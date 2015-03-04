@@ -1,4 +1,4 @@
-add_llvm_library(LLVMInstCombine
+add_llvm_library(SeaInstCombine
   InstructionCombining.cpp
   InstCombineAddSub.cpp
   InstCombineAndOrXor.cpp
@@ -14,4 +14,3 @@ add_llvm_library(LLVMInstCombine
   InstCombineVectorOps.cpp
   )
 
-add_dependencies(LLVMInstCombine intrinsics_gen)
