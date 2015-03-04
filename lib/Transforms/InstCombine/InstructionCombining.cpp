@@ -33,7 +33,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Transforms/Scalar.h"
+#include "llvm_seahorn/Transforms/Scalar.h"
 #include "InstCombine.h"
 #include "llvm-c/Initialization.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -72,23 +72,23 @@ STATISTIC(NumExpand,    "Number of expansions");
 STATISTIC(NumFactor   , "Number of factorizations");
 STATISTIC(NumReassoc  , "Number of reassociations");
 
-// Initialization Routines
-void llvm::initializeInstCombine(PassRegistry &Registry) {
-  initializeInstCombinerPass(Registry);
-}
+// // Initialization Routines
+// void llvm_seahorn::initializeInstCombine(PassRegistry &Registry) {
+//   initializeInstCombinerPass(Registry);
+// }
 
-void LLVMInitializeInstCombine(LLVMPassRegistryRef R) {
-  initializeInstCombine(*unwrap(R));
-}
+// void LLVMInitializeInstCombine(LLVMPassRegistryRef R) {
+//   initializeSeaInstCombine(*unwrap(R));
+// }
 
-char InstCombiner::ID = 0;
-INITIALIZE_PASS_BEGIN(InstCombiner, "instcombine",
-                "Combine redundant instructions", false, false)
-INITIALIZE_PASS_DEPENDENCY(AssumptionCacheTracker)
-INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfo)
-INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
-INITIALIZE_PASS_END(InstCombiner, "instcombine",
-                "Combine redundant instructions", false, false)
+// char InstCombiner::ID = 0;
+// INITIALIZE_PASS_BEGIN(InstCombiner, "seainstcombine",
+//                 "Combine redundant instructions", false, false)
+// INITIALIZE_PASS_DEPENDENCY(AssumptionCacheTracker)
+// INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfo)
+// INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
+// INITIALIZE_PASS_END(InstCombiner, "seainstcombine",
+//                 "Combine redundant instructions", false, false)
 
 void InstCombiner::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesCFG();
@@ -3004,6 +3004,10 @@ bool InstCombiner::runOnFunction(Function &F) {
   return EverMadeChange;
 }
 
-FunctionPass *llvm::createInstructionCombiningPass() {
-  return new InstCombiner();
+llvm::FunctionPass *llvm_seahorn::createInstructionCombiningPass() {
+  return new llvm_seahorn::InstCombiner();
 }
+
+static llvm::RegisterPass<llvm_seahorn::InstCombiner>
+X ("sea-instcombine", "Instruction combiner");
+

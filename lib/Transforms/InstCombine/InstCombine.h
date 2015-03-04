@@ -33,7 +33,10 @@ class TargetLibraryInfo;
 class DbgDeclareInst;
 class MemIntrinsic;
 class MemSetInst;
-
+}
+namespace llvm_seahorn
+{
+  using namespace llvm;
 /// SelectPatternFlavor - We can match a variety of different patterns for
 /// select operations.
 enum SelectPatternFlavor {
@@ -467,7 +470,7 @@ private:
 };
 
 } // end namespace llvm.
-
+using namespace llvm_seahorn;
 #undef DEBUG_TYPE
 
 #endif

@@ -19,7 +19,8 @@
 
 #define DEBUG_TYPE "instcombine"
 
-namespace llvm {
+namespace llvm_seahorn {
+  using namespace llvm;
 
 /// InstCombineWorklist - This is the worklist management logic for
 /// InstCombine.
