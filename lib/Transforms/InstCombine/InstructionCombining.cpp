@@ -81,7 +81,7 @@ STATISTIC(NumReassoc  , "Number of reassociations");
 //   initializeSeaInstCombine(*unwrap(R));
 // }
 
-// char InstCombiner::ID = 0;
+char InstCombiner::ID = 0;
 // INITIALIZE_PASS_BEGIN(InstCombiner, "seainstcombine",
 //                 "Combine redundant instructions", false, false)
 // INITIALIZE_PASS_DEPENDENCY(AssumptionCacheTracker)
