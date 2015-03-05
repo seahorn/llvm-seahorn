@@ -566,6 +566,7 @@ Value *InstCombiner::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
 
       // Turn it into OR if input bits are zero.
       if ((LHSKnownZero & RHS->getValue()) == RHS->getValue()) {
+        if (AvoidBv) return nullptr;
         Instruction *Or =
           BinaryOperator::CreateOr(I->getOperand(0), I->getOperand(1),
                                    I->getName());
@@ -634,6 +635,7 @@ Value *InstCombiner::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
     if (ConstantInt *C0 = dyn_cast<ConstantInt>(I->getOperand(0))) {
       APInt I0 = C0->getValue();
       if ((I0 + 1).isPowerOf2() && (I0 | KnownZero).isAllOnesValue()) {
+        if (AvoidBv) return nullptr;
         Instruction *Xor = BinaryOperator::CreateXor(I->getOperand(1), C0);
         return InsertNewInstWith(Xor, *I);
       }

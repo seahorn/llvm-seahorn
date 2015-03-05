@@ -106,6 +106,7 @@ class LLVM_LIBRARY_VISIBILITY InstCombiner
   bool MadeIRChange;
   LibCallSimplifier *Simplifier;
   bool MinimizeSize;
+  bool AvoidBv;
 
 public:
   /// Worklist - All of the instructions that need to be simplified.
@@ -120,6 +121,7 @@ public:
   InstCombiner()
       : FunctionPass(ID), DL(nullptr), DT(nullptr), Builder(nullptr) {
     MinimizeSize = false;
+    AvoidBv = true;
     initializeInstCombinerPass(*PassRegistry::getPassRegistry());
   }
 

@@ -1689,16 +1689,17 @@ Instruction *InstCombiner::visitICmpInstWithInstAndIntCst(ICmpInst &ICI,
     // C1-X <u C2 -> (X|(C2-1)) == C1
     //   iff C1 & (C2-1) == C2-1
     //       C2 is a power of 2
-    if (ICI.getPredicate() == ICmpInst::ICMP_ULT && LHSI->hasOneUse() &&
+    if (!AvoidBv && ICI.getPredicate() == ICmpInst::ICMP_ULT && LHSI->hasOneUse() &&
         RHSV.isPowerOf2() && (LHSV & (RHSV - 1)) == (RHSV - 1))
       return new ICmpInst(ICmpInst::ICMP_EQ,
                           Builder->CreateOr(LHSI->getOperand(1), RHSV - 1),
                           LHSC);
+        
 
     // C1-X >u C2 -> (X|C2) != C1
     //   iff C1 & C2 == C2
     //       C2+1 is a power of 2
-    if (ICI.getPredicate() == ICmpInst::ICMP_UGT && LHSI->hasOneUse() &&
+    if (!AvoidBv && ICI.getPredicate() == ICmpInst::ICMP_UGT && LHSI->hasOneUse() &&
         (RHSV + 1).isPowerOf2() && (LHSV & RHSV) == RHSV)
       return new ICmpInst(ICmpInst::ICMP_NE,
                           Builder->CreateOr(LHSI->getOperand(1), RHSV), LHSC);
@@ -1736,7 +1737,7 @@ Instruction *InstCombiner::visitICmpInstWithInstAndIntCst(ICmpInst &ICI,
       // X-C1 <u C2 -> (X & -C2) == C1
       //   iff C1 & (C2-1) == 0
       //       C2 is a power of 2
-      if (ICI.getPredicate() == ICmpInst::ICMP_ULT && LHSI->hasOneUse() &&
+      if (!AvoidBv && ICI.getPredicate() == ICmpInst::ICMP_ULT && LHSI->hasOneUse() &&
           RHSV.isPowerOf2() && (LHSV & (RHSV - 1)) == 0)
         return new ICmpInst(ICmpInst::ICMP_EQ,
                             Builder->CreateAnd(LHSI->getOperand(0), -RHSV),
@@ -1745,7 +1746,7 @@ Instruction *InstCombiner::visitICmpInstWithInstAndIntCst(ICmpInst &ICI,
       // X-C1 >u C2 -> (X & ~C2) != C1
       //   iff C1 & C2 == 0
       //       C2+1 is a power of 2
-      if (ICI.getPredicate() == ICmpInst::ICMP_UGT && LHSI->hasOneUse() &&
+      if (!AvoidBv && ICI.getPredicate() == ICmpInst::ICMP_UGT && LHSI->hasOneUse() &&
           (RHSV + 1).isPowerOf2() && (LHSV & RHSV) == 0)
         return new ICmpInst(ICmpInst::ICMP_NE,
                             Builder->CreateAnd(LHSI->getOperand(0), ~RHSV),
@@ -2617,6 +2618,7 @@ Instruction *InstCombiner::visitICmpInst(ICmpInst &I) {
     switch (I.getPredicate()) {
     default: llvm_unreachable("Invalid icmp instruction!");
     case ICmpInst::ICMP_EQ: {               // icmp eq i1 A, B -> ~(A^B)
+      if (AvoidBv) return nullptr;
       Value *Xor = Builder->CreateXor(Op0, Op1, I.getName()+"tmp");
       return BinaryOperator::CreateNot(Xor);
     }
@@ -2634,6 +2636,7 @@ Instruction *InstCombiner::visitICmpInst(ICmpInst &I) {
       std::swap(Op0, Op1);                   // Change icmp sgt -> icmp slt
       // FALL THROUGH
     case ICmpInst::ICMP_SLT: {               // icmp slt i1 A, B -> A & ~B
+      if (AvoidBv) return nullptr;
       Value *Not = Builder->CreateNot(Op1, I.getName()+"tmp");
       return BinaryOperator::CreateAnd(Not, Op0);
     }
@@ -3383,6 +3386,7 @@ Instruction *InstCombiner::visitICmpInst(ICmpInst &I) {
           // a * Cst icmp eq/ne b * Cst --> a & Mask icmp b & Mask
           // Mask = -1 >> count-trailing-zeros(Cst).
           if (!CI->isZero() && !CI->isOne()) {
+            if (AvoidBv) return nullptr;
             const APInt &AP = CI->getValue();
             ConstantInt *Mask = ConstantInt::get(I.getContext(),
                                     APInt::getLowBitsSet(AP.getBitWidth(),

@@ -467,6 +467,7 @@ Instruction *InstCombiner::visitTrunc(TruncInst &CI) {
 
   // Canonicalize trunc x to i1 -> (icmp ne (and x, 1), 0), likewise for vector.
   if (DestTy->getScalarSizeInBits() == 1) {
+    if (AvoidBv) return nullptr;
     Constant *One = ConstantInt::get(Src->getType(), 1);
     Src = Builder->CreateAnd(Src, One);
     Value *Zero = Constant::getNullValue(Src->getType());
@@ -596,6 +597,7 @@ Instruction *InstCombiner::transformZExtICmp(ICmpInst *ICI, Instruction &CI,
   // may lead to additional simplifications.
   if (ICI->isEquality() && CI.getType() == ICI->getOperand(0)->getType()) {
     if (IntegerType *ITy = dyn_cast<IntegerType>(CI.getType())) {
+      if (AvoidBv) return nullptr;
       uint32_t BitWidth = ITy->getBitWidth();
       Value *LHS = ICI->getOperand(0);
       Value *RHS = ICI->getOperand(1);
@@ -787,6 +789,7 @@ Instruction *InstCombiner::visitZExt(ZExtInst &CI) {
       CanEvaluateZExtd(Src, DestTy, BitsToClear, *this, &CI)) {
     assert(BitsToClear < SrcTy->getScalarSizeInBits() &&
            "Unreasonable BitsToClear");
+    if (AvoidBv) return nullptr;
 
     // Okay, we can transform this!  Insert the new expression now.
     DEBUG(dbgs() << "ICE: EvaluateInDifferentType converting expression type"
@@ -817,6 +820,7 @@ Instruction *InstCombiner::visitZExt(ZExtInst &CI) {
   if (TruncInst *CSrc = dyn_cast<TruncInst>(Src)) {   // A->B->C cast
     // TODO: Subsume this into EvaluateInDifferentType.
 
+    if (AvoidBv) return nullptr;
     // Get the sizes of the types involved.  We know that the intermediate type
     // will be smaller than A or C, but don't know the relation between A and C.
     Value *A = CSrc->getOperand(0);
@@ -887,6 +891,7 @@ Instruction *InstCombiner::visitZExt(ZExtInst &CI) {
   if (SrcI && SrcI->hasOneUse() &&
       SrcI->getType()->getScalarType()->isIntegerTy(1) &&
       match(SrcI, m_Not(m_Value(X))) && (!X->hasOneUse() || !isa<CmpInst>(X))) {
+    if (AvoidBv) return nullptr;
     Value *New = Builder->CreateZExt(X, CI.getType());
     return BinaryOperator::CreateXor(New, ConstantInt::get(CI.getType(), 1));
   }
