@@ -1063,7 +1063,7 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
   if (ConstantInt *CI = dyn_cast<ConstantInt>(RHS)) {
     // X + (signbit) --> X ^ signbit
     const APInt &Val = CI->getValue();
-    if (Val.isSignBit())
+    if (!AvoidBv && Val.isSignBit())
       return BinaryOperator::CreateXor(LHS, RHS);
 
     // See if SimplifyDemandedBits can simplify this.  This handles stuff like
@@ -1129,7 +1129,7 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
     return BinaryOperator::CreateXor(LHS, RHS);
 
   // X + X --> X << 1
-  if (LHS == RHS) {
+  if (!AvoidBv && LHS == RHS) {
     BinaryOperator *New =
       BinaryOperator::CreateShl(LHS, ConstantInt::get(I.getType(), 1));
     New->setHasNoSignedWrap(I.hasNoSignedWrap());
@@ -1168,7 +1168,7 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
       computeKnownBits(RHS, RHSKnownZero, RHSKnownOne, 0, &I);
 
       // No bits in common -> bitwise or.
-      if ((LHSKnownZero|RHSKnownZero).isAllOnesValue())
+      if (!AvoidBv && (LHSKnownZero|RHSKnownZero).isAllOnesValue())
         return BinaryOperator::CreateOr(LHS, RHS);
     }
   }

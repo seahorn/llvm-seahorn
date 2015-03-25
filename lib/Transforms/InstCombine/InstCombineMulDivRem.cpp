@@ -206,7 +206,7 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
       return BO;
     }
 
-    if (match(&I, m_Mul(m_Value(NewOp), m_Constant(C1)))) {
+    if (!AvoidBv && match(&I, m_Mul(m_Value(NewOp), m_Constant(C1)))) {
       Constant *NewCst = nullptr;
       if (match(C1, m_APInt(IVal)) && IVal->isPowerOf2())
         // Replace X*(2^C) with X << C, where C is either a scalar or a splat.
