@@ -47,7 +47,7 @@
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Target/TargetLibraryInfo.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Transforms/IPO/PassManagerBuilder.h"
+#include "llvm_seahorn/Transforms/IPO/PassManagerBuilder.h"
 #include <algorithm>
 #include <memory>
 using namespace llvm;
@@ -199,7 +199,7 @@ static void AddOptimizationPasses(PassManagerBase &MPM,FunctionPassManager &FPM,
   FPM.add(createVerifierPass());          // Verify that input is correct
   MPM.add(createDebugInfoVerifierPass()); // Verify that debug info is correct
 
-  PassManagerBuilder Builder;
+  llvm_seahorn::PassManagerBuilder Builder;
   Builder.OptLevel = OptLevel;
   Builder.SizeLevel = SizeLevel;
 
@@ -230,7 +230,7 @@ static void AddOptimizationPasses(PassManagerBase &MPM,FunctionPassManager &FPM,
 }
 
 static void AddStandardLinkPasses(PassManagerBase &PM) {
-  PassManagerBuilder Builder;
+  llvm_seahorn::PassManagerBuilder Builder;
   Builder.VerifyInput = true;
   Builder.StripDebug = StripDebug;
   if (DisableOptimizations)
