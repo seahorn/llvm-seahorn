@@ -914,9 +914,13 @@ Value *InstCombiner::FoldAndOfICmps(ICmpInst *LHS, ICmpInst *RHS) {
     }
   }
 
-  // handle (roughly):  (icmp eq (A & B), C) & (icmp eq (A & D), E)
-  if (Value *V = foldLogOpOfMaskedICmps(LHS, RHS, true, Builder))
-    return V;
+  // AG: This is probably too drastic but safe.
+  if (!AvoidBv)
+  {
+    // handle (roughly):  (icmp eq (A & B), C) & (icmp eq (A & D), E)
+    if (Value *V = foldLogOpOfMaskedICmps(LHS, RHS, true, Builder))
+      return V;
+  }
 
   // E.g. (icmp sge x, 0) & (icmp slt x, n) --> icmp ult x, n
   if (Value *V = simplifyRangeCheck(LHS, RHS, /*Inverted=*/false))
@@ -1814,11 +1818,14 @@ Value *InstCombiner::FoldOrOfICmps(ICmpInst *LHS, ICmpInst *RHS,
     }
   }
 
-  // handle (roughly):
-  // (icmp ne (A & B), C) | (icmp ne (A & D), E)
-  if (Value *V = foldLogOpOfMaskedICmps(LHS, RHS, false, Builder))
-    return V;
-
+  if (!AvoidBv)
+  {
+    // handle (roughly):
+    // (icmp ne (A & B), C) | (icmp ne (A & D), E)
+    if (Value *V = foldLogOpOfMaskedICmps(LHS, RHS, false, Builder))
+      return V;
+  }
+  
   Value *Val = LHS->getOperand(0), *Val2 = RHS->getOperand(0);
   if (LHS->hasOneUse() || RHS->hasOneUse()) {
     // (icmp eq B, 0) | (icmp ult A, B) -> (icmp ule A, B-1)
