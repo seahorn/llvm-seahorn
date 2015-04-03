@@ -1864,7 +1864,7 @@ Value *InstCombiner::FoldOrOfICmps(ICmpInst *LHS, ICmpInst *RHS,
   // This only handles icmp of constants: (icmp1 A, C1) | (icmp2 B, C2).
   if (!LHSCst || !RHSCst) return nullptr;
 
-  if (LHSCst == RHSCst && LHSCC == RHSCC) {
+  if (!AvoidBv && LHSCst == RHSCst && LHSCC == RHSCC) {
     // (icmp ne A, 0) | (icmp ne B, 0) --> (icmp ne (A|B), 0)
     if (LHSCC == ICmpInst::ICMP_NE && LHSCst->isZero()) {
       Value *NewOr = Builder->CreateOr(Val, Val2);
