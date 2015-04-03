@@ -932,7 +932,7 @@ Value *InstCombiner::FoldAndOfICmps(ICmpInst *LHS, ICmpInst *RHS) {
   ConstantInt *RHSCst = dyn_cast<ConstantInt>(RHS->getOperand(1));
   if (!LHSCst || !RHSCst) return nullptr;
 
-  if (LHSCst == RHSCst && LHSCC == RHSCC) {
+  if (!AvoidBv && LHSCst == RHSCst && LHSCC == RHSCC) {
     // (icmp ult A, C) & (icmp ult B, C) --> (icmp ult (A|B), C)
     // where C is a power of 2
     if (LHSCC == ICmpInst::ICMP_ULT &&
@@ -942,7 +942,7 @@ Value *InstCombiner::FoldAndOfICmps(ICmpInst *LHS, ICmpInst *RHS) {
     }
 
     // (icmp eq A, 0) & (icmp eq B, 0) --> (icmp eq (A|B), 0)
-    if (LHSCC == ICmpInst::ICMP_EQ && LHSCst->isZero()) {
+    if (!AvoidBv && LHSCC == ICmpInst::ICMP_EQ && LHSCst->isZero()) {
       Value *NewOr = Builder->CreateOr(Val, Val2);
       return Builder->CreateICmp(LHSCC, NewOr, LHSCst);
     }
@@ -1756,7 +1756,7 @@ Value *InstCombiner::FoldOrOfICmps(ICmpInst *LHS, ICmpInst *RHS,
   // 4) LowRange1 ^ LowRange2 and HighRange1 ^ HighRange2 are one-bit mask.
   // This implies all values in the two ranges differ by exactly one bit.
 
-  if ((LHSCC == ICmpInst::ICMP_ULT || LHSCC == ICmpInst::ICMP_ULE) &&
+  if (!AvoidBv && (LHSCC == ICmpInst::ICMP_ULT || LHSCC == ICmpInst::ICMP_ULE) &&
       LHSCC == RHSCC && LHSCst && RHSCst && LHS->hasOneUse() &&
       RHS->hasOneUse() && LHSCst->getType() == RHSCst->getType() &&
       LHSCst->getValue() == (RHSCst->getValue())) {
