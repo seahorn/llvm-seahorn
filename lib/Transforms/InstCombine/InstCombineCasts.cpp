@@ -514,6 +514,8 @@ Instruction *InstCombiner::visitTrunc(TruncInst &CI) {
 /// in order to eliminate the icmp.
 Instruction *InstCombiner::transformZExtICmp(ICmpInst *ICI, Instruction &CI,
                                              bool DoXform) {
+  
+  if (AvoidBv) return nullptr;
   // If we are just checking for a icmp eq of a single bit and zext'ing it
   // to an integer, then shift the bit to the appropriate place and then
   // cast to integer to avoid the comparison.
@@ -905,6 +907,9 @@ Instruction *InstCombiner::transformSExtICmp(ICmpInst *ICI, Instruction &CI) {
   Value *Op0 = ICI->getOperand(0), *Op1 = ICI->getOperand(1);
   ICmpInst::Predicate Pred = ICI->getPredicate();
 
+  
+  if (AvoidBv) return nullptr;
+  
   // Don't bother if Op1 isn't of vector or integer type.
   if (!Op1->getType()->isIntOrIntVectorTy())
     return nullptr;
