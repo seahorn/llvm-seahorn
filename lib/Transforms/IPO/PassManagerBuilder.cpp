@@ -35,6 +35,11 @@ using namespace llvm_seahorn;
 using namespace llvm;
 
 static cl::opt<bool>
+EnableIndVar("enable-indvar", cl::Hidden,
+             cl::desc("Enable indvar pass"),
+             cl::init (true));
+
+static cl::opt<bool>
 RunLoopVectorization("vectorize-loops", cl::Hidden,
                      cl::desc("Run the Loop vectorization passes"));
 
@@ -236,7 +241,8 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
   MPM.add(createLICMPass());                  // Hoist loop invariants
   MPM.add(createLoopUnswitchPass(SizeLevel || OptLevel < 3));
   MPM.add(llvm_seahorn::createInstructionCombiningPass());
-  MPM.add(createIndVarSimplifyPass());        // Canonicalize indvars
+  if (EnableIndVar)
+    MPM.add(createIndVarSimplifyPass());        // Canonicalize indvars
   MPM.add(createLoopIdiomPass());             // Recognize idioms like memset.
   MPM.add(createLoopDeletionPass());          // Delete dead loops
 
@@ -445,8 +451,9 @@ void PassManagerBuilder::addLTOOptimizationPasses(PassManagerBase &PM) {
   // Nuke dead stores.
   PM.add(createDeadStoreEliminationPass());
 
-  // More loops are countable; try to optimize them.
-  PM.add(createIndVarSimplifyPass());
+  if (EnableIndVar)
+    // More loops are countable; try to optimize them.
+    PM.add(createIndVarSimplifyPass());
   PM.add(createLoopDeletionPass());
   PM.add(createLoopVectorizePass(true, LoopVectorize));
 
