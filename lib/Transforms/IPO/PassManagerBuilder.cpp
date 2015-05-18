@@ -40,6 +40,10 @@ EnableIndVar("enable-indvar", cl::Hidden,
              cl::init (true));
 
 static cl::opt<bool>
+EnableLoopIdiom("enable-loop-idiom", cl::Hidden,
+                cl::desc("Enable loop-idiom pass"),
+                cl::init (true));
+static cl::opt<bool>
 RunLoopVectorization("vectorize-loops", cl::Hidden,
                      cl::desc("Run the Loop vectorization passes"));
 
@@ -243,7 +247,8 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
   MPM.add(llvm_seahorn::createInstructionCombiningPass());
   if (EnableIndVar)
     MPM.add(createIndVarSimplifyPass());        // Canonicalize indvars
-  MPM.add(createLoopIdiomPass());             // Recognize idioms like memset.
+  if (EnableLoopIdiom)
+    MPM.add(createLoopIdiomPass());             // Recognize idioms like memset.
   MPM.add(createLoopDeletionPass());          // Delete dead loops
 
   if (!DisableUnrollLoops)
