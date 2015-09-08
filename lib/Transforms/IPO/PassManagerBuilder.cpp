@@ -278,7 +278,12 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
       MPM.add(createMergedLoadStoreMotionPass()); // Merge ld/st in diamonds
     MPM.add(createGVNPass(DisableGVNLoadPRE));  // Remove redundancies
   }
+
   MPM.add(createMemCpyOptPass());             // Remove memcpy / form memset
+  if (EnableNondet) {
+    // -- Turn undef into nondet (undef are created by MemCpy)
+    MPM.add (llvm_seahorn::createNondetInitPass ());
+  }
   MPM.add(createSCCPPass());                  // Constant prop with SCCP
 
   // Run instcombine after redundancy elimination to exploit opportunities
@@ -290,6 +295,11 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
   MPM.add(createDeadStoreEliminationPass());  // Delete dead stores
 
   addExtensionsToPM(EP_ScalarOptimizerLate, MPM);
+
+  if (EnableNondet) {
+    // eliminate unused calls to verifier.nondet() functions
+    MPM.add (llvm_seahorn::createDeadNondetElimPass ());
+  }
 
   if (RerollLoops)
     MPM.add(createLoopRerollPass());
@@ -474,7 +484,12 @@ void PassManagerBuilder::addLTOOptimizationPasses(PassManagerBase &PM) {
   if (EnableMLSM)
     PM.add(createMergedLoadStoreMotionPass()); // Merge ld/st in diamonds.
   PM.add(createGVNPass(DisableGVNLoadPRE)); // Remove redundancies.
+
   PM.add(createMemCpyOptPass());            // Remove dead memcpys.
+  if (EnableNondet) {
+    // -- Turn undef into nondet (undef are created by MemCpy)
+    PM.add (llvm_seahorn::createNondetInitPass ());
+  }
 
   // Nuke dead stores.
   PM.add(createDeadStoreEliminationPass());
