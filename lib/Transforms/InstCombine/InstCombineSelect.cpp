@@ -550,6 +550,7 @@ Instruction *InstCombiner::visitSelectInstWithICmp(SelectInst &SI,
   //        watch code size carefully. We should consider xor instead of
   //        sub/add when we decide to do that.
   if (IntegerType *Ty = dyn_cast<IntegerType>(CmpLHS->getType())) {
+    if (AvoidBv) return nullptr;
     if (TrueVal->getType() == Ty) {
       if (ConstantInt *Cmp = dyn_cast<ConstantInt>(CmpRHS)) {
         ConstantInt *C1 = nullptr, *C2 = nullptr;

@@ -36,6 +36,13 @@ target_link_libraries (seaopt SeaLlvmIpo SeaInstCombine SeaInstNondet)
 set_target_properties(seaopt PROPERTIES ENABLE_EXPORTS 1)
 install(TARGETS seaopt RUNTIME DESTINATION bin)
 
+if (SEAHORN_STATIC_EXE)
+  set (CMAKE_EXE_LINKER_FLAGS "-static -static-libgcc -static-libstdc++")
+  set_target_properties(seaopt PROPERTIES ENABLE_EXPORTS FALSE)
+  set_target_properties (seaopt PROPERTIES LINK_SEARCH_START_STATIC ON)
+  set_target_properties (seaopt PROPERTIES LINK_SEARCH_END_STATIC ON)
+endif()
+
 
 if(WITH_POLLY AND LINK_POLLY_INTO_TOOLS)
   target_link_libraries(seaopt Polly)

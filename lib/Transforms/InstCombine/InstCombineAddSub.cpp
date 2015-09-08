@@ -1535,7 +1535,7 @@ Instruction *InstCombiner::visitSub(BinaryOperator &I) {
     return BinaryOperator::CreateXor(Op0, Op1);
 
   // Replace (-1 - A) with (~A).
-  if (match(Op0, m_AllOnes()))
+  if (!AvoidBv && match(Op0, m_AllOnes()))
     return BinaryOperator::CreateNot(Op1);
 
   if (Constant *C = dyn_cast<Constant>(Op0)) {
