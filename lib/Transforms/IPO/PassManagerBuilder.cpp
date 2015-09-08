@@ -43,6 +43,12 @@ static cl::opt<bool>
 EnableLoopIdiom("enable-loop-idiom", cl::Hidden,
                 cl::desc("Enable loop-idiom pass"),
                 cl::init (true));
+
+static cl::opt<bool>
+EnableNondet("enable-nondet-init", cl::Hidden,
+             cl::desc("Enable non-deterministic initialization of all alloca"),
+             cl::init (true));
+
 static cl::opt<bool>
 RunLoopVectorization("vectorize-loops", cl::Hidden,
                      cl::desc("Run the Loop vectorization passes"));
@@ -89,6 +95,7 @@ static cl::opt<bool> UseCFLAA("use-cfl-aa",
 static cl::opt<bool>
 EnableMLSM("mlsm", cl::init(true), cl::Hidden,
            cl::desc("Enable motion of merged load and store"));
+
 
 PassManagerBuilder::PassManagerBuilder() {
     OptLevel = 2;
@@ -229,6 +236,12 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
     MPM.add(createSROAPass(/*RequiresDomTree*/ false));
   else
     MPM.add(createScalarReplAggregatesPass(-1, false));
+
+  if (EnableNondet) {
+    // -- Turn undef into nondet (undef are created by SROA when it calls mem2reg)
+    MPM.add (llvm_seahorn::createNondetInitPass ());
+  }
+
   MPM.add(createEarlyCSEPass());              // Catch trivial redundancies
   MPM.add(createJumpThreadingPass());         // Thread jumps.
   MPM.add(createCorrelatedValuePropagationPass()); // Propagate conditionals
@@ -236,6 +249,11 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
   MPM.add(llvm_seahorn::createInstructionCombiningPass());  // Combine silly seq's
   addExtensionsToPM(EP_Peephole, MPM);
 
+  if (EnableNondet) {
+    // eliminate unused calls to verifier.nondet() functions
+    MPM.add (llvm_seahorn::createDeadNondetElimPass ());
+  }
+    
   if (!DisableTailCalls)
     MPM.add(createTailCallEliminationPass()); // Eliminate tail calls
   MPM.add(createCFGSimplificationPass());     // Merge & remove BBs
@@ -443,6 +461,11 @@ void PassManagerBuilder::addLTOOptimizationPasses(PassManagerBase &PM) {
   else
     PM.add(createScalarReplAggregatesPass());
 
+  if (EnableNondet) {
+    // -- Turn undef into nondet (undef are created by SROA when it calls mem2reg)
+    PM.add (llvm_seahorn::createNondetInitPass ());
+  }
+
   // Run a few AA driven optimizations here and now, to cleanup the code.
   PM.add(createFunctionAttrsPass()); // Add nocapture.
   PM.add(createGlobalsModRefPass()); // IP alias analysis.
@@ -455,6 +478,11 @@ void PassManagerBuilder::addLTOOptimizationPasses(PassManagerBase &PM) {
 
   // Nuke dead stores.
   PM.add(createDeadStoreEliminationPass());
+
+  if (EnableNondet) {
+    // eliminate unused calls to verifier.nondet() functions
+    PM.add (llvm_seahorn::createDeadNondetElimPass ());
+  }
 
   if (EnableIndVar)
     // More loops are countable; try to optimize them.
