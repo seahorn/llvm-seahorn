@@ -31,7 +31,7 @@ add_llvm_executable(seaopt
   PrintSCC.cpp
   opt.cpp
   )
-target_link_libraries (seaopt SeaLlvmIpo SeaInstCombine SeaInstNondet)
+target_link_libraries (seaopt SeaLlvmIpo SeaInstCombine SeaInstNondet SeaLoops)
 
 set_target_properties(seaopt PROPERTIES ENABLE_EXPORTS 1)
 install(TARGETS seaopt RUNTIME DESTINATION bin)
