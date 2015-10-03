@@ -1384,7 +1384,7 @@ Instruction *InstCombiner::visitURem(BinaryOperator &I) {
                           I.getType());
 
   // X urem Y -> X and Y-1, where Y is a power of 2,
-  if (isKnownToBeAPowerOfTwo(Op1, /*OrZero*/ true, 0, AC, &I, DT)) {
+  if (!AvoidBv && isKnownToBeAPowerOfTwo(Op1, /*OrZero*/ true, 0, AC, &I, DT)) {
     Constant *N1 = Constant::getAllOnesValue(I.getType());
     Value *Add = Builder->CreateAdd(Op1, N1);
     return BinaryOperator::CreateAnd(Op0, Add);
