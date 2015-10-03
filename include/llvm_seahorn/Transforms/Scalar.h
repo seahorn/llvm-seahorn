@@ -7,5 +7,6 @@ namespace llvm_seahorn
   llvm::FunctionPass *createInstructionCombiningPass();
   llvm::Pass* createNondetInitPass ();
   llvm::Pass* createDeadNondetElimPass ();
+  llvm::Pass* createIndVarSimplifyPass ();
 }
 #endif
