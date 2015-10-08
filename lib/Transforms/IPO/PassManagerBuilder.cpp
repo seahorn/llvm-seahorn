@@ -173,11 +173,20 @@ void PassManagerBuilder::populateFunctionPassManager(FunctionPassManager &FPM) {
     FPM.add(createSROAPass());
   else
     FPM.add(createScalarReplAggregatesPass());
-  FPM.add(createEarlyCSEPass());
+  
+  if (!EnableNondet)
+    // -- this pass might mess things up if there is undefined
+    // -- behavior that we want to treat as non-deterministic
+    FPM.add(createEarlyCSEPass());
+    
   FPM.add(createLowerExpectIntrinsicPass());
 }
 
 void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
+  if (EnableNondet) {
+    // -- Turn undef into nondet (undef are created by SROA when it calls mem2reg)
+    MPM.add (llvm_seahorn::createNondetInitPass ());
+  }
   // If all optimizations are disabled, just run the always-inline pass and,
   // if enabled, the function merging pass.
   if (OptLevel == 0) {
