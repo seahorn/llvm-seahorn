@@ -8,5 +8,6 @@ namespace llvm_seahorn
   llvm::Pass* createNondetInitPass ();
   llvm::Pass* createDeadNondetElimPass ();
   llvm::Pass* createIndVarSimplifyPass ();
+  llvm::Pass* createFakeLatchExitPass ();
 }
 #endif

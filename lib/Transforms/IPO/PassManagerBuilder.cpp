@@ -35,6 +35,9 @@ using namespace llvm_seahorn;
 using namespace llvm;
 
 static cl::opt<bool>
+NeverTrue ("never-true", cl::Hidden, cl::init (false));
+
+static cl::opt<bool>
 EnableIndVar("enable-indvar", cl::Hidden,
              cl::desc("Enable indvar pass"),
              cl::init (true));
@@ -186,7 +189,14 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
   if (EnableNondet) {
     // -- Turn undef into nondet (undef are created by SROA when it calls mem2reg)
     MPM.add (llvm_seahorn::createNondetInitPass ());
+    // -- Moved here from populateFunctionPassManager() since we have
+    // -- to run nondet-init after sroa and before anything else
+    //MPM.add(createEarlyCSEPass());
   }
+  
+  if (NeverTrue)
+    MPM.add (llvm_seahorn::createFakeLatchExitPass ());
+  
   // If all optimizations are disabled, just run the always-inline pass and,
   // if enabled, the function merging pass.
   if (OptLevel == 0) {
