@@ -1925,7 +1925,7 @@ Value *InstCombiner::FoldOrOfICmps(ICmpInst *LHS, ICmpInst *RHS,
     switch (RHSCC) {
     default: llvm_unreachable("Unknown integer condition code!");
     case ICmpInst::ICMP_EQ:
-      if (LHS->getOperand(0) == RHS->getOperand(0)) {
+      if (!AvoidBv && LHS->getOperand(0) == RHS->getOperand(0)) {
         // if LHSCst and RHSCst differ only by one bit:
         // (A == C1 || A == C2) -> (A & ~(C1 ^ C2)) == C1
         assert(LHSCst->getValue().ule(LHSCst->getValue()));
