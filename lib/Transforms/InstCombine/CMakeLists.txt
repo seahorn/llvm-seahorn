@@ -1,4 +1,4 @@
-add_llvm_library(SeaInstCombine
+llvm_add_library(SeaInstCombine
   InstructionCombining.cpp
   InstCombineAddSub.cpp
   InstCombineAndOrXor.cpp

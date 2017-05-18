@@ -28,8 +28,8 @@ class LLVM_LIBRARY_VISIBILITY InstCombineWorklist {
   SmallVector<Instruction*, 256> Worklist;
   DenseMap<Instruction*, unsigned> WorklistMap;
 
-  void operator=(const InstCombineWorklist&RHS) LLVM_DELETED_FUNCTION;
-  InstCombineWorklist(const InstCombineWorklist&) LLVM_DELETED_FUNCTION;
+  void operator=(const InstCombineWorklist&RHS);
+  InstCombineWorklist(const InstCombineWorklist&);
 public:
   InstCombineWorklist() {}
 
