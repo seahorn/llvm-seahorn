@@ -17,6 +17,7 @@
 //#include "llvm-c/Transforms/PassManagerBuilder.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/Passes.h"
+#include "llvm/LinkAllPasses.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -155,17 +156,17 @@ PassManagerBuilder::addInitialAliasAnalysisPasses(PassManagerBase &PM) const {
   // BasicAliasAnalysis wins if they disagree. This is intended to help
   // support "obvious" type-punning idioms.
   if (UseCFLAA)
-    PM.add(createCFLAliasAnalysisPass());
-  PM.add(createTypeBasedAliasAnalysisPass());
-  PM.add(createScopedNoAliasAAPass());
-  PM.add(createBasicAliasAnalysisPass());
+    PM.add(createCFLAndersAAWrapperPass());
+  PM.add(createTypeBasedAAWrapperPass());
+  PM.add(createScopedNoAliasAAWrapperPass());
+  PM.add(createBasicAAWrapperPass());
 }
 
 void PassManagerBuilder::populateFunctionPassManager(FunctionPassManager &FPM) {
   addExtensionsToPM(EP_EarlyAsPossible, FPM);
 
   // Add LibraryInfo if we have some.
-  if (LibraryInfo) FPM.add(new TargetLibraryInfo(*LibraryInfo));
+  if (LibraryInfo) FPM.add(new TargetLibraryInfoWrapperPass());
 
   if (OptLevel == 0) return;
 
@@ -220,7 +221,7 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
   }
 
   // Add LibraryInfo if we have some.
-  if (LibraryInfo) MPM.add(new TargetLibraryInfo(*LibraryInfo));
+  if (LibraryInfo) MPM.add(new TargetLibraryInfoWrapperPass());
 
   addInitialAliasAnalysisPasses(MPM);
 
@@ -252,7 +253,7 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
   // Start of function pass.
   // Break up aggregate allocas, using SSAUpdater.
   if (UseNewSROA)
-    MPM.add(createSROAPass(/*RequiresDomTree*/ false));
+    MPM.add(createSROAPass());
   else
     MPM.add(createScalarReplAggregatesPass(-1, false));
 
