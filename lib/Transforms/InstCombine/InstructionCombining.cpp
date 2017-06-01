@@ -227,7 +227,7 @@ bool InstCombiner::SimplifyAssociativeOrCommutative(BinaryOperator &I) {
         Value *C = I.getOperand(1);
 
         // Does "B op C" simplify?
-        if (Value *V = SimplifyBinOp(Opcode, B, C, DL)) {
+        if (Value *V = SimplifyBinOp(Opcode, B, C, *DL)) {
           // It simplifies to V.  Form "A op V".
           I.setOperand(0, A);
           I.setOperand(1, V);
@@ -256,7 +256,7 @@ bool InstCombiner::SimplifyAssociativeOrCommutative(BinaryOperator &I) {
         Value *C = Op1->getOperand(1);
 
         // Does "A op B" simplify?
-        if (Value *V = SimplifyBinOp(Opcode, A, B, DL)) {
+        if (Value *V = SimplifyBinOp(Opcode, A, B, *DL)) {
           // It simplifies to V.  Form "V op C".
           I.setOperand(0, V);
           I.setOperand(1, C);
@@ -278,7 +278,7 @@ bool InstCombiner::SimplifyAssociativeOrCommutative(BinaryOperator &I) {
         Value *C = I.getOperand(1);
 
         // Does "C op A" simplify?
-        if (Value *V = SimplifyBinOp(Opcode, C, A, DL)) {
+        if (Value *V = SimplifyBinOp(Opcode, C, A, *DL)) {
           // It simplifies to V.  Form "V op B".
           I.setOperand(0, V);
           I.setOperand(1, B);
@@ -298,7 +298,7 @@ bool InstCombiner::SimplifyAssociativeOrCommutative(BinaryOperator &I) {
         Value *C = Op1->getOperand(1);
 
         // Does "C op A" simplify?
-        if (Value *V = SimplifyBinOp(Opcode, C, A, DL)) {
+        if (Value *V = SimplifyBinOp(Opcode, C, A, *DL)) {
           // It simplifies to V.  Form "B op V".
           I.setOperand(0, B);
           I.setOperand(1, V);
@@ -495,7 +495,7 @@ static Value *tryFactorization(InstCombiner::BuilderTy *Builder,
         std::swap(C, D);
       // Consider forming "A op' (B op D)".
       // If "B op D" simplifies then it can be formed with no cost.
-      Value *V = SimplifyBinOp(TopLevelOpcode, B, D, DL);
+      Value *V = SimplifyBinOp(TopLevelOpcode, B, D, *DL);
       // If "B op D" doesn't simplify then only go on if both of the existing
       // operations "A op' B" and "C op' D" will be zapped as no longer used.
       if (!V && LHS->hasOneUse() && RHS->hasOneUse())
@@ -514,7 +514,7 @@ static Value *tryFactorization(InstCombiner::BuilderTy *Builder,
         std::swap(C, D);
       // Consider forming "(A op C) op' B".
       // If "A op C" simplifies then it can be formed with no cost.
-      Value *V = SimplifyBinOp(TopLevelOpcode, A, C, DL);
+      Value *V = SimplifyBinOp(TopLevelOpcode, A, C, *DL);
 
       // If "A op C" doesn't simplify then only go on if both of the existing
       // operations "A op' B" and "C op' D" will be zapped as no longer used.
@@ -594,8 +594,8 @@ Value *InstCombiner::SimplifyUsingDistributiveLaws(BinaryOperator &I) {
     Instruction::BinaryOps InnerOpcode = Op0->getOpcode(); // op'
 
     // Do "A op C" and "B op C" both simplify?
-    if (Value *L = SimplifyBinOp(TopLevelOpcode, A, C, DL))
-      if (Value *R = SimplifyBinOp(TopLevelOpcode, B, C, DL)) {
+    if (Value *L = SimplifyBinOp(TopLevelOpcode, A, C, *DL))
+      if (Value *R = SimplifyBinOp(TopLevelOpcode, B, C, *DL)) {
         // They do! Return "L op' R".
         ++NumExpand;
         // If "L op' R" equals "A op' B" then "L op' R" is just the LHS.
@@ -603,7 +603,7 @@ Value *InstCombiner::SimplifyUsingDistributiveLaws(BinaryOperator &I) {
             (Instruction::isCommutative(InnerOpcode) && L == B && R == A))
           return Op0;
         // Otherwise return "L op' R" if it simplifies.
-        if (Value *V = SimplifyBinOp(InnerOpcode, L, R, DL))
+        if (Value *V = SimplifyBinOp(InnerOpcode, L, R, *DL))
           return V;
         // Otherwise, create a new instruction.
         C = Builder->CreateBinOp(InnerOpcode, L, R);
@@ -619,8 +619,8 @@ Value *InstCombiner::SimplifyUsingDistributiveLaws(BinaryOperator &I) {
     Instruction::BinaryOps InnerOpcode = Op1->getOpcode(); // op'
 
     // Do "A op B" and "A op C" both simplify?
-    if (Value *L = SimplifyBinOp(TopLevelOpcode, A, B, DL))
-      if (Value *R = SimplifyBinOp(TopLevelOpcode, A, C, DL)) {
+    if (Value *L = SimplifyBinOp(TopLevelOpcode, A, B, *DL))
+      if (Value *R = SimplifyBinOp(TopLevelOpcode, A, C, *DL)) {
         // They do! Return "L op' R".
         ++NumExpand;
         // If "L op' R" equals "B op' C" then "L op' R" is just the RHS.
@@ -628,7 +628,7 @@ Value *InstCombiner::SimplifyUsingDistributiveLaws(BinaryOperator &I) {
             (Instruction::isCommutative(InnerOpcode) && L == C && R == B))
           return Op1;
         // Otherwise return "L op' R" if it simplifies.
-        if (Value *V = SimplifyBinOp(InnerOpcode, L, R, DL))
+        if (Value *V = SimplifyBinOp(InnerOpcode, L, R, *DL))
           return V;
         // Otherwise, create a new instruction.
         A = Builder->CreateBinOp(InnerOpcode, L, R);
@@ -1334,7 +1334,7 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
     for (User::op_iterator I = GEP.op_begin() + 1, E = GEP.op_end();
          I != E; ++I, ++GTI) {
       // Skip indices into struct types.
-      SequentialType *SeqTy = dyn_cast<SequentialType>(*GTI);
+      SequentialType *SeqTy = dyn_cast<SequentialType>(&GTI);
       if (!SeqTy) continue;
 
       // If the element type has zero size then any index over it is equivalent
@@ -1417,7 +1417,7 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
     if (DI == -1) {
       // All the GEPs feeding the PHI are identical. Clone one down into our
       // BB so that it can be merged with the current GEP.
-      GEP.getParent()->getInstList().insert(GEP.getParent()->getFirstNonPHI(),
+      GEP.getParent()->getInstList().insert(GEP.getParent()->getFirstNonPHI()->getIterator(),
                                             NewGEP);
     } else {
       // All the GEPs feeding the PHI differ at a single offset. Clone a GEP
@@ -1434,7 +1434,7 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
                            PN->getIncomingBlock(I));
 
       NewGEP->setOperand(DI, NewPN);
-      GEP.getParent()->getInstList().insert(GEP.getParent()->getFirstNonPHI(),
+      GEP.getParent()->getInstList().insert(GEP.getParent()->getFirstNonPHI()->getIterator(),
                                             NewGEP);
       NewGEP->setOperand(DI, NewPN);
     }
