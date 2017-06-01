@@ -54,8 +54,7 @@ public:
   /// has no duplicates.
   void AddInitialGroup(Instruction *const *List, unsigned NumEntries) {
     assert(Worklist.empty() && "Worklist must be empty to add initial group");
-    Worklist.reserve(NumEntries+16);
-    WorklistMap.resize(NumEntries);
+    Worklist.reserve(NumEntries);
     DEBUG(dbgs() << "IC: ADDING: " << NumEntries << " instrs to worklist\n");
     for (unsigned Idx = 0; NumEntries; --NumEntries) {
       Instruction *I = List[NumEntries-1];
