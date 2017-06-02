@@ -2903,7 +2903,7 @@ bool InstCombiner::DoOneIteration(Function &F, unsigned Iteration) {
         DEBUG(dbgs() << "IC: Old = " << *I << '\n'
                      << "    New = " << *Result << '\n');
 
-        if (!I->getDebugLoc().isUnknown())
+        if ( I->getDebugLoc() )
           Result->setDebugLoc(I->getDebugLoc());
         // Everything uses the new instruction now.
         I->replaceAllUsesWith(Result);
@@ -2917,12 +2917,12 @@ bool InstCombiner::DoOneIteration(Function &F, unsigned Iteration) {
 
         // Insert the new instruction into the basic block...
         BasicBlock *InstParent = I->getParent();
-        BasicBlock::iterator InsertPos = I;
+        BasicBlock::iterator InsertPos = I->getIterator();
 
         // If we replace a PHI with something that isn't a PHI, fix up the
         // insertion point.
         if (!isa<PHINode>(Result) && isa<PHINode>(InsertPos))
-          InsertPos = InstParent->getFirstInsertionPt();
+          InsertPos = InstParent->getFirstInsertionPt()->getIterator();
 
         InstParent->getInstList().insert(InsertPos, Result);
 
@@ -2957,25 +2957,25 @@ public:
   InstCombinerLibCallSimplifier(const DataLayout *DL,
                                 const TargetLibraryInfo *TLI,
                                 InstCombiner *IC)
-    : LibCallSimplifier(DL, TLI) {
+    : LibCallSimplifier(*DL, TLI) {
     this->IC = IC;
   }
 
   /// replaceAllUsesWith - override so that instruction replacement
   /// can be defined in terms of the instruction combiner framework.
-  void replaceAllUsesWith(Instruction *I, Value *With) const override {
+  void replaceAllUsesWith(Instruction *I, Value *With) const {
     IC->ReplaceInstUsesWith(*I, With);
   }
 };
 }
 
 bool InstCombiner::runOnFunction(Function &F) {
-  if (skipOptnoneFunction(F))
+  if (F.hasFnAttribute(Attribute::OptimizeNone))
     return false;
 
   AC = &getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F);
-  DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
-  DL = DLP ? &DLP->getDataLayout() : nullptr;
+  DataLayout *DLP = getAnalysisIfAvailable<DataLayout>();
+  DL = DLP ? DLP : nullptr;
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   TLI = &getAnalysis<TargetLibraryInfo>();
 
@@ -2985,8 +2985,8 @@ bool InstCombiner::runOnFunction(Function &F) {
 
   /// Builder - This is an IRBuilder that automatically inserts new
   /// instructions into the worklist when they are created.
-  IRBuilder<true, TargetFolder, InstCombineIRInserter> TheBuilder(
-      F.getContext(), TargetFolder(DL), InstCombineIRInserter(Worklist, AC));
+  IRBuilder<TargetFolder, InstCombineIRInserter> TheBuilder(
+      F.getContext(), TargetFolder(*DL), InstCombineIRInserter(Worklist, AC));
   Builder = &TheBuilder;
 
   InstCombinerLibCallSimplifier TheSimplifier(DL, TLI, this);
