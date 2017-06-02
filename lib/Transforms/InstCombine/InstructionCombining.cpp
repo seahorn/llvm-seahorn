@@ -1240,7 +1240,7 @@ Value *InstCombiner::SimplifyVectorOp(BinaryOperator &Inst) {
   // It may not be safe to reorder shuffles and things like div, urem, etc.
   // because we may trap when executing those ops on unknown vector elements.
   // See PR20059.
-  if (!isSafeToSpeculativelyExecute(&Inst, DL)) return nullptr;
+  if (!isSafeToSpeculativelyExecute(nullptr, &Inst, DT)) return nullptr;
 
   unsigned VWidth = cast<VectorType>(Inst.getType())->getNumElements();
   Value *LHS = Inst.getOperand(0), *RHS = Inst.getOperand(1);
@@ -1317,9 +1317,10 @@ Value *InstCombiner::SimplifyVectorOp(BinaryOperator &Inst) {
 }
 
 Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
+  Type * GT = GEP.getPointerOperandType();
   SmallVector<Value*, 8> Ops(GEP.op_begin(), GEP.op_end());
 
-  if (Value *V = SimplifyGEPInst(Ops, DL, TLI, DT, AC))
+  if (Value *V = SimplifyGEPInst(GT, Ops, *DL, TLI, DT, AC))
     return ReplaceInstUsesWith(GEP, V);
 
   Value *PtrOp = GEP.getOperand(0);
@@ -1423,7 +1424,7 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
       // All the GEPs feeding the PHI differ at a single offset. Clone a GEP
       // into the current block so it can be merged, and create a new PHI to
       // set that index.
-      Instruction *InsertPt = Builder->GetInsertPoint();
+      Instruction *InsertPt = dyn_cast<Instruction>(Builder->GetInsertPoint());
       Builder->SetInsertPoint(PN);
       PHINode *NewPN = Builder->CreatePHI(Op1->getOperand(DI)->getType(),
                                           PN->getNumOperands());
@@ -1465,7 +1466,7 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
     bool EndsWithSequential = false;
     for (gep_type_iterator I = gep_type_begin(*Src), E = gep_type_end(*Src);
          I != E; ++I)
-      EndsWithSequential = !(*I)->isStructTy();
+      EndsWithSequential = !I.isStruct();
 
     // Can we combine the two pointer arithmetics offsets?
     if (EndsWithSequential) {
@@ -1510,7 +1511,7 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
       return (GEP.isInBounds() && Src->isInBounds()) ?
         GetElementPtrInst::CreateInBounds(Src->getOperand(0), Indices,
                                           GEP.getName()) :
-        GetElementPtrInst::Create(Src->getOperand(0), Indices, GEP.getName());
+        GetElementPtrInst::Create( Src->getSourceElementType(),Src->getOperand(0), Indices, GEP.getName());
   }
 
   if (DL && GEP.getNumIndices() == 1) {
@@ -1589,7 +1590,7 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
           // -> GEP i8* X, ...
           SmallVector<Value*, 8> Idx(GEP.idx_begin()+1, GEP.idx_end());
           GetElementPtrInst *Res =
-            GetElementPtrInst::Create(StrippedPtr, Idx, GEP.getName());
+            GetElementPtrInst::Create(StrippedPtrTy->getElementType(), StrippedPtr, Idx, GEP.getName());
           Res->setIsInBounds(GEP.isInBounds());
           if (StrippedPtrTy->getAddressSpace() == GEP.getAddressSpace())
             return Res;
@@ -1768,7 +1769,7 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
           if (Instruction *I = visitBitCast(*BCI)) {
             if (I != BCI) {
               I->takeName(BCI);
-              BCI->getParent()->getInstList().insert(BCI, I);
+              BCI->getParent()->getInstList().insert(BCI->getIterator(), I);
               ReplaceInstUsesWith(*BCI, I);
             }
             return &GEP;
@@ -2097,7 +2098,7 @@ Instruction *InstCombiner::visitSwitchInst(SwitchInst &SI) {
   // truncated to i8 or i16.
   bool TruncCond = false;
   if (DL && BitWidth > NewWidth &&
-      NewWidth >= DL->getLargestLegalIntTypeSize()) {
+      NewWidth >= DL->getLargestLegalIntTypeSizeInBits()) {
     TruncCond = true;
     IntegerType *Ty = IntegerType::get(SI.getContext(), NewWidth);
     Builder->SetInsertPoint(&SI);
@@ -2269,7 +2270,7 @@ Instruction *InstCombiner::visitExtractValueInst(ExtractValueInst &EV) {
 
       // We need to insert these at the location of the old load, not at that of
       // the extractvalue.
-      Builder->SetInsertPoint(L->getParent(), L);
+      Builder->SetInsertPoint(L);
       Value *GEP = Builder->CreateInBoundsGEP(L->getPointerOperand(), Indices);
       // Returning the load directly will cause the main loop to insert it in
       // the wrong spot, so use ReplaceInstUsesWith().
@@ -2334,7 +2335,8 @@ Instruction *InstCombiner::visitLandingPadInst(LandingPadInst &LI) {
   // The logic here should be correct for any real-world personality function.
   // However if that turns out not to be true, the offending logic can always
   // be conditioned on the personality function, like the catch-all logic is.
-  Personality_Type Personality = RecognizePersonality(LI.getPersonalityFn());
+  Function * F = LI.getFunction();
+  Personality_Type Personality = RecognizePersonality(F);
 
   // Simplify the list of clauses, eg by removing repeated catch clauses
   // (these are often created by inlining).
@@ -2601,7 +2603,6 @@ Instruction *InstCombiner::visitLandingPadInst(LandingPadInst &LI) {
   // with a new one.
   if (MakeNewInstruction) {
     LandingPadInst *NLI = LandingPadInst::Create(LI.getType(),
-                                                 LI.getPersonalityFn(),
                                                  NewClauses.size());
     for (unsigned i = 0, e = NewClauses.size(); i != e; ++i)
       NLI->addClause(NewClauses[i]);
@@ -2648,14 +2649,14 @@ static bool TryToSinkInstruction(Instruction *I, BasicBlock *DestBlock) {
   // We can only sink load instructions if there is nothing between the load and
   // the end of block that could change the value.
   if (I->mayReadFromMemory()) {
-    for (BasicBlock::iterator Scan = I, E = I->getParent()->end();
+    for (BasicBlock::iterator Scan = I->getIterator(), E = I->getParent()->end();
          Scan != E; ++Scan)
       if (Scan->mayWriteToMemory())
         return false;
   }
 
   BasicBlock::iterator InsertPos = DestBlock->getFirstInsertionPt();
-  I->moveBefore(InsertPos);
+  I->moveBefore(&(*InsertPos));
   ++NumSunkInst;
   return true;
 }
@@ -2690,7 +2691,8 @@ static bool AddReachableCodeToWorklist(BasicBlock *BB,
       continue;
 
     for (BasicBlock::iterator BBI = BB->begin(), E = BB->end(); BBI != E; ) {
-      Instruction *Inst = BBI++;
+      Instruction *Inst = &(*BBI);
+      BBI++;
 
       // DCE instruction if trivially dead.
       if (isInstructionTriviallyDead(Inst, TLI)) {
@@ -2702,7 +2704,7 @@ static bool AddReachableCodeToWorklist(BasicBlock *BB,
 
       // ConstantProp instruction if trivially constant.
       if (!Inst->use_empty() && isa<Constant>(Inst->getOperand(0)))
-        if (Constant *C = ConstantFoldInstruction(Inst, DL, TLI)) {
+        if (Constant *C = ConstantFoldInstruction(Inst, *DL, TLI)) {
           DEBUG(dbgs() << "IC: ConstFold to: " << *C << " from: "
                        << *Inst << '\n');
           Inst->replaceAllUsesWith(C);
@@ -2720,7 +2722,7 @@ static bool AddReachableCodeToWorklist(BasicBlock *BB,
 
           Constant*& FoldRes = FoldedConstants[CE];
           if (!FoldRes)
-            FoldRes = ConstantFoldConstantExpression(CE, DL, TLI);
+            FoldRes = ConstantFoldConstant(CE, *DL, TLI);
           if (!FoldRes)
             FoldRes = CE;
 
@@ -2786,23 +2788,24 @@ bool InstCombiner::DoOneIteration(Function &F, unsigned Iteration) {
     // Do a depth-first traversal of the function, populate the worklist with
     // the reachable instructions.  Ignore blocks that are not reachable.  Keep
     // track of which blocks we visit.
-    SmallPtrSet<BasicBlock*, 64> Visited;
-    MadeIRChange |= AddReachableCodeToWorklist(F.begin(), Visited, *this, DL,
+    // SmallPtrSize asserts that the size must be <= 32
+    SmallPtrSet<BasicBlock*, 32> Visited;
+    MadeIRChange |= AddReachableCodeToWorklist( &(*F.begin()), Visited, *this, DL,
                                                TLI);
 
     // Do a quick scan over the function.  If we find any blocks that are
     // unreachable, remove any instructions inside of them.  This prevents
     // the instcombine code from having to deal with some bad special cases.
     for (Function::iterator BB = F.begin(), E = F.end(); BB != E; ++BB) {
-      if (Visited.count(BB)) continue;
+      if (Visited.count( &(*BB) )) continue;
 
       // Delete the instructions backwards, as it has a reduced likelihood of
       // having to update as many def-use and use-def chains.
       Instruction *EndInst = BB->getTerminator(); // Last not to be deleted.
-      while (EndInst != BB->begin()) {
+      while (EndInst->getIterator() != BB->begin()) {
         // Delete the next to last instruction.
-        BasicBlock::iterator I = EndInst;
-        Instruction *Inst = --I;
+        BasicBlock::iterator I = EndInst->getIterator();
+        Instruction *Inst = &(*(--I));
         if (!Inst->use_empty())
           Inst->replaceAllUsesWith(UndefValue::get(Inst->getType()));
         if (isa<LandingPadInst>(Inst)) {
@@ -2833,7 +2836,7 @@ bool InstCombiner::DoOneIteration(Function &F, unsigned Iteration) {
 
     // Instruction isn't dead, see if we can constant propagate it.
     if (!I->use_empty() && isa<Constant>(I->getOperand(0)))
-      if (Constant *C = ConstantFoldInstruction(I, DL, TLI)) {
+      if (Constant *C = ConstantFoldInstruction(I, *DL, TLI)) {
         DEBUG(dbgs() << "IC: ConstFold to: " << *C << " from: " << *I << '\n');
 
         // Add operands to the worklist.
@@ -2884,7 +2887,7 @@ bool InstCombiner::DoOneIteration(Function &F, unsigned Iteration) {
     }
 
     // Now that we have an instruction, try combining it to simplify it.
-    Builder->SetInsertPoint(I->getParent(), I);
+    Builder->SetInsertPoint(I);
     Builder->SetCurrentDebugLocation(I->getDebugLoc());
 
 #ifndef NDEBUG
