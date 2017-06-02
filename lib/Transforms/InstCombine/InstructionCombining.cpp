@@ -34,6 +34,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm_seahorn/Transforms/Scalar.h"
+#include "llvm_seahorn/GEPTypeBridgeIterator.h"
 #include "InstCombine.h"
 #include "llvm-c/Initialization.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -93,7 +94,7 @@ char InstCombiner::ID = 0;
 void InstCombiner::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesCFG();
   AU.addRequired<AssumptionCacheTracker>();
-  AU.addRequired<TargetLibraryInfo>();
+  AU.addRequired<TargetLibraryInfoWrapperPass>();
   AU.addRequired<DominatorTreeWrapperPass>();
   AU.addPreserved<DominatorTreeWrapperPass>();
 }
@@ -800,7 +801,7 @@ Instruction *InstCombiner::FoldOpIntoPhi(Instruction &I) {
     // instruction, but insert another equivalent one, leading to infinite
     // instcombine.
     if (isPotentiallyReachable(I.getParent(), NonConstBB, DT,
-                               getAnalysisIfAvailable<LoopInfo>()))
+                               &getAnalysisIfAvailable<LoopInfoWrapperPass>()->getLoopInfo() ))
       return nullptr;
   }
 
@@ -1331,11 +1332,11 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
     bool MadeChange = false;
     Type *IntPtrTy = DL->getIntPtrType(GEP.getPointerOperandType());
 
-    gep_type_iterator GTI = gep_type_begin(GEP);
+    bridge_gep_iterator GTI = bridge_gep_begin(GEP);
     for (User::op_iterator I = GEP.op_begin() + 1, E = GEP.op_end();
          I != E; ++I, ++GTI) {
       // Skip indices into struct types.
-      SequentialType *SeqTy = dyn_cast<SequentialType>(&GTI);
+      SequentialType *SeqTy = dyn_cast<SequentialType>(*GTI);
       if (!SeqTy) continue;
 
       // If the element type has zero size then any index over it is equivalent
@@ -2974,10 +2975,13 @@ bool InstCombiner::runOnFunction(Function &F) {
     return false;
 
   AC = &getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F);
-  DataLayout *DLP = getAnalysisIfAvailable<DataLayout>();
-  DL = DLP ? DLP : nullptr;
+
+  // Datalayout pass is not longer accessed via a pass, we get it
+  // through the target machine, but doesn't appear necessary.
+
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
-  TLI = &getAnalysis<TargetLibraryInfo>();
+  TargetLibraryInfoWrapperPass * TLP = &getAnalysis<TargetLibraryInfoWrapperPass>();
+  TLI = &TLP->getTLI();
 
   // Minimizing size?
   MinimizeSize = F.getAttributes().hasAttribute(AttributeSet::FunctionIndex,
