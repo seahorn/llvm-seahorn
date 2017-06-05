@@ -42,15 +42,16 @@ struct NoOpModuleAnalysis : public AnalysisInfoMixin<NoOpModuleAnalysis> {
 private:
     friend AnalysisInfoMixin<NoOpModuleAnalysis>;
     static AnalysisKey Key;
-};
-
+};                                                                                                                  
 
 /// \brief No-op CGSCC pass which does nothing.
 struct NoOpCGSCCPass {
-  PreservedAnalyses run(LazyCallGraph::SCC &C) {
+  PreservedAnalyses run(LazyCallGraph::SCC &C, CGSCCAnalysisManager &,
+                        LazyCallGraph &, CGSCCUpdateResult &UR) {
     return PreservedAnalyses::all();
   }
   static StringRef name() { return "NoOpCGSCCPass"; }
+  static AnalysisKey Key;
 };
 
 /// \brief No-op CGSCC analysis.
@@ -60,7 +61,7 @@ struct NoOpCGSCCAnalysis : public AnalysisInfoMixin<NoOpCGSCCPass> {
   static StringRef name() { return "NoOpCGSCCAnalysis"; }
 
 private:
-  static AnalysisInfoMixin<NoOpCGSCCAnalysis>;
+  friend AnalysisInfoMixin<NoOpCGSCCAnalysis>;
   static AnalysisKey Key;
 };
 
@@ -152,7 +153,7 @@ static bool parseModulePassName(ModulePassManager &MPM, StringRef Name) {
     return true;                                                               \
   }                                                                            \
   if (Name == "invalidate<" NAME ">") {                                        \
-    MPM.addPass(InvalidateAnalysisPass<decltype(CREATE_PASS)>());              \
+    MPM.addPass(InvalidateAnalysisPass<std::remove_reference<decltype(CREATE_PASS)>::type>()); \
     return true;                                                               \
   }
 #include "PassRegistry.def"
@@ -168,7 +169,8 @@ static bool parseCGSCCPassName(CGSCCPassManager &CGPM, StringRef Name) {
   }
 #define CGSCC_ANALYSIS(NAME, CREATE_PASS)                                      \
   if (Name == "require<" NAME ">") {                                           \
-    CGPM.addPass(RequireAnalysisPass<std::remove_reference<decltype(CREATE_PASS)>::type, Module>()); \
+    CGPM.addPass(RequireAnalysisPass<std::remove_reference<decltype(CREATE_PASS)>::type, \
+		 LazyCallGraph::SCC, CGSCCAnalysisManager, LazyCallGraph &, CGSCCUpdateResult &>()); \
     return true;                                                               \
   }                                                                            \
   if (Name == "invalidate<" NAME ">") {                                        \
@@ -188,7 +190,7 @@ static bool parseFunctionPassName(FunctionPassManager &FPM, StringRef Name) {
   }
 #define FUNCTION_ANALYSIS(NAME, CREATE_PASS)                                   \
   if (Name == "require<" NAME ">") {                                           \
-    FPM.addPass(RequireAnalysisPass<std::remove_reference<decltype(CREATE_PASS)>::type, Module>()); \
+    FPM.addPass(RequireAnalysisPass<std::remove_reference<decltype(CREATE_PASS)>::type, Function>()); \
     return true;                                                               \
   }                                                                            \
   if (Name == "invalidate<" NAME ">") {                                        \
