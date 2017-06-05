@@ -87,19 +87,19 @@ char NoOpFunctionAnalysis::PassID;
 
 void llvm::registerModuleAnalyses(ModuleAnalysisManager &MAM) {
 #define MODULE_ANALYSIS(NAME, CREATE_PASS) \
-  MAM.registerPass(CREATE_PASS);
+  MAM.registerPass([&] { return CREATE_PASS; });
 #include "PassRegistry.def"
 }
 
 void llvm::registerCGSCCAnalyses(CGSCCAnalysisManager &CGAM) {
 #define CGSCC_ANALYSIS(NAME, CREATE_PASS) \
-  CGAM.registerPass(CREATE_PASS);
+  CGAM.registerPass([&] { return CREATE_PASS; });
 #include "PassRegistry.def"
 }
 
 void llvm::registerFunctionAnalyses(FunctionAnalysisManager &FAM) {
 #define FUNCTION_ANALYSIS(NAME, CREATE_PASS) \
-  FAM.registerPass(CREATE_PASS);
+  FAM.registerPass([&] { return CREATE_PASS; });
 #include "PassRegistry.def"
 }
 
@@ -143,7 +143,7 @@ static bool parseModulePassName(ModulePassManager &MPM, StringRef Name) {
   }
 #define MODULE_ANALYSIS(NAME, CREATE_PASS)                                     \
   if (Name == "require<" NAME ">") {                                           \
-    MPM.addPass(RequireAnalysisPass<decltype(CREATE_PASS)>());                 \
+    MPM.addPass( RequireAnalysisPass<std::remove_reference<decltype(CREATE_PASS)>::type, Module>()); \
     return true;                                                               \
   }                                                                            \
   if (Name == "invalidate<" NAME ">") {                                        \
@@ -163,7 +163,7 @@ static bool parseCGSCCPassName(CGSCCPassManager &CGPM, StringRef Name) {
   }
 #define CGSCC_ANALYSIS(NAME, CREATE_PASS)                                      \
   if (Name == "require<" NAME ">") {                                           \
-    CGPM.addPass(RequireAnalysisPass<decltype(CREATE_PASS)>());                \
+    CGPM.addPass(RequireAnalysisPass<std::remove_reference<decltype(CREATE_PASS)>::type, Module>()); \
     return true;                                                               \
   }                                                                            \
   if (Name == "invalidate<" NAME ">") {                                        \
@@ -183,7 +183,7 @@ static bool parseFunctionPassName(FunctionPassManager &FPM, StringRef Name) {
   }
 #define FUNCTION_ANALYSIS(NAME, CREATE_PASS)                                   \
   if (Name == "require<" NAME ">") {                                           \
-    FPM.addPass(RequireAnalysisPass<decltype(CREATE_PASS)>());                 \
+    FPM.addPass(RequireAnalysisPass<std::remove_reference<decltype(CREATE_PASS)>::type, Module>()); \
     return true;                                                               \
   }                                                                            \
   if (Name == "invalidate<" NAME ">") {                                        \
