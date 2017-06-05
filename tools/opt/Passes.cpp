@@ -34,16 +34,16 @@ struct NoOpModulePass {
 };
 
 /// \brief No-op module analysis.
-struct NoOpModuleAnalysis {
-  struct Result {};
-  Result run(Module &) { return Result(); }
-  static StringRef name() { return "NoOpModuleAnalysis"; }
-  static void *ID() { return (void *)&PassID; }
+struct NoOpModuleAnalysis : public AnalysisInfoMixin<NoOpModuleAnalysis> {
+    struct Result {};
+    Result run(Module &, ModuleAnalysisManager &) { return Result(); }
+    static StringRef name() { return "NoOpModuleAnalysis"; }
+    
 private:
-  static char PassID;
+    friend AnalysisInfoMixin<NoOpModuleAnalysis>;
+    static AnalysisKey Key;
 };
 
-char NoOpModuleAnalysis::PassID;
 
 /// \brief No-op CGSCC pass which does nothing.
 struct NoOpCGSCCPass {
@@ -54,34 +54,37 @@ struct NoOpCGSCCPass {
 };
 
 /// \brief No-op CGSCC analysis.
-struct NoOpCGSCCAnalysis {
+struct NoOpCGSCCAnalysis : public AnalysisInfoMixin<NoOpCGSCCPass> {
   struct Result {};
-  Result run(LazyCallGraph::SCC &) { return Result(); }
+  Result run(LazyCallGraph::SCC &, CGSCCAnalysisManager &, LazyCallGraph &G) { return Result(); }
   static StringRef name() { return "NoOpCGSCCAnalysis"; }
-  static void *ID() { return (void *)&PassID; }
+
 private:
-  static char PassID;
+  static AnalysisInfoMixin<NoOpCGSCCAnalysis>;
+  static AnalysisKey Key;
 };
 
-char NoOpCGSCCAnalysis::PassID;
 
 /// \brief No-op function pass which does nothing.
 struct NoOpFunctionPass {
-  PreservedAnalyses run(Function &F) { return PreservedAnalyses::all(); }
+  PreservedAnalyses run(Function &F, FunctionAnalysisManager &) { return PreservedAnalyses::all(); }
   static StringRef name() { return "NoOpFunctionPass"; }
 };
 
 /// \brief No-op function analysis.
-struct NoOpFunctionAnalysis {
+struct NoOpFunctionAnalysis : public AnalysisInfoMixin<NoOpFunctionAnalysis>{
   struct Result {};
-  Result run(Function &) { return Result(); }
+  Result run(Function &, FunctionAnalysisManager &) { return Result(); }
   static StringRef name() { return "NoOpFunctionAnalysis"; }
-  static void *ID() { return (void *)&PassID; }
+ 
 private:
-  static char PassID;
+  friend AnalysisInfoMixin<NoOpFunctionAnalysis>;
+  static AnalysisKey Key;
 };
 
-char NoOpFunctionAnalysis::PassID;
+AnalysisKey NoOpModuleAnalysis::Key;
+AnalysisKey NoOpCGSCCAnalysis::Key;
+AnalysisKey NoOpFunctionAnalysis::Key;
 
 } // End anonymous namespace.
 
@@ -90,6 +93,8 @@ void llvm::registerModuleAnalyses(ModuleAnalysisManager &MAM) {
   MAM.registerPass([&] { return CREATE_PASS; });
 #include "PassRegistry.def"
 }
+
+
 
 void llvm::registerCGSCCAnalyses(CGSCCAnalysisManager &CGAM) {
 #define CGSCC_ANALYSIS(NAME, CREATE_PASS) \
