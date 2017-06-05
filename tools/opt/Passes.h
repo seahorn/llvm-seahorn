@@ -16,6 +16,7 @@
 #ifndef LLVM_TOOLS_OPT_PASSES_H
 #define LLVM_TOOLS_OPT_PASSES_H
 
+#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/CGSCCPassManager.h"
 #include "llvm/IR/PassManager.h"

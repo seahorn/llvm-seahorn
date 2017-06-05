@@ -29,7 +29,7 @@ namespace {
 
 /// \brief No-op module pass which does nothing.
 struct NoOpModulePass {
-  PreservedAnalyses run(Module &M) { return PreservedAnalyses::all(); }
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &) { return PreservedAnalyses::all(); }
   static StringRef name() { return "NoOpModulePass"; }
 };
 
