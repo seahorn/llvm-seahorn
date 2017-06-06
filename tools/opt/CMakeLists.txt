@@ -26,7 +26,7 @@ add_executable(seaopt
   BreakpointPrinter.cpp
   GraphPrinters.cpp
   NewPMDriver.cpp
-  Passes.cpp
+  PassBuilder.cpp
   PassPrinters.cpp
   PrintSCC.cpp
   opt.cpp
