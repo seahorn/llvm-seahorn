@@ -55,7 +55,7 @@ struct NoOpCGSCCPass {
 };
 
 /// \brief No-op CGSCC analysis.
-struct NoOpCGSCCAnalysis : public AnalysisInfoMixin<NoOpCGSCCPass> {
+struct NoOpCGSCCAnalysis : public AnalysisInfoMixin<NoOpCGSCCAnalysis> {
   struct Result {};
   Result run(LazyCallGraph::SCC &, CGSCCAnalysisManager &, LazyCallGraph &G) { return Result(); }
   static StringRef name() { return "NoOpCGSCCAnalysis"; }
