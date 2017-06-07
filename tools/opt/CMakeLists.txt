@@ -2,10 +2,13 @@
 llvm_map_components_to_libnames(LLVM_LINK_COMPONENTS
   ${LLVM_TARGETS_TO_BUILD}
   Analysis
+  BitReader
   BitWriter
   CodeGen
   Core
   Coroutines
+  Demangle
+  ExecutionEngine
   IPO
   IRReader
   InstCombine
@@ -15,6 +18,7 @@ llvm_map_components_to_libnames(LLVM_LINK_COMPONENTS
   ObjCARCOpts
   Passes
   ScalarOpts
+  SelectionDAG
   Support
   Target
   TransformUtils
