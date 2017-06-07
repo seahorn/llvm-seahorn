@@ -5,12 +5,15 @@ llvm_map_components_to_libnames(LLVM_LINK_COMPONENTS
   BitWriter
   CodeGen
   Core
+  Coroutines
   IPO
   IRReader
   InstCombine
   Instrumentation
+  Linker
   MC
   ObjCARCOpts
+  Passes
   ScalarOpts
   Support
   Target
