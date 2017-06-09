@@ -1045,7 +1045,7 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
   const APInt *Val;
   if (match(RHS, m_APInt(Val))) {
     // X + (signbit) --> X ^ signbit
-    if (Val->isSignBit())
+    if (!AvoidBv && Val->isSignBit())
       return BinaryOperator::CreateXor(LHS, RHS);
 
     // Is this add the last step in a convoluted sext?
@@ -1137,7 +1137,7 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
     return BinaryOperator::CreateXor(LHS, RHS);
 
   // X + X --> X << 1
-  if (LHS == RHS) {
+  if (!AvoidBv && LHS == RHS) {
     BinaryOperator *New =
       BinaryOperator::CreateShl(LHS, ConstantInt::get(I.getType(), 1));
     New->setHasNoSignedWrap(I.hasNoSignedWrap());
@@ -1166,7 +1166,7 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
     return replaceInstUsesWith(I, V);
 
   // A+B --> A|B iff A and B have no bits set in common.
-  if (haveNoCommonBitsSet(LHS, RHS, DL, &AC, &I, &DT))
+  if (!AvoidBv && haveNoCommonBitsSet(LHS, RHS, DL, &AC, &I, &DT))
     return BinaryOperator::CreateOr(LHS, RHS);
 
   if (Constant *CRHS = dyn_cast<Constant>(RHS)) {
@@ -1566,7 +1566,7 @@ Instruction *InstCombiner::visitSub(BinaryOperator &I) {
     return BinaryOperator::CreateXor(Op0, Op1);
 
   // Replace (-1 - A) with (~A).
-  if (match(Op0, m_AllOnes()))
+  if (!AvoidBv && match(Op0, m_AllOnes()))
     return BinaryOperator::CreateNot(Op1);
 
   if (Constant *C = dyn_cast<Constant>(Op0)) {
