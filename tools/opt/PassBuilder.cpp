@@ -273,6 +273,7 @@ void PassBuilder::registerLoopAnalyses(LoopAnalysisManager &LAM) {
   LAM.registerPass([&] { return CREATE_PASS; });
 #include "PassRegistry.def"
 }
+#undef LOOP_ANALYSIS
 
 FunctionPassManager
 PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
@@ -700,6 +701,8 @@ static bool isLoopPassName(StringRef Name) {
 
   return false;
 }
+#undef LOOP_PASS
+#undef LOOP_ANALYSIS
 
 Optional<std::vector<PassBuilder::PipelineElement>>
 PassBuilder::parsePipelineText(StringRef Text) {
