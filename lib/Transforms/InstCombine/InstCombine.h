@@ -76,7 +76,7 @@ static inline Constant *SubOne(Constant *C) {
 /// just like the normal insertion helper, but also adds any new instructions
 /// to the instcombine worklist.
 class LLVM_LIBRARY_VISIBILITY InstCombineIRInserter
-    : public IRBuilderDefaultInserter<true> {
+  : public IRBuilderDefaultInserter {
   InstCombineWorklist &Worklist;
   AssumptionCache *AC;
 
@@ -86,7 +86,7 @@ public:
 
   void InsertHelper(Instruction *I, const Twine &Name, BasicBlock *BB,
                     BasicBlock::iterator InsertPt) const {
-    IRBuilderDefaultInserter<true>::InsertHelper(I, Name, BB, InsertPt);
+    IRBuilderDefaultInserter::InsertHelper(I, Name, BB, InsertPt);
     Worklist.Add(I);
 
     using namespace llvm::PatternMatch;
@@ -114,7 +114,7 @@ public:
 
   /// Builder - This is an IRBuilder that automatically inserts new
   /// instructions into the worklist when they are created.
-  typedef IRBuilder<true, TargetFolder, InstCombineIRInserter> BuilderTy;
+  typedef IRBuilder<TargetFolder, InstCombineIRInserter> BuilderTy;
   BuilderTy *Builder;
 
   static char ID; // Pass identification, replacement for typeid
@@ -122,7 +122,7 @@ public:
       : FunctionPass(ID), DL(nullptr), DT(nullptr), Builder(nullptr) {
     MinimizeSize = false;
     AvoidBv = true;
-    initializeInstCombinerPass(*PassRegistry::getPassRegistry());
+    initializeInstructionCombiningPassPass(*PassRegistry::getPassRegistry());
   }
 
 public:
@@ -302,7 +302,8 @@ public:
     assert(New && !New->getParent() &&
            "New instruction already inserted into a basic block!");
     BasicBlock *BB = Old.getParent();
-    BB->getInstList().insert(&Old, New); // Insert inst
+   
+    BB->getInstList().insert( Old.getIterator(), New); // Insert inst
     Worklist.Add(New);
     return New;
   }
@@ -373,31 +374,31 @@ public:
 
   void computeKnownBits(Value *V, APInt &KnownZero, APInt &KnownOne,
                         unsigned Depth = 0, Instruction *CxtI = nullptr) const {
-    return llvm::computeKnownBits(V, KnownZero, KnownOne, DL, Depth, AC, CxtI,
+    return llvm::computeKnownBits(V, KnownZero, KnownOne, *DL, Depth, AC, CxtI,
                                   DT);
   }
 
   bool MaskedValueIsZero(Value *V, const APInt &Mask,
                          unsigned Depth = 0,
                          Instruction *CxtI = nullptr) const {
-    return llvm::MaskedValueIsZero(V, Mask, DL, Depth, AC, CxtI, DT);
+    return llvm::MaskedValueIsZero(V, Mask, *DL, Depth, AC, CxtI, DT);
   }
   unsigned ComputeNumSignBits(Value *Op, unsigned Depth = 0,
                               Instruction *CxtI = nullptr) const {
-    return llvm::ComputeNumSignBits(Op, DL, Depth, AC, CxtI, DT);
+    return llvm::ComputeNumSignBits(Op, *DL, Depth, AC, CxtI, DT);
   }
   void ComputeSignBit(Value *V, bool &KnownZero, bool &KnownOne,
                       unsigned Depth = 0, Instruction *CxtI = nullptr) const {
-    return llvm::ComputeSignBit(V, KnownZero, KnownOne, DL, Depth, AC, CxtI,
+    return llvm::ComputeSignBit(V, KnownZero, KnownOne, *DL, Depth, AC, CxtI,
                                 DT);
   }
   OverflowResult computeOverflowForUnsignedMul(Value *LHS, Value *RHS,
                                                const Instruction *CxtI) {
-    return llvm::computeOverflowForUnsignedMul(LHS, RHS, DL, AC, CxtI, DT);
+    return llvm::computeOverflowForUnsignedMul(LHS, RHS, *DL, AC, CxtI, DT);
   }
   OverflowResult computeOverflowForUnsignedAdd(Value *LHS, Value *RHS,
                                                const Instruction *CxtI) {
-    return llvm::computeOverflowForUnsignedAdd(LHS, RHS, DL, AC, CxtI, DT);
+    return llvm::computeOverflowForUnsignedAdd(LHS, RHS, *DL, AC, CxtI, DT);
   }
 
 private:

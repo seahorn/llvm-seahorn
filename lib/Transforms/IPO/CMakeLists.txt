@@ -1,1 +1,1 @@
-add_llvm_library(SeaLlvmIpo PassManagerBuilder.cpp)
+llvm_add_library(SeaLlvmIpo PassManagerBuilder.cpp)

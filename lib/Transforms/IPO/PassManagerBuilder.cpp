@@ -17,13 +17,15 @@
 //#include "llvm-c/Transforms/PassManagerBuilder.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/Passes.h"
+#include "llvm/LinkAllPasses.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Verifier.h"
-#include "llvm/PassManager.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ManagedStatic.h"
-#include "llvm/Target/TargetLibraryInfo.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm-c/TargetMachine.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/Scalar.h"
@@ -155,17 +157,17 @@ PassManagerBuilder::addInitialAliasAnalysisPasses(PassManagerBase &PM) const {
   // BasicAliasAnalysis wins if they disagree. This is intended to help
   // support "obvious" type-punning idioms.
   if (UseCFLAA)
-    PM.add(createCFLAliasAnalysisPass());
-  PM.add(createTypeBasedAliasAnalysisPass());
-  PM.add(createScopedNoAliasAAPass());
-  PM.add(createBasicAliasAnalysisPass());
+    PM.add(createCFLAndersAAWrapperPass());
+  PM.add(createTypeBasedAAWrapperPass());
+  PM.add(createScopedNoAliasAAWrapperPass());
+  PM.add(createBasicAAWrapperPass());
 }
 
 void PassManagerBuilder::populateFunctionPassManager(FunctionPassManager &FPM) {
   addExtensionsToPM(EP_EarlyAsPossible, FPM);
 
   // Add LibraryInfo if we have some.
-  if (LibraryInfo) FPM.add(new TargetLibraryInfo(*LibraryInfo));
+  if (LibraryInfo) FPM.add(new TargetLibraryInfoWrapperPass());
 
   if (OptLevel == 0) return;
 
@@ -175,7 +177,7 @@ void PassManagerBuilder::populateFunctionPassManager(FunctionPassManager &FPM) {
   if (UseNewSROA)
     FPM.add(createSROAPass());
   else
-    FPM.add(createScalarReplAggregatesPass());
+    FPM.add(createSROAPass());
   
   if (!EnableNondet)
     // -- this pass might mess things up if there is undefined
@@ -220,7 +222,7 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
   }
 
   // Add LibraryInfo if we have some.
-  if (LibraryInfo) MPM.add(new TargetLibraryInfo(*LibraryInfo));
+  if (LibraryInfo) MPM.add(new TargetLibraryInfoWrapperPass());
 
   addInitialAliasAnalysisPasses(MPM);
 
@@ -245,16 +247,13 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
     Inliner = nullptr;
   }
   if (!DisableUnitAtATime)
-    MPM.add(createFunctionAttrsPass());       // Set readonly/readnone attrs
+    MPM.add(createFunctionImportPass());       // Set readonly/readnone attrs
   if (OptLevel > 2)
     MPM.add(createArgumentPromotionPass());   // Scalarize uninlined fn args
 
   // Start of function pass.
   // Break up aggregate allocas, using SSAUpdater.
-  if (UseNewSROA)
-    MPM.add(createSROAPass(/*RequiresDomTree*/ false));
-  else
-    MPM.add(createScalarReplAggregatesPass(-1, false));
+  MPM.add(createSROAPass());
 
   if (EnableNondet) {
     // -- Turn undef into nondet (undef are created by SROA when it calls mem2reg)
@@ -488,7 +487,7 @@ void PassManagerBuilder::addLTOOptimizationPasses(PassManagerBase &PM) {
   if (UseNewSROA)
     PM.add(createSROAPass());
   else
-    PM.add(createScalarReplAggregatesPass());
+    PM.add(createSROAPass());
 
   if (EnableNondet) {
     // -- Turn undef into nondet (undef are created by SROA when it calls mem2reg)
@@ -496,8 +495,8 @@ void PassManagerBuilder::addLTOOptimizationPasses(PassManagerBase &PM) {
   }
 
   // Run a few AA driven optimizations here and now, to cleanup the code.
-  PM.add(createFunctionAttrsPass()); // Add nocapture.
-  PM.add(createGlobalsModRefPass()); // IP alias analysis.
+  PM.add(createFunctionImportPass()); // Add nocapture.
+  PM.add(createGlobalsAAWrapperPass()); // IP alias analysis.
 
   PM.add(createLICMPass());                 // Hoist loop invariants.
   if (EnableMLSM)
@@ -557,12 +556,16 @@ void PassManagerBuilder::addLTOOptimizationPasses(PassManagerBase &PM) {
 void PassManagerBuilder::populateLTOPassManager(PassManagerBase &PM,
                                                 TargetMachine *TM) {
   if (TM) {
-    PM.add(new DataLayoutPass());
-    TM->addAnalysisPasses(PM);
+    // not sure this is necessary as the usage should declare whether or not
+    // the DataLayoutPass is invoked.
+    // PM.add(new DataLayoutPass());
+    LLVMTargetMachineRef TMR = (LLVMTargetMachineRef)TM;
+    LLVMPassManagerRef PMR = (LLVMPassManagerRef)&PM;
+    LLVMAddAnalysisPasses(TMR, PMR);
   }
 
   if (LibraryInfo)
-    PM.add(new TargetLibraryInfo(*LibraryInfo));
+    PM.add(new TargetLibraryInfoWrapperPass());
 
   if (VerifyInput)
     PM.add(createVerifierPass());
@@ -571,14 +574,14 @@ void PassManagerBuilder::populateLTOPassManager(PassManagerBase &PM,
     PM.add(createStripSymbolsPass(true));
 
   if (VerifyInput)
-    PM.add(createDebugInfoVerifierPass());
+    PM.add(createVerifierPass());
 
   if (OptLevel != 0)
     addLTOOptimizationPasses(PM);
 
   if (VerifyOutput) {
     PM.add(createVerifierPass());
-    PM.add(createDebugInfoVerifierPass());
+    // there's no longer a createDebugVerifierInfoPass()
   }
 }
 

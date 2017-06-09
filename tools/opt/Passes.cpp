@@ -29,77 +29,83 @@ namespace {
 
 /// \brief No-op module pass which does nothing.
 struct NoOpModulePass {
-  PreservedAnalyses run(Module &M) { return PreservedAnalyses::all(); }
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &) { return PreservedAnalyses::all(); }
   static StringRef name() { return "NoOpModulePass"; }
 };
 
 /// \brief No-op module analysis.
-struct NoOpModuleAnalysis {
-  struct Result {};
-  Result run(Module &) { return Result(); }
-  static StringRef name() { return "NoOpModuleAnalysis"; }
-  static void *ID() { return (void *)&PassID; }
+struct NoOpModuleAnalysis : public AnalysisInfoMixin<NoOpModuleAnalysis> {
+    struct Result {};
+    Result run(Module &, ModuleAnalysisManager &) { return Result(); }
+    static StringRef name() { return "NoOpModuleAnalysis"; }
+    
 private:
-  static char PassID;
-};
-
-char NoOpModuleAnalysis::PassID;
+    friend AnalysisInfoMixin<NoOpModuleAnalysis>;
+    static AnalysisKey Key;
+};                                                                                                                  
 
 /// \brief No-op CGSCC pass which does nothing.
 struct NoOpCGSCCPass {
-  PreservedAnalyses run(LazyCallGraph::SCC &C) {
+  PreservedAnalyses run(LazyCallGraph::SCC &C, CGSCCAnalysisManager &,
+                        LazyCallGraph &, CGSCCUpdateResult &UR) {
     return PreservedAnalyses::all();
   }
   static StringRef name() { return "NoOpCGSCCPass"; }
+  static AnalysisKey Key;
 };
 
 /// \brief No-op CGSCC analysis.
-struct NoOpCGSCCAnalysis {
+struct NoOpCGSCCAnalysis : public AnalysisInfoMixin<NoOpCGSCCAnalysis> {
   struct Result {};
-  Result run(LazyCallGraph::SCC &) { return Result(); }
+  Result run(LazyCallGraph::SCC &, CGSCCAnalysisManager &, LazyCallGraph &G) { return Result(); }
   static StringRef name() { return "NoOpCGSCCAnalysis"; }
-  static void *ID() { return (void *)&PassID; }
+
 private:
-  static char PassID;
+  friend AnalysisInfoMixin<NoOpCGSCCAnalysis>;
+  static AnalysisKey Key;
 };
 
-char NoOpCGSCCAnalysis::PassID;
 
 /// \brief No-op function pass which does nothing.
 struct NoOpFunctionPass {
-  PreservedAnalyses run(Function &F) { return PreservedAnalyses::all(); }
+  PreservedAnalyses run(Function &F, FunctionAnalysisManager &) { return PreservedAnalyses::all(); }
   static StringRef name() { return "NoOpFunctionPass"; }
 };
 
 /// \brief No-op function analysis.
-struct NoOpFunctionAnalysis {
+struct NoOpFunctionAnalysis : public AnalysisInfoMixin<NoOpFunctionAnalysis>{
   struct Result {};
-  Result run(Function &) { return Result(); }
+  Result run(Function &, FunctionAnalysisManager &) { return Result(); }
   static StringRef name() { return "NoOpFunctionAnalysis"; }
-  static void *ID() { return (void *)&PassID; }
+ 
 private:
-  static char PassID;
+  friend AnalysisInfoMixin<NoOpFunctionAnalysis>;
+  static AnalysisKey Key;
 };
 
-char NoOpFunctionAnalysis::PassID;
+AnalysisKey NoOpModuleAnalysis::Key;
+AnalysisKey NoOpCGSCCAnalysis::Key;
+AnalysisKey NoOpFunctionAnalysis::Key;
 
 } // End anonymous namespace.
 
 void llvm::registerModuleAnalyses(ModuleAnalysisManager &MAM) {
 #define MODULE_ANALYSIS(NAME, CREATE_PASS) \
-  MAM.registerPass(CREATE_PASS);
+  MAM.registerPass([&] { return CREATE_PASS; });
 #include "PassRegistry.def"
 }
 
+
+
 void llvm::registerCGSCCAnalyses(CGSCCAnalysisManager &CGAM) {
 #define CGSCC_ANALYSIS(NAME, CREATE_PASS) \
-  CGAM.registerPass(CREATE_PASS);
+  CGAM.registerPass([&] { return CREATE_PASS; });
 #include "PassRegistry.def"
 }
 
 void llvm::registerFunctionAnalyses(FunctionAnalysisManager &FAM) {
 #define FUNCTION_ANALYSIS(NAME, CREATE_PASS) \
-  FAM.registerPass(CREATE_PASS);
+  FAM.registerPass([&] { return CREATE_PASS; });
 #include "PassRegistry.def"
 }
 
@@ -143,11 +149,11 @@ static bool parseModulePassName(ModulePassManager &MPM, StringRef Name) {
   }
 #define MODULE_ANALYSIS(NAME, CREATE_PASS)                                     \
   if (Name == "require<" NAME ">") {                                           \
-    MPM.addPass(RequireAnalysisPass<decltype(CREATE_PASS)>());                 \
+    MPM.addPass( RequireAnalysisPass<std::remove_reference<decltype(CREATE_PASS)>::type, Module>()); \
     return true;                                                               \
   }                                                                            \
   if (Name == "invalidate<" NAME ">") {                                        \
-    MPM.addPass(InvalidateAnalysisPass<decltype(CREATE_PASS)>());              \
+    MPM.addPass(InvalidateAnalysisPass<std::remove_reference<decltype(CREATE_PASS)>::type>()); \
     return true;                                                               \
   }
 #include "PassRegistry.def"
@@ -163,7 +169,8 @@ static bool parseCGSCCPassName(CGSCCPassManager &CGPM, StringRef Name) {
   }
 #define CGSCC_ANALYSIS(NAME, CREATE_PASS)                                      \
   if (Name == "require<" NAME ">") {                                           \
-    CGPM.addPass(RequireAnalysisPass<decltype(CREATE_PASS)>());                \
+    CGPM.addPass(RequireAnalysisPass<std::remove_reference<decltype(CREATE_PASS)>::type, \
+		 LazyCallGraph::SCC, CGSCCAnalysisManager, LazyCallGraph &, CGSCCUpdateResult &>()); \
     return true;                                                               \
   }                                                                            \
   if (Name == "invalidate<" NAME ">") {                                        \
@@ -183,7 +190,7 @@ static bool parseFunctionPassName(FunctionPassManager &FPM, StringRef Name) {
   }
 #define FUNCTION_ANALYSIS(NAME, CREATE_PASS)                                   \
   if (Name == "require<" NAME ">") {                                           \
-    FPM.addPass(RequireAnalysisPass<decltype(CREATE_PASS)>());                 \
+    FPM.addPass(RequireAnalysisPass<std::remove_reference<decltype(CREATE_PASS)>::type, Function>()); \
     return true;                                                               \
   }                                                                            \
   if (Name == "invalidate<" NAME ">") {                                        \

@@ -1,1 +1,1 @@
-add_llvm_library(SeaInstNondet NondetInit.cc)
+llvm_add_library(SeaInstNondet NondetInit.cc)
