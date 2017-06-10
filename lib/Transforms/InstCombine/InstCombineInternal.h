@@ -182,6 +182,8 @@ private:
   TargetLibraryInfo &TLI;
   DominatorTree &DT;
   const DataLayout &DL;
+  
+  bool AvoidBv;
 
   // Optional analyses. When non-null, these can both be used to do better
   // combining and will be updated to reflect any changes.
