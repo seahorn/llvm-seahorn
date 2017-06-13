@@ -11,3 +11,4 @@ namespace llvm_seahorn
   llvm::Pass* createFakeLatchExitPass ();
 }
 #endif
+

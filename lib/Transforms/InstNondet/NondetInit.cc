@@ -24,7 +24,7 @@ DM-0002198
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/Compiler.h"
-#include "llvm/PassManager.h"
+#include "llvm/IR/PassManager.h"
 
 #include "llvm/IR/IRBuilder.h"
 
@@ -198,8 +198,7 @@ namespace llvm_seahorn
 
 static RegisterPass<llvm_seahorn::NondetInit> 
 X("nondet-init", 
-  "Non-deterministic initialization" 
-  "of all alloca.");
+  "Non-deterministic initialization of all alloca");
 
 static RegisterPass<llvm_seahorn::KillUnusedNondet> 
 Y("kill-nondet",

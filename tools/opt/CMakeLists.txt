@@ -4,7 +4,6 @@ set(LLVM_LINK_COMPONENTS
   BitWriter
   CodeGen
   Core
-  IPA
   IPO
   IRReader
   InstCombine
@@ -16,6 +15,7 @@ set(LLVM_LINK_COMPONENTS
   Target
   TransformUtils
   Vectorize
+  Passes
   )
 
 # Support plugins.
@@ -26,9 +26,9 @@ add_llvm_executable(seaopt
   BreakpointPrinter.cpp
   GraphPrinters.cpp
   NewPMDriver.cpp
-  Passes.cpp
   PassPrinters.cpp
   PrintSCC.cpp
+  Passes.cpp
   opt.cpp
   )
 target_link_libraries (seaopt SeaLlvmIpo SeaInstCombine SeaInstNondet SeaLoops)

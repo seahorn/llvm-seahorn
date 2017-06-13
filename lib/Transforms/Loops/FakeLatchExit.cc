@@ -16,7 +16,7 @@ namespace
 
     bool runOnLoop (Loop *L, LPPassManager &LPM) override
     {
-      LoopInfo *LI = &getAnalysis<LoopInfo> ();
+      LoopInfo *LI = &getAnalysis<LoopInfoWrapperPass> ().getLoopInfo();
       
       BasicBlock *latch = L->getLoopLatch ();
 
@@ -49,8 +49,8 @@ namespace
 
     void getAnalysisUsage (AnalysisUsage &AU) const override
     {
-      AU.addRequired<LoopInfo>();
-      AU.addPreserved<LoopInfo>();
+      AU.addRequired<LoopInfoWrapperPass>();
+      AU.addPreserved<LoopInfoWrapperPass>();
       AU.setPreservesAll ();
     }
   };
