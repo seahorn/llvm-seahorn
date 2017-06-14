@@ -282,7 +282,7 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
   MPM.add(createLoopUnswitchPass(SizeLevel || OptLevel < 3));
   MPM.add(llvm_seahorn::createInstructionCombiningPass());
   if (EnableIndVar)
-    MPM.add(createIndVarSimplifyPass());        // Canonicalize indvars
+    MPM.add(llvm::seahorn::createIndVarSimplifyPass());        // Canonicalize indvars
   if (EnableLoopIdiom)
     MPM.add(createLoopIdiomPass());             // Recognize idioms like memset.
   MPM.add(createLoopDeletionPass());          // Delete dead loops
@@ -409,8 +409,15 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
   MPM.add(createCFGSimplificationPass());
   MPM.add(llvm_seahorn::createInstructionCombiningPass());
 
-  if (!DisableUnrollLoops)
+  if (!DisableUnrollLoops) {
     MPM.add(createLoopUnrollPass());    // Unroll small loops
+    
+    // LoopUnroll may generate some redundancy
+    MPM.add(llvm_seahorn::createInstructionCombingingPass());
+    
+    // might need check of loop prologue for invariants
+    MPM.add(createLICMPass());
+  }
 
   // After vectorization and unrolling, assume intrinsics may tell us more
   // about pointer alignments.
@@ -517,11 +524,21 @@ void PassManagerBuilder::addLTOOptimizationPasses(PassManagerBase &PM) {
     PM.add (llvm_seahorn::createDeadNondetElimPass ());
   }
 
-  if (EnableIndVar)
+  if (EnableIndVar) {
     // More loops are countable; try to optimize them.
-    PM.add(createIndVarSimplifyPass());
+    PM.add(llvm_seahorn::createIndVarSimplifyPass());
+  }
   PM.add(createLoopDeletionPass());
   PM.add(createLoopVectorizePass(true, LoopVectorize));
+
+  // Now that we've optimized loops (in particular loop induction variables),                                                                                        
+  // we may have exposed more scalar opportunities. Run parts of the scalar                                                                                          
+  // optimizer again at this point.                                                                                                                                  
+  PM.add(llvm_seahorn::createInstructionCombiningPass()); // Initial cleanup                                                                                         
+  PM.add(createCFGSimplificationPass()); // if-convert                                                                                                               
+  PM.add(createSCCPPass()); // Propagate exposed constants                                                                                                           
+  PM.add(llvm_seahorn::createInstructionCombiningPass()); // Clean up again                                                                                          
+  PM.add(createBitTrackingDCEPass());
 
   // More scalar chains could be vectorized due to more alias information
   if (RunSLPAfterLoopVectorization)

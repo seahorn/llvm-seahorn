@@ -63,6 +63,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/Local.h"
+#include "llvm_seahorn/Transforms/Scalar.h"
 #include <algorithm>
 #include <climits>
 using namespace llvm;
@@ -3181,6 +3182,88 @@ PreservedAnalyses InstCombinePass::run(Function &F,
   PA.preserve<DominatorTreeAnalysis>();
   return PA;
 }
+
+/*
+ * Seahorn adoptions
+ */
+
+namespace llvm_seahorn {
+  /// \brief The legacy pass manager's instcombine pass.                                                                                                               
+  ///                                                                                                                                                                  
+  /// This is a basic whole-function wrapper around the instcombine utility. It                                                                                        
+  /// will try to combine all instructions in the function.                                                                                                            
+  class SeaInstructionCombiningPass : public FunctionPass {
+    InstCombineWorklist Worklist;
+
+  public:
+    static char ID; // Pass identification, replacement for typeid                                                                                                     
+
+    SeaInstructionCombiningPass() : FunctionPass(ID) {
+      // initializeInstructionCombiningPassPass(*PassRegistry::getPassRegistry());                                                                                     
+    }
+
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
+      AU.setPreservesCFG();
+      AU.addRequired<AAResultsWrapperPass>();
+      AU.addRequired<AssumptionCacheTracker>();
+      AU.addRequired<TargetLibraryInfoWrapperPass>();
+      AU.addRequired<DominatorTreeWrapperPass>();
+      AU.addPreserved<DominatorTreeWrapperPass>();
+      AU.addPreserved<GlobalsAAWrapperPass>();
+    }
+
+    bool runOnFunction(Function &F) override {
+      // skipOptnoneFunction is deprecated
+      if (F.hasFnAttribute(Attribute::OptimizeNone))
+	return false;
+
+      // Required analyses.                                                                                                                                            
+      auto AA = &getAnalysis<AAResultsWrapperPass>().getAAResults();
+      auto &AC = getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F);
+      auto &TLI = getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
+      auto &DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
+
+      // Optional analyses.                                                                                                                                            
+      auto *LIWP = getAnalysisIfAvailable<LoopInfoWrapperPass>();
+      auto *LI = LIWP ? &LIWP->getLoopInfo() : nullptr;
+
+      return combineInstructionsOverFunction(F, Worklist, AA, AC, TLI, DT, LI);
+    }
+  };
+} // end namespace llvm_seahorn                                                                                                                                      
+
+/*
+ * Lewaving inline initialization as comments
+ */
+// INITIALIZE_PASS_BEGIN(InstructionCombiningPass, "seainstcombine",                                                                                                 
+//                       "Combine redundant instructions", false, false)                                                                                             
+// INITIALIZE_PASS_DEPENDENCY(AssumptionCacheTracker)                                                                                                                
+// INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfoWrapperPass)                                                                                                          
+// INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)                                                                                                              
+// INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)                                                                                                                  
+// INITIALIZE_PASS_DEPENDENCY(GlobalsAAWrapperPass)                                                                                                                  
+// INITIALIZE_PASS_END(InstructionCombiningPass, "seainstcombine",                                                                                                   
+//                     "Combine redundant instructions", false, false)                                                                                               
+
+// Initialization Routines                                                                                                                                           
+// void llvm_seahorn::initializeInstCombine(PassRegistry &Registry) {                                                                                                
+//   initializeInstCombinerPass(Registry);                                                                                                                           
+// }                                                                                                                                                                 
+
+// void LLVMInitializeInstCombine(LLVMPassRegistryRef R) {                                                                                                           
+//   initializeSeaInstCombine(*unwrap(R));                                                                                                                           
+// }     
+
+
+char llvm_seahorn::SeaInstructionCombiningPass::ID = 0;
+
+FunctionPass *llvm_seahorn::createInstructionCombiningPass() {
+  return new llvm_seahorn::SeaInstructionCombiningPass();
+}
+
+static llvm::RegisterPass<llvm_seahorn::SeaInstructionCombiningPass>
+X ("sea-instcombine", "SeaHorn instruction combiner");
+
 
 void InstructionCombiningPass::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesCFG();
