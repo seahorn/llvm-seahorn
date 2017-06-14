@@ -832,8 +832,8 @@ Value *InstCombiner::FoldAndOfICmps(ICmpInst *LHS, ICmpInst *RHS) {
     // (icmp ult A, C) & (icmp ult B, C) --> (icmp ult (A|B), C)
     // where C is a power of 2 or
     // (icmp eq A, 0) & (icmp eq B, 0) --> (icmp eq (A|B), 0)
-    if (!AvoidBv && (LHSCC == ICmpInst::ICMP_ULT && LHSCst->getValue().isPowerOf2()) ||
-        (LHSCC == ICmpInst::ICMP_EQ && LHSCst->isZero())) {
+    if (!AvoidBv && ( (LHSCC == ICmpInst::ICMP_ULT && LHSCst->getValue().isPowerOf2()) ||
+		      (LHSCC == ICmpInst::ICMP_EQ && LHSCst->isZero()) ) ) {
       Value *NewOr = Builder->CreateOr(Val, Val2);
       return Builder->CreateICmp(LHSCC, NewOr, LHSCst);
     }
