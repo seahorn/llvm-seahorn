@@ -502,6 +502,7 @@ Instruction *InstCombiner::visitTrunc(TruncInst &CI) {
 
   // Canonicalize trunc x to i1 -> (icmp ne (and x, 1), 0), likewise for vector.
   if (DestTy->getScalarSizeInBits() == 1) {
+    if (AvoidBv) return nullptr;
     Constant *One = ConstantInt::get(SrcTy, 1);
     Src = Builder->CreateAnd(Src, One);
     Value *Zero = Constant::getNullValue(Src->getType());
@@ -581,6 +582,8 @@ Instruction *InstCombiner::visitTrunc(TruncInst &CI) {
 
 Instruction *InstCombiner::transformZExtICmp(ICmpInst *ICI, ZExtInst &CI,
                                              bool DoTransform) {
+  if (AvoidBv) return nullptr;
+
   // If we are just checking for a icmp eq of a single bit and zext'ing it
   // to an integer, then shift the bit to the appropriate place and then
   // cast to integer to avoid the comparison.
@@ -666,6 +669,8 @@ Instruction *InstCombiner::transformZExtICmp(ICmpInst *ICI, ZExtInst &CI,
   // may lead to additional simplifications.
   if (ICI->isEquality() && CI.getType() == ICI->getOperand(0)->getType()) {
     if (IntegerType *ITy = dyn_cast<IntegerType>(CI.getType())) {
+      if (AvoidBv) return nullptr;
+
       uint32_t BitWidth = ITy->getBitWidth();
       Value *LHS = ICI->getOperand(0);
       Value *RHS = ICI->getOperand(1);
@@ -856,6 +861,8 @@ Instruction *InstCombiner::visitZExt(ZExtInst &CI) {
     assert(BitsToClear < SrcTy->getScalarSizeInBits() &&
            "Unreasonable BitsToClear");
 
+    if (AvoidBv) return nullptr;
+
     // Okay, we can transform this!  Insert the new expression now.
     DEBUG(dbgs() << "ICE: EvaluateInDifferentType converting expression type"
           " to avoid zero extend: " << CI << '\n');
@@ -884,6 +891,8 @@ Instruction *InstCombiner::visitZExt(ZExtInst &CI) {
   // 'and' which will be much cheaper than the pair of casts.
   if (TruncInst *CSrc = dyn_cast<TruncInst>(Src)) {   // A->B->C cast
     // TODO: Subsume this into EvaluateInDifferentType.
+
+    if (AvoidBv) return nullptr;
 
     // Get the sizes of the types involved.  We know that the intermediate type
     // will be smaller than A or C, but don't know the relation between A and C.
@@ -957,6 +966,9 @@ Instruction *InstCombiner::visitZExt(ZExtInst &CI) {
   if (SrcI && match(SrcI, m_OneUse(m_Xor(m_Value(And), m_Constant(C)))) &&
       match(And, m_OneUse(m_And(m_Trunc(m_Value(X)), m_Specific(C)))) &&
       X->getType() == CI.getType()) {
+    
+    if ( AvoidBv) return nullptr;
+
     Constant *ZC = ConstantExpr::getZExt(C, CI.getType());
     return BinaryOperator::CreateXor(Builder->CreateAnd(X, ZC), ZC);
   }
@@ -966,6 +978,9 @@ Instruction *InstCombiner::visitZExt(ZExtInst &CI) {
 
 /// Transform (sext icmp) to bitwise / integer operations to eliminate the icmp.
 Instruction *InstCombiner::transformSExtICmp(ICmpInst *ICI, Instruction &CI) {
+  
+  if (AvoidBv) return nullptr;
+
   Value *Op0 = ICI->getOperand(0), *Op1 = ICI->getOperand(1);
   ICmpInst::Predicate Pred = ICI->getPredicate();
 
