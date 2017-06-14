@@ -807,9 +807,12 @@ Value *InstCombiner::FoldAndOfICmps(ICmpInst *LHS, ICmpInst *RHS) {
     }
   }
 
-  // handle (roughly):  (icmp eq (A & B), C) & (icmp eq (A & D), E)
-  if (Value *V = foldLogOpOfMaskedICmps(LHS, RHS, true, Builder))
-    return V;
+  // Carrying over a safe but perhaps drastic check
+  if ( !AvoidBv ) {
+    // handle (roughly):  (icmp eq (A & B), C) & (icmp eq (A & D), E)
+    if (Value *V = foldLogOpOfMaskedICmps(LHS, RHS, true, Builder))
+      return V;
+  }
 
   // E.g. (icmp sge x, 0) & (icmp slt x, n) --> icmp ult x, n
   if (Value *V = simplifyRangeCheck(LHS, RHS, /*Inverted=*/false))
@@ -825,11 +828,11 @@ Value *InstCombiner::FoldAndOfICmps(ICmpInst *LHS, ICmpInst *RHS) {
   ConstantInt *RHSCst = dyn_cast<ConstantInt>(RHS->getOperand(1));
   if (!LHSCst || !RHSCst) return nullptr;
 
-  if (LHSCst == RHSCst && LHSCC == RHSCC) {
+  if (!AvoidBv && LHSCst == RHSCst && LHSCC == RHSCC) {
     // (icmp ult A, C) & (icmp ult B, C) --> (icmp ult (A|B), C)
     // where C is a power of 2 or
     // (icmp eq A, 0) & (icmp eq B, 0) --> (icmp eq (A|B), 0)
-    if ((LHSCC == ICmpInst::ICMP_ULT && LHSCst->getValue().isPowerOf2()) ||
+    if (!AvoidBv && (LHSCC == ICmpInst::ICMP_ULT && LHSCst->getValue().isPowerOf2()) ||
         (LHSCC == ICmpInst::ICMP_EQ && LHSCst->isZero())) {
       Value *NewOr = Builder->CreateOr(Val, Val2);
       return Builder->CreateICmp(LHSCC, NewOr, LHSCst);
@@ -1738,10 +1741,12 @@ Value *InstCombiner::FoldOrOfICmps(ICmpInst *LHS, ICmpInst *RHS,
     }
   }
 
-  // handle (roughly):
-  // (icmp ne (A & B), C) | (icmp ne (A & D), E)
-  if (Value *V = foldLogOpOfMaskedICmps(LHS, RHS, false, Builder))
-    return V;
+  if (!AvoidBv) {
+    // handle (roughly):
+    // (icmp ne (A & B), C) | (icmp ne (A & D), E)
+    if (Value *V = foldLogOpOfMaskedICmps(LHS, RHS, false, Builder))
+      return V;
+  }
 
   Value *Val = LHS->getOperand(0), *Val2 = RHS->getOperand(0);
   if (LHS->hasOneUse() || RHS->hasOneUse()) {
@@ -1781,7 +1786,7 @@ Value *InstCombiner::FoldOrOfICmps(ICmpInst *LHS, ICmpInst *RHS,
   // This only handles icmp of constants: (icmp1 A, C1) | (icmp2 B, C2).
   if (!LHSCst || !RHSCst) return nullptr;
 
-  if (LHSCst == RHSCst && LHSCC == RHSCC) {
+  if (!AvoidBv && LHSCst == RHSCst && LHSCC == RHSCC) {
     // (icmp ne A, 0) | (icmp ne B, 0) --> (icmp ne (A|B), 0)
     if (LHSCC == ICmpInst::ICMP_NE && LHSCst->isZero()) {
       Value *NewOr = Builder->CreateOr(Val, Val2);
@@ -1842,7 +1847,7 @@ Value *InstCombiner::FoldOrOfICmps(ICmpInst *LHS, ICmpInst *RHS,
     switch (RHSCC) {
     default: llvm_unreachable("Unknown integer condition code!");
     case ICmpInst::ICMP_EQ:
-      if (LHS->getOperand(0) == RHS->getOperand(0)) {
+      if (!AvoidBv && LHS->getOperand(0) == RHS->getOperand(0)) {
         // if LHSCst and RHSCst differ only by one bit:
         // (A == C1 || A == C2) -> (A | (C1 ^ C2)) == C2
         assert(LHSCst->getValue().ule(LHSCst->getValue()));
