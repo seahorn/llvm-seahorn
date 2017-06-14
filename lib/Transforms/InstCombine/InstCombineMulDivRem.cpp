@@ -213,7 +213,7 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
       return BO;
     }
 
-    if (match(&I, m_Mul(m_Value(NewOp), m_Constant(C1)))) {
+    if (!AvoidBv && match(&I, m_Mul(m_Value(NewOp), m_Constant(C1)))) {
       Constant *NewCst = nullptr;
       if (match(C1, m_APInt(IVal)) && IVal->isPowerOf2())
         // Replace X*(2^C) with X << C, where C is either a scalar or a splat.
@@ -1503,7 +1503,7 @@ Instruction *InstCombiner::visitURem(BinaryOperator &I) {
                           I.getType());
 
   // X urem Y -> X and Y-1, where Y is a power of 2,
-  if (isKnownToBeAPowerOfTwo(Op1, DL, /*OrZero*/ true, 0, &AC, &I, &DT)) {
+  if (!AvoidBv && isKnownToBeAPowerOfTwo(Op1, DL, /*OrZero*/ true, 0, &AC, &I, &DT)) {
     Constant *N1 = Constant::getAllOnesValue(I.getType());
     Value *Add = Builder->CreateAdd(Op1, N1);
     return BinaryOperator::CreateAnd(Op0, Add);

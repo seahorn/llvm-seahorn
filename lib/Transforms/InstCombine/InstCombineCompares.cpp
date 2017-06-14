@@ -2318,13 +2318,13 @@ Instruction *InstCombiner::foldICmpSubConstant(ICmpInst &Cmp,
 
   // C2 - Y <u C -> (Y | (C - 1)) == C2
   //   iff (C2 & (C - 1)) == C - 1 and C is a power of 2
-  if (Pred == ICmpInst::ICMP_ULT && C->isPowerOf2() &&
+  if (!AvoidBv && Pred == ICmpInst::ICMP_ULT && C->isPowerOf2() &&
       (*C2 & (*C - 1)) == (*C - 1))
     return new ICmpInst(ICmpInst::ICMP_EQ, Builder->CreateOr(Y, *C - 1), X);
 
   // C2 - Y >u C -> (Y | C) != C2
   //   iff C2 & C == C and C + 1 is a power of 2
-  if (Pred == ICmpInst::ICMP_UGT && (*C + 1).isPowerOf2() && (*C2 & *C) == *C)
+  if (!AvoidBv && Pred == ICmpInst::ICMP_UGT && (*C + 1).isPowerOf2() && (*C2 & *C) == *C)
     return new ICmpInst(ICmpInst::ICMP_NE, Builder->CreateOr(Y, *C), X);
 
   return nullptr;
@@ -2364,7 +2364,7 @@ Instruction *InstCombiner::foldICmpAddConstant(ICmpInst &Cmp,
   // X+C <u C2 -> (X & -C2) == C
   //   iff C & (C2-1) == 0
   //       C2 is a power of 2
-  if (Cmp.getPredicate() == ICmpInst::ICMP_ULT && C->isPowerOf2() &&
+  if (!AvoidBv && Cmp.getPredicate() == ICmpInst::ICMP_ULT && C->isPowerOf2() &&
       (*C2 & (*C - 1)) == 0)
     return new ICmpInst(ICmpInst::ICMP_EQ, Builder->CreateAnd(X, -(*C)),
                         ConstantExpr::getNeg(cast<Constant>(Y)));
@@ -2372,7 +2372,7 @@ Instruction *InstCombiner::foldICmpAddConstant(ICmpInst &Cmp,
   // X+C >u C2 -> (X & ~C2) != C
   //   iff C & C2 == 0
   //       C2+1 is a power of 2
-  if (Cmp.getPredicate() == ICmpInst::ICMP_UGT && (*C + 1).isPowerOf2() &&
+  if (!AvoidBv && Cmp.getPredicate() == ICmpInst::ICMP_UGT && (*C + 1).isPowerOf2() &&
       (*C2 & *C) == 0)
     return new ICmpInst(ICmpInst::ICMP_NE, Builder->CreateAnd(X, ~(*C)),
                         ConstantExpr::getNeg(cast<Constant>(Y)));
@@ -2984,6 +2984,7 @@ Instruction *InstCombiner::foldICmpBinOp(ICmpInst &I) {
         // a * Cst icmp eq/ne b * Cst --> a & Mask icmp b & Mask
         // Mask = -1 >> count-trailing-zeros(Cst).
         if (!CI->isZero() && !CI->isOne()) {
+	  if (AvoidBv) return nullptr;
           const APInt &AP = CI->getValue();
           ConstantInt *Mask = ConstantInt::get(
               I.getContext(),
@@ -4230,16 +4231,19 @@ Instruction *InstCombiner::visitICmpInst(ICmpInst &I) {
     switch (I.getPredicate()) {
     default: llvm_unreachable("Invalid icmp instruction!");
     case ICmpInst::ICMP_EQ: {                // icmp eq i1 A, B -> ~(A^B)
+      if (AvoidBv) return nullptr;
       Value *Xor = Builder->CreateXor(Op0, Op1, I.getName() + "tmp");
       return BinaryOperator::CreateNot(Xor);
     }
     case ICmpInst::ICMP_NE:                  // icmp ne i1 A, B -> A^B
+      if (AvoidBv) return nullptr;
       return BinaryOperator::CreateXor(Op0, Op1);
 
     case ICmpInst::ICMP_UGT:
       std::swap(Op0, Op1);                   // Change icmp ugt -> icmp ult
       LLVM_FALLTHROUGH;
     case ICmpInst::ICMP_ULT:{                // icmp ult i1 A, B -> ~A & B
+      if (AvoidBv) return nullptr;
       Value *Not = Builder->CreateNot(Op0, I.getName() + "tmp");
       return BinaryOperator::CreateAnd(Not, Op1);
     }
@@ -4247,6 +4251,7 @@ Instruction *InstCombiner::visitICmpInst(ICmpInst &I) {
       std::swap(Op0, Op1);                   // Change icmp sgt -> icmp slt
       LLVM_FALLTHROUGH;
     case ICmpInst::ICMP_SLT: {               // icmp slt i1 A, B -> A & ~B
+      if (AvoidBv) return nullptr;
       Value *Not = Builder->CreateNot(Op1, I.getName() + "tmp");
       return BinaryOperator::CreateAnd(Not, Op0);
     }
@@ -4254,6 +4259,7 @@ Instruction *InstCombiner::visitICmpInst(ICmpInst &I) {
       std::swap(Op0, Op1);                   // Change icmp uge -> icmp ule
       LLVM_FALLTHROUGH;
     case ICmpInst::ICMP_ULE: {               // icmp ule i1 A, B -> ~A | B
+      if (AvoidBv) return nullptr;
       Value *Not = Builder->CreateNot(Op0, I.getName() + "tmp");
       return BinaryOperator::CreateOr(Not, Op1);
     }
@@ -4261,6 +4267,7 @@ Instruction *InstCombiner::visitICmpInst(ICmpInst &I) {
       std::swap(Op0, Op1);                   // Change icmp sge -> icmp sle
       LLVM_FALLTHROUGH;
     case ICmpInst::ICMP_SLE: {               // icmp sle i1 A, B -> A | ~B
+      if (AvoidBv) return nullptr;
       Value *Not = Builder->CreateNot(Op1, I.getName() + "tmp");
       return BinaryOperator::CreateOr(Not, Op0);
     }
