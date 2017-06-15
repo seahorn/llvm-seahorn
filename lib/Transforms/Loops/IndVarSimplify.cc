@@ -88,7 +88,9 @@ static cl::opt<bool> UsePostIncrementRanges(
 
 namespace {
 struct RewritePhi;
+}
 
+namespace {
 class IndVarSimplify {
   LoopInfo *LI;
   ScalarEvolution *SE;
@@ -2496,7 +2498,7 @@ PreservedAnalyses IndVarSimplifyPass::run(Loop &L, LoopAnalysisManager &AM,
   return getLoopPassPreservedAnalyses();
 }
 
-namespace {
+namespace  {
 struct IndVarSimplifyLegacyPass : public LoopPass {
   static char ID; // Pass identification, replacement for typeid
   IndVarSimplifyLegacyPass() : LoopPass(ID) {
@@ -2525,7 +2527,7 @@ struct IndVarSimplifyLegacyPass : public LoopPass {
     getLoopAnalysisUsage(AU);
   }
 };
-}
+} // end of namespace
 
 char IndVarSimplifyLegacyPass::ID = 0;
 INITIALIZE_PASS_BEGIN(IndVarSimplifyLegacyPass, "indvars",
@@ -2537,3 +2539,5 @@ INITIALIZE_PASS_END(IndVarSimplifyLegacyPass, "indvars",
 Pass *llvm::createIndVarSimplifyPass() {
   return new IndVarSimplifyLegacyPass();
 }
+
+

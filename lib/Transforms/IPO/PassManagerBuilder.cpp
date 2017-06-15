@@ -282,7 +282,7 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
   MPM.add(createLoopUnswitchPass(SizeLevel || OptLevel < 3));
   MPM.add(llvm_seahorn::createInstructionCombiningPass());
   if (EnableIndVar)
-    MPM.add(llvm::seahorn::createIndVarSimplifyPass());        // Canonicalize indvars
+    MPM.add(llvm_seahorn::createIndVarSimplifyPass());        // Canonicalize indvars
   if (EnableLoopIdiom)
     MPM.add(createLoopIdiomPass());             // Recognize idioms like memset.
   MPM.add(createLoopDeletionPass());          // Delete dead loops
@@ -413,7 +413,7 @@ void PassManagerBuilder::populateModulePassManager(PassManagerBase &MPM) {
     MPM.add(createLoopUnrollPass());    // Unroll small loops
     
     // LoopUnroll may generate some redundancy
-    MPM.add(llvm_seahorn::createInstructionCombingingPass());
+    MPM.add(llvm_seahorn::createInstructionCombiningPass());
     
     // might need check of loop prologue for invariants
     MPM.add(createLICMPass());
