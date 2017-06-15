@@ -28,8 +28,8 @@ class LLVM_LIBRARY_VISIBILITY InstCombineWorklist {
   SmallVector<Instruction*, 256> Worklist;
   DenseMap<Instruction*, unsigned> WorklistMap;
 
-  void operator=(const InstCombineWorklist&RHS) LLVM_DELETED_FUNCTION;
-  InstCombineWorklist(const InstCombineWorklist&) LLVM_DELETED_FUNCTION;
+  void operator=(const InstCombineWorklist&RHS);
+  InstCombineWorklist(const InstCombineWorklist&);
 public:
   InstCombineWorklist() {}
 
@@ -54,8 +54,7 @@ public:
   /// has no duplicates.
   void AddInitialGroup(Instruction *const *List, unsigned NumEntries) {
     assert(Worklist.empty() && "Worklist must be empty to add initial group");
-    Worklist.reserve(NumEntries+16);
-    WorklistMap.resize(NumEntries);
+    Worklist.reserve(NumEntries);
     DEBUG(dbgs() << "IC: ADDING: " << NumEntries << " instrs to worklist\n");
     for (unsigned Idx = 0; NumEntries; --NumEntries) {
       Instruction *I = List[NumEntries-1];

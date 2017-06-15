@@ -1,17 +1,24 @@
-set(LLVM_LINK_COMPONENTS
+# Taking out the "IPA"
+llvm_map_components_to_libnames(LLVM_LINK_COMPONENTS
   ${LLVM_TARGETS_TO_BUILD}
   Analysis
+  BitReader
   BitWriter
   CodeGen
   Core
-  IPA
+  Coroutines
+  Demangle
+  ExecutionEngine
   IPO
   IRReader
   InstCombine
   Instrumentation
+  Linker
   MC
   ObjCARCOpts
+  Passes
   ScalarOpts
+  SelectionDAG
   Support
   Target
   TransformUtils
@@ -21,17 +28,17 @@ set(LLVM_LINK_COMPONENTS
 # Support plugins.
 set(LLVM_NO_DEAD_STRIP 1)
 
-add_llvm_executable(seaopt
+add_executable(seaopt
   AnalysisWrappers.cpp
   BreakpointPrinter.cpp
   GraphPrinters.cpp
   NewPMDriver.cpp
-  Passes.cpp
+  PassBuilder.cpp
   PassPrinters.cpp
   PrintSCC.cpp
   opt.cpp
   )
-target_link_libraries (seaopt SeaLlvmIpo SeaInstCombine SeaInstNondet SeaLoops)
+target_link_libraries (seaopt SeaLlvmIpo SeaInstCombine SeaInstNondet SeaLoops ${LLVM_LINK_COMPONENTS})
 
 set_target_properties(seaopt PROPERTIES ENABLE_EXPORTS 1)
 install(TARGETS seaopt RUNTIME DESTINATION bin)
