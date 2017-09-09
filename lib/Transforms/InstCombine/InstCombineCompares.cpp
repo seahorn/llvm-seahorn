@@ -3163,7 +3163,8 @@ Instruction *InstCombiner::visitICmpInst(ICmpInst &I) {
 
     // Turn a signed comparison into an unsigned one if both operands
     // are known to have the same sign.
-    if (I.isSigned() &&
+    if (!AvoidUnsignedICmp &&
+	I.isSigned() &&
         ((Op0KnownZero.isNegative() && Op1KnownZero.isNegative()) ||
          (Op0KnownOne.isNegative() && Op1KnownOne.isNegative())))
       return new ICmpInst(I.getUnsignedPredicate(), Op0, Op1);
