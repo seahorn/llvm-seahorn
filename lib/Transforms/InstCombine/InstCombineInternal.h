@@ -185,7 +185,10 @@ private:
   bool AvoidBv; 
   // Avoid transforming from signed comparisons to unsigned ones
   bool AvoidUnsignedICmp;
-  
+  // Avoid generating IntToPtr instructions.
+  // /Accessible with IC.seaAvoidIntToPtr().
+  bool AvoidIntToPtr;
+
   AliasAnalysis *AA;
 
   // Required analyses.
@@ -207,7 +210,7 @@ public:
                AssumptionCache *AC, TargetLibraryInfo *TLI,
                DominatorTree *DT, const DataLayout &DL, LoopInfo *LI)
     : Worklist(Worklist), Builder(Builder), MinimizeSize(MinimizeSize),
-    AvoidBv(true), AvoidUnsignedICmp(true),
+    AvoidBv(true), AvoidUnsignedICmp(true), AvoidIntToPtr(true),
     AA(AA), AC(AC), TLI(TLI), DT(DT), DL(DL), LI(LI), MadeIRChange(false) {}
 
   /// \brief Run the combiner over the entire worklist until it is empty.
@@ -504,6 +507,8 @@ public:
                                                const Instruction *CxtI) {
     return llvm::computeOverflowForUnsignedAdd(LHS, RHS, DL, AC, CxtI, DT);
   }
+
+  bool seaAvoidIntToPtr() const { return AvoidIntToPtr; }
 
 private:
   /// \brief Performs a few simplifications for operators which are associative

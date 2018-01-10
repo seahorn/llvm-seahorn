@@ -471,7 +471,7 @@ static Instruction *combineLoadToOperationType(InstCombiner &IC, LoadInst &LI) {
   // integers instead of any other type. We only do this when the loaded type
   // is sized and has a size exactly the same as its store size and the store
   // size is a legal integer type.
-  if (!Ty->isIntegerTy() && Ty->isSized() &&
+  if (!IC.seaAvoidIntToPtr() && !Ty->isIntegerTy() && Ty->isSized() &&
       DL.isLegalInteger(DL.getTypeStoreSizeInBits(Ty)) &&
       DL.getTypeStoreSizeInBits(Ty) == DL.getTypeSizeInBits(Ty)) {
     if (std::all_of(LI.user_begin(), LI.user_end(), [&LI](User *U) {
