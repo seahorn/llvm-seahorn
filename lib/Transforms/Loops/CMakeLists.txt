@@ -1,4 +1,5 @@
 add_llvm_library(SeaLoops
   IndVarSimplify.cc
-  FakeLatchExit
+  FakeLatchExit.cc
+  SeaSCEVUtils.cc
 )

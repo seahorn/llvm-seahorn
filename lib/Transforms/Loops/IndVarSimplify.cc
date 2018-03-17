@@ -53,6 +53,9 @@
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 #include "llvm/Transforms/Utils/SimplifyIndVar.h"
+
+#include "llvm_seahorn/Loops/SeaSCEVUtils.h"
+
 using namespace llvm;
 
 #define DEBUG_TYPE "indvars"
@@ -625,6 +628,15 @@ void SeaIndVarSimplify::rewriteLoopExitValues(Loop *L, SCEVExpander &Rewriter) {
         if (!SE->isLoopInvariant(ExitValue, L) ||
             !isSafeToExpand(ExitValue, *SE))
           continue;
+
+        DEBUG(dbgs() << "[sea-indvars] Exit value:\t");
+        DEBUG(ExitValue->dump());
+
+        if (seaSCEVContainsMul(ExitValue)) {
+          DEBUG(dbgs() << "[Sea-IndVarSimplify] Scev: " << ExitValue << "\n"
+                       << "contains multiplication, overriding bailing-out!\n");
+          continue;
+        }
 
         // Computing the value outside of the loop brings no benefit if :
         //  - it is definitely used inside the loop in a way which can not be
