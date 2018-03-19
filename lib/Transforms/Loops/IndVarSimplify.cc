@@ -632,6 +632,10 @@ void SeaIndVarSimplify::rewriteLoopExitValues(Loop *L, SCEVExpander &Rewriter) {
         DEBUG(dbgs() << "[sea-indvars] Exit value:\t");
         DEBUG(ExitValue->dump());
 
+        // Note that this might not catch all cases with multi-level AddRecExpr
+        // in rare cases. SCEV expander tried to reuse as much existing
+        // instructions as possible, so this is difficult to check against and
+        // happens rarely in practice.
         if (seaSCEVContainsMul(ExitValue)) {
           DEBUG(dbgs() << "[Sea-IndVarSimplify] Scev: " << ExitValue << "\n"
                        << "contains multiplication, overriding bailing-out!\n");
