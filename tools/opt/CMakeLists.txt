@@ -4,6 +4,7 @@ set(LLVM_LINK_COMPONENTS
   BitWriter
   CodeGen
   Core
+  Coroutines
   IPO
   IRReader
   InstCombine
@@ -28,7 +29,6 @@ add_llvm_executable(seaopt
   NewPMDriver.cpp
   PassPrinters.cpp
   PrintSCC.cpp
-  Passes.cpp
   opt.cpp
   )
 target_link_libraries (seaopt SeaLlvmIpo SeaInstCombine SeaInstNondet SeaLoops)

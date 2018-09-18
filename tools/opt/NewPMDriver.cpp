@@ -44,6 +44,7 @@ bool llvm::runPassPipeline(StringRef Arg0, LLVMContext &Context, Module &M,
                            bool ShouldPreserveBitcodeUseListOrder) {
   PassBuilder PB(TM);
 
+  LoopAnalysisManager LAM(DebugPM);
   FunctionAnalysisManager FAM(DebugPM);
   CGSCCAnalysisManager CGAM(DebugPM);
   ModuleAnalysisManager MAM(DebugPM);
@@ -52,14 +53,8 @@ bool llvm::runPassPipeline(StringRef Arg0, LLVMContext &Context, Module &M,
   PB.registerModuleAnalyses(MAM);
   PB.registerCGSCCAnalyses(CGAM);
   PB.registerFunctionAnalyses(FAM);
-
-  // Cross register the analysis managers through their proxies.
-  MAM.registerPass(FunctionAnalysisManagerModuleProxy(FAM));
-  MAM.registerPass(CGSCCAnalysisManagerModuleProxy(CGAM));
-  CGAM.registerPass(FunctionAnalysisManagerCGSCCProxy(FAM));
-  CGAM.registerPass(ModuleAnalysisManagerCGSCCProxy(MAM));
-  FAM.registerPass(CGSCCAnalysisManagerFunctionProxy(CGAM));
-  FAM.registerPass(ModuleAnalysisManagerFunctionProxy(MAM));
+  PB.registerLoopAnalyses(LAM);
+  PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
 
   ModulePassManager MPM(DebugPM);
   if (VK > VK_NoVerifier)
@@ -92,7 +87,7 @@ bool llvm::runPassPipeline(StringRef Arg0, LLVMContext &Context, Module &M,
   cl::PrintOptionValues();
 
   // Now that we have all of the passes ready, run them.
-  MPM.run(M, &MAM);
+  MPM.run(M, MAM);
 
   // Declare success.
   if (OK != OK_NoOutput)

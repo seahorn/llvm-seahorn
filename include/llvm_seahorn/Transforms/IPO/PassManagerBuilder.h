@@ -20,7 +20,7 @@
 
 namespace llvm {
 
-  class FunctionInfoIndex;
+  class ModuleSummaryIndex;  
   class Pass;
   class TargetLibraryInfoImpl;
   class TargetMachine;
@@ -124,8 +124,15 @@ public:
   /// added to the per-module passes.
   Pass *Inliner;
 
-  /// The function summary index to use for function importing.
-  const FunctionInfoIndex *FunctionIndex;
+  /// The module summary index to use for exporting information from the
+  /// regular LTO phase, for example for the CFI and devirtualization type
+  /// tests.
+  ModuleSummaryIndex *ExportSummary = nullptr;
+
+  /// The module summary index to use for importing information to the
+  /// thin LTO backends, for example for the CFI and devirtualization type
+  /// tests.
+  const ModuleSummaryIndex *ImportSummary = nullptr;
 
   bool DisableTailCalls;
   bool DisableUnitAtATime;
@@ -134,6 +141,7 @@ public:
   bool SLPVectorize;
   bool LoopVectorize;
   bool RerollLoops;
+  bool NewGVN;
   bool LoadCombine;
   bool DisableGVNLoadPRE;
   bool VerifyInput;

@@ -221,9 +221,9 @@ static void AddOptimizationPasses(legacy::PassManagerBase &MPM,
   if (DisableInline) {
     // No inlining pass
   } else if (OptLevel > 1) {
-    Builder.Inliner = createFunctionInliningPass(OptLevel, SizeLevel);
+    Builder.Inliner = createFunctionInliningPass(OptLevel, SizeLevel, false);
   } else {
-    Builder.Inliner = createAlwaysInlinerPass();
+    Builder.Inliner = createAlwaysInlinerLegacyPass();
   }
   Builder.DisableUnitAtATime = !UnitAtATime;
   Builder.DisableUnrollLoops = (DisableLoopUnrolling.getNumOccurrences() > 0) ?
@@ -281,10 +281,9 @@ static TargetMachine* GetTargetMachine(Triple TheTriple, StringRef CPUStr,
     return nullptr;
   }
 
-  return TheTarget->createTargetMachine(TheTriple.getTriple(),
-                                        CPUStr, FeaturesStr, Options,
-                                        RelocModel, CMModel,
-                                        GetCodeGenOptLevel());
+  return TheTarget->createTargetMachine(TheTriple.getTriple(), CPUStr,
+					FeaturesStr, Options, getRelocModel(),
+					CMModel, GetCodeGenOptLevel());
 }
 
 #ifdef LINK_POLLY_INTO_TOOLS
@@ -297,14 +296,14 @@ void initializePollyPasses(llvm::PassRegistry &Registry);
 // main for opt
 //
 int main(int argc, char **argv) {
-  sys::PrintStackTraceOnErrorSignal();
+  sys::PrintStackTraceOnErrorSignal(argv[0]);
   llvm::PrettyStackTraceProgram X(argc, argv);
 
   // Enable debug stream buffering.
   EnableDebugBuffering = true;
 
   llvm_shutdown_obj Y;  // Call llvm_shutdown() on exit.
-  LLVMContext &Context = getGlobalContext();
+  static LLVMContext Context;
 
   InitializeAllTargets();
   InitializeAllTargetMCs();
@@ -326,7 +325,7 @@ int main(int argc, char **argv) {
   // supported.
   initializeCodeGenPreparePass(Registry);
   initializeAtomicExpandPass(Registry);
-  initializeRewriteSymbolsPass(Registry);
+  initializeRewriteSymbolsLegacyPassPass(Registry);
   initializeWinEHPreparePass(Registry);
   initializeDwarfEHPreparePass(Registry);
   initializeSjLjEHPreparePass(Registry);
@@ -517,9 +516,7 @@ int main(int argc, char **argv) {
 
     const PassInfo *PassInf = PassList[i];
     Pass *P = nullptr;
-    if (PassInf->getTargetMachineCtor())
-      P = PassInf->getTargetMachineCtor()(TM.get());
-    else if (PassInf->getNormalCtor())
+    if (PassInf->getNormalCtor())
       P = PassInf->getNormalCtor()();
     else
       errs() << argv[0] << ": cannot create pass: "

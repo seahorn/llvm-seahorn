@@ -15,14 +15,15 @@
 #include "llvm_seahorn/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/BasicAliasAnalysis.h"
-#include "llvm/Analysis/CFLAliasAnalysis.h"
+#include "llvm/Analysis/CFLAndersAliasAnalysis.h"
+#include "llvm/Analysis/CFLSteensAliasAnalysis.h"
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/Passes.h"
 #include "llvm/Analysis/ScopedNoAliasAA.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TypeBasedAliasAnalysis.h"
 #include "llvm/IR/DataLayout.h"
-#include "llvm/IR/FunctionInfo.h"
+#include "llvm/IR/ModuleSummaryIndex.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/CommandLine.h"
@@ -30,8 +31,10 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/IPO/ForceFunctionAttrs.h"
+#include "llvm/Transforms/IPO/FunctionAttrs.h"
 #include "llvm/Transforms/IPO/InferFunctionAttrs.h"
 #include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Scalar/GVN.h"
 #include "llvm/Transforms/Vectorize.h"
 #include "llvm_seahorn/Transforms/Scalar.h"
 
@@ -65,10 +68,6 @@ RunSLPVectorization("vectorize-slp", cl::Hidden,
                     cl::desc("Run the SLP vectorization passes"));
 
 static cl::opt<bool>
-RunBBVectorization("vectorize-slp-aggressive", cl::Hidden,
-                    cl::desc("Run the BB vectorization passes"));
-
-static cl::opt<bool>
 UseGVNAfterVectorization("use-gvn-after-vectorization",
   cl::init(false), cl::Hidden,
   cl::desc("Run GVN instead of Early CSE after vectorization passes"));
@@ -85,13 +84,12 @@ static cl::opt<bool>
 RunLoopRerolling("reroll-loops", cl::Hidden,
                  cl::desc("Run the loop rerolling pass"));
 
+static cl::opt<bool> RunNewGVN("enable-newgvn", cl::init(false), cl::Hidden,
+                               cl::desc("Run the NewGVN pass"));
+
 static cl::opt<bool>
 RunFloat2Int("float-to-int", cl::Hidden, cl::init(true),
              cl::desc("Run the float2int (float demotion) pass"));
-
-static cl::opt<bool> RunLoadCombine("combine-loads", cl::init(false),
-                                    cl::Hidden,
-                                    cl::desc("Run the load combining pass"));
 
 static cl::opt<bool>
 RunSLPAfterLoopVectorization("run-slp-after-loop-vectorization",
@@ -99,9 +97,18 @@ RunSLPAfterLoopVectorization("run-slp-after-loop-vectorization",
   cl::desc("Run the SLP vectorizer (and BB vectorizer) after the Loop "
            "vectorizer instead of before"));
 
-static cl::opt<bool> UseCFLAA("use-cfl-aa",
-  cl::init(false), cl::Hidden,
-  cl::desc("Enable the new, experimental CFL alias analysis"));
+// Experimental option to use CFL-AA
+enum class CFLAAType { None, Steensgaard, Andersen, Both };
+static cl::opt<CFLAAType>
+    UseCFLAA("use-cfl-aa", cl::init(CFLAAType::None), cl::Hidden,
+             cl::desc("Enable the new, experimental CFL alias analysis"),
+             cl::values(clEnumValN(CFLAAType::None, "none", "Disable CFL-AA"),
+                        clEnumValN(CFLAAType::Steensgaard, "steens",
+                                   "Enable unification-based CFL-AA"),
+                        clEnumValN(CFLAAType::Andersen, "anders",
+                                   "Enable inclusion-based CFL-AA"),
+                        clEnumValN(CFLAAType::Both, "both",
+                                   "Enable both variants of CFL-AA")));
 
 static cl::opt<bool>
 EnableMLSM("mlsm", cl::init(true), cl::Hidden,
@@ -124,19 +131,19 @@ static cl::opt<bool> EnableLoopLoadElim(
     "enable-loop-load-elim", cl::init(false), cl::Hidden,
     cl::desc("Enable the new, experimental LoopLoadElimination Pass"));
 
+namespace llvm_seahorn {
+  
 PassManagerBuilder::PassManagerBuilder() {
     OptLevel = 2;
     SizeLevel = 0;
     LibraryInfo = nullptr;
     Inliner = nullptr;
-    FunctionIndex = nullptr;
     DisableUnitAtATime = false;
     DisableUnrollLoops = false;
-    BBVectorize = RunBBVectorization;
     SLPVectorize = RunSLPVectorization;
     LoopVectorize = RunLoopVectorization;
     RerollLoops = RunLoopRerolling;
-    LoadCombine = RunLoadCombine;
+    NewGVN = RunNewGVN;    
     DisableGVNLoadPRE = false;
     VerifyInput = false;
     VerifyOutput = false;
@@ -175,11 +182,25 @@ void PassManagerBuilder::addExtensionsToPM(ExtensionPointTy ETy,
 
 void PassManagerBuilder::addInitialAliasAnalysisPasses(
     legacy::PassManagerBase &PM) const {
+
+  switch (UseCFLAA) {
+  case CFLAAType::Steensgaard:
+    PM.add(createCFLSteensAAWrapperPass());
+    break;
+  case CFLAAType::Andersen:
+    PM.add(createCFLAndersAAWrapperPass());
+    break;
+  case CFLAAType::Both:
+    PM.add(createCFLSteensAAWrapperPass());
+    PM.add(createCFLAndersAAWrapperPass());
+    break;
+  default:
+    break;
+  }
+  
   // Add TypeBasedAliasAnalysis before BasicAliasAnalysis so that
   // BasicAliasAnalysis wins if they disagree. This is intended to help
   // support "obvious" type-punning idioms.
-  if (UseCFLAA)
-    PM.add(createCFLAAWrapperPass());
   PM.add(createTypeBasedAAWrapperPass());
   PM.add(createScopedNoAliasAAWrapperPass());
 }
@@ -197,16 +218,12 @@ void PassManagerBuilder::populateFunctionPassManager(
   addInitialAliasAnalysisPasses(FPM);
 
   FPM.add(createCFGSimplificationPass());
-  if (UseNewSROA)
-    FPM.add(createSROAPass());
-  else
-    FPM.add(createScalarReplAggregatesPass());
-
-  if (!EnableNondet)
+  FPM.add(createSROAPass());
+  if (!EnableNondet) {
     // -- this pass might mess things up if there is undefined
     // -- behavior that we want to treat as non-deterministic
     FPM.add(createEarlyCSEPass());
-  
+  }
   FPM.add(createLowerExpectIntrinsicPass());
 }
 
@@ -291,16 +308,13 @@ void PassManagerBuilder::populateModulePassManager(
     Inliner = nullptr;
   }
   if (!DisableUnitAtATime)
-    MPM.add(createPostOrderFunctionAttrsPass());
+    MPM.add(createPostOrderFunctionAttrsLegacyPass());    
   if (OptLevel > 2)
     MPM.add(createArgumentPromotionPass());   // Scalarize uninlined fn args
 
   // Start of function pass.
   // Break up aggregate allocas, using SSAUpdater.
-  if (UseNewSROA)
-    MPM.add(createSROAPass());
-  else
-    MPM.add(createScalarReplAggregatesPass(-1, false));
+  MPM.add(createSROAPass());
 
   if (EnableNondet) {
     // -- Turn undef into nondet (undef are created by SROA when it calls mem2reg)
@@ -346,7 +360,8 @@ void PassManagerBuilder::populateModulePassManager(
   if (OptLevel > 1) {
     if (EnableMLSM)
       MPM.add(createMergedLoadStoreMotionPass()); // Merge ld/st in diamonds
-    MPM.add(createGVNPass(DisableGVNLoadPRE));  // Remove redundancies
+    MPM.add(NewGVN ? createNewGVNPass()
+                   : createGVNPass(DisableGVNLoadPRE)); // Remove redundancies
   }
   
   MPM.add(createMemCpyOptPass());             // Remove memcpy / form memset
@@ -383,28 +398,11 @@ void PassManagerBuilder::populateModulePassManager(
   if (!RunSLPAfterLoopVectorization) {
     if (SLPVectorize)
       MPM.add(createSLPVectorizerPass());   // Vectorize parallel scalar chains.
-
-    if (BBVectorize) {
-      MPM.add(createBBVectorizePass());
-      MPM.add(llvm_seahorn::createInstructionCombiningPass());
-      addExtensionsToPM(EP_Peephole, MPM);
-      if (OptLevel > 1 && UseGVNAfterVectorization)
-        MPM.add(createGVNPass(DisableGVNLoadPRE)); // Remove redundancies
-      else
-        MPM.add(createEarlyCSEPass());      // Catch trivial redundancies
-
-      // BBVectorize may have significantly shortened a loop body; unroll again.
-      if (!DisableUnrollLoops)
-        MPM.add(createLoopUnrollPass());
-    }
   }
-
-  if (LoadCombine)
-    MPM.add(createLoadCombinePass());
 
   MPM.add(createAggressiveDCEPass());         // Delete dead instructions
   MPM.add(createCFGSimplificationPass()); // Merge & remove BBs
-  MPM.add(llvm_seahorn::createInstructionCombiningPass());  // Clean up after everything.  
+  MPM.add(llvm_seahorn::createInstructionCombiningPass());  // Clean up after everything.
   addExtensionsToPM(EP_Peephole, MPM);
 
   // FIXME: This is a HACK! The inliner pass above implicitly creates a CGSCC
@@ -497,20 +495,6 @@ void PassManagerBuilder::populateModulePassManager(
         MPM.add(createEarlyCSEPass());
       }
     }
-
-    if (BBVectorize) {
-      MPM.add(createBBVectorizePass());
-      MPM.add(llvm_seahorn::createInstructionCombiningPass());      
-      addExtensionsToPM(EP_Peephole, MPM);
-      if (OptLevel > 1 && UseGVNAfterVectorization)
-        MPM.add(createGVNPass(DisableGVNLoadPRE)); // Remove redundancies
-      else
-        MPM.add(createEarlyCSEPass());      // Catch trivial redundancies
-
-      // BBVectorize may have significantly shortened a loop body; unroll again.
-      if (!DisableUnrollLoops)
-        MPM.add(createLoopUnrollPass());
-    }
   }
 
   addExtensionsToPM(EP_Peephole, MPM);
@@ -553,11 +537,12 @@ void PassManagerBuilder::populateModulePassManager(
 }
 
 void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
+  // Remove unused virtual tables to improve the quality of code generated by
+  // whole-program devirtualization and bitset lowering.
+  PM.add(createGlobalDCEPass());
+  
   // Provide AliasAnalysis services for optimizations.
   addInitialAliasAnalysisPasses(PM);
-
-  if (FunctionIndex)
-    PM.add(createFunctionImportPass(FunctionIndex));
 
   // Allow forcing function attributes as a debugging and tuning aid.
   PM.add(createForceFunctionAttrsLegacyPass());
@@ -571,7 +556,7 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
   PM.add(createIPSCCPPass());
 
   // Now that we internalized some globals, see if we can hack on them!
-  PM.add(createPostOrderFunctionAttrsPass());
+  PM.add(createPostOrderFunctionAttrsLegacyPass());
   PM.add(createReversePostOrderFunctionAttrsPass());
   PM.add(createGlobalOptimizerPass());
   // Promote any localized global vars.
@@ -620,10 +605,7 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
   PM.add(createJumpThreadingPass());
 
   // Break up allocas
-  if (UseNewSROA)
-    PM.add(createSROAPass());
-  else
-    PM.add(createScalarReplAggregatesPass());
+  PM.add(createSROAPass());
 
   if (EnableNondet) {
     // -- Turn undef into nondet (undef are created by SROA when it calls mem2reg)
@@ -631,13 +613,14 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
   }
   
   // Run a few AA driven optimizations here and now, to cleanup the code.
-  PM.add(createPostOrderFunctionAttrsPass()); // Add nocapture.
+  PM.add(createPostOrderFunctionAttrsLegacyPass()); // Add nocapture.
   PM.add(createGlobalsAAWrapperPass()); // IP alias analysis.
 
   PM.add(createLICMPass());                 // Hoist loop invariants.
   if (EnableMLSM)
     PM.add(createMergedLoadStoreMotionPass()); // Merge ld/st in diamonds.
-  PM.add(createGVNPass(DisableGVNLoadPRE)); // Remove redundancies.
+  PM.add(NewGVN ? createNewGVNPass()
+                : createGVNPass(DisableGVNLoadPRE)); // Remove redundancies.
   PM.add(createMemCpyOptPass());            // Remove dead memcpys.
 
   if (EnableNondet) {
@@ -682,9 +665,6 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
   // alignments.
   PM.add(createAlignmentFromAssumptionsPass());
 
-  if (LoadCombine)
-    PM.add(createLoadCombinePass());
-
   // Cleanup and simplify the code after the scalar optimizations.
   PM.add(llvm_seahorn::createInstructionCombiningPass());
   addExtensionsToPM(EP_Peephole, PM);
@@ -716,9 +696,15 @@ void PassManagerBuilder::populateLTOPassManager(legacy::PassManagerBase &PM) {
   if (VerifyInput)
     PM.add(createVerifierPass());
 
-  if (OptLevel > 1)
+  if (OptLevel != 0)
     addLTOOptimizationPasses(PM);
-
+  else {
+    // The whole-program-devirt pass needs to run at -O0 because only it knows
+    // about the llvm.type.checked.load intrinsic: it needs to both lower the
+    // intrinsic itself and handle it in the summary.
+    PM.add(createWholeProgramDevirtPass(ExportSummary, nullptr));
+  }
+  
   // Create a function that performs CFI checks for cross-DSO calls with targets
   // in the current module.
   PM.add(createCrossDSOCFIPass());
@@ -726,7 +712,7 @@ void PassManagerBuilder::populateLTOPassManager(legacy::PassManagerBase &PM) {
   // Lower bit sets to globals. This pass supports Clang's control flow
   // integrity mechanisms (-fsanitize=cfi*) and needs to run at link time if CFI
   // is enabled. The pass does nothing if CFI is disabled.
-  PM.add(createLowerBitSetsPass());
+  PM.add(createLowerTypeTestsPass(ExportSummary, nullptr));  
 
   if (OptLevel != 0)
     addLateLTOOptimizationPasses(PM);
@@ -824,3 +810,5 @@ void PassManagerBuilder::populateLTOPassManager(legacy::PassManagerBase &PM) {
 
 //   Builder->populateLTOPassManager(*LPM);
 // }
+
+}

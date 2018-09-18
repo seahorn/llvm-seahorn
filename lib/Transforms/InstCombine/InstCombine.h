@@ -15,33 +15,49 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_TRANSFORMS_INSTCOMBINE_INSTCOMBINE_H
-#define LLVM_TRANSFORMS_INSTCOMBINE_INSTCOMBINE_H
+#ifndef LLVM_SEAHORN_TRANSFORMS_INSTCOMBINE_INSTCOMBINE_H
+#define LLVM_SEAHORN_TRANSFORMS_INSTCOMBINE_INSTCOMBINE_H
 
+#include "InstCombineWorklist.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/PassManager.h"
-#include "llvm/Transforms/InstCombine/InstCombineWorklist.h"
+
 
 namespace llvm_seahorn {
 
-using namespace llvm;
-class InstCombinePass {
+class InstCombinePass : public llvm::PassInfoMixin<InstCombinePass> {
   InstCombineWorklist Worklist;
+  bool ExpensiveCombines;
 
 public:
-  static StringRef name() { return "InstCombinePass"; }
+  static llvm::StringRef name() { return "InstCombinePass"; }
 
-  // Explicitly define constructors for MSVC.
-  InstCombinePass() {}
-  InstCombinePass(InstCombinePass &&Arg) : Worklist(std::move(Arg.Worklist)) {}
-  InstCombinePass &operator=(InstCombinePass &&RHS) {
-    Worklist = std::move(RHS.Worklist);
-    return *this;
-  }
+  explicit InstCombinePass(bool ExpensiveCombines = true)
+      : ExpensiveCombines(ExpensiveCombines) {}
 
-  PreservedAnalyses run(Function &F, AnalysisManager<Function> *AM);
+  llvm::PreservedAnalyses run(llvm::Function &F, llvm::FunctionAnalysisManager &AM);
 };
 
+/// \brief The legacy pass manager's instcombine pass.
+///
+/// This is a basic whole-function wrapper around the instcombine utility. It
+/// will try to combine all instructions in the function.
+class SeaInstructionCombiningPass : public llvm::FunctionPass {
+  InstCombineWorklist Worklist;
+  const bool ExpensiveCombines;
+
+public:
+  static char ID; // Pass identification, replacement for typeid
+
+  SeaInstructionCombiningPass(bool ExpensiveCombines = true)
+    : llvm::FunctionPass(ID), ExpensiveCombines(ExpensiveCombines) {
+    //initializeInstructionCombiningPassPass(*PassRegistry::getPassRegistry());
+  }
+
+  void getAnalysisUsage(llvm::AnalysisUsage &AU) const override;
+  bool runOnFunction(llvm::Function &F) override;
+};
+  
 }
 
 #endif

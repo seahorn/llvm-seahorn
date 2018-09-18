@@ -4,7 +4,7 @@
 namespace llvm {class FunctionPass; class Pass;}
 namespace llvm_seahorn
 {
-  llvm::FunctionPass *createInstructionCombiningPass();
+  llvm::FunctionPass *createInstructionCombiningPass(bool ExpensiveCombines = true);
   llvm::Pass* createNondetInitPass ();
   llvm::Pass* createDeadNondetElimPass ();
   llvm::Pass* createIndVarSimplifyPass ();

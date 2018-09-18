@@ -25,7 +25,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm_seahorn/Transforms/Scalar.h"
-#include "llvm/Transforms/Scalar.h"
+#include "llvm_seahorn/Loops/SeaSCEVUtils.h"
+
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
@@ -49,16 +50,15 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 #include "llvm/Transforms/Utils/SimplifyIndVar.h"
 
-#include "llvm_seahorn/Loops/SeaSCEVUtils.h"
-
 using namespace llvm;
 
-#define DEBUG_TYPE "indvars"
+#define DEBUG_TYPE "sea-indvars"
 
 STATISTIC(NumWidened     , "Number of indvars widened");
 STATISTIC(NumReplaced    , "Number of exit values replaced");
@@ -101,7 +101,7 @@ class SeaIndVarSimplify : public LoopPass {
   TargetLibraryInfo         *TLI;
   const TargetTransformInfo *TTI;
 
-  SmallVector<WeakVH, 16> DeadInsts;
+  SmallVector<WeakTrackingVH, 16> DeadInsts;
   bool Changed;
 public:
 
@@ -153,14 +153,14 @@ private:
 
 using namespace llvm_seahorn;
 char SeaIndVarSimplify::ID = 0;
-// INITIALIZE_PASS_BEGIN(IndVarSimplify, "indvars",
+// INITIALIZE_PASS_BEGIN(IndVarSimplify, "sea-indvars",
 //                 "Induction Variable Simplification", false, false)
 // INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 // INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
 // INITIALIZE_PASS_DEPENDENCY(ScalarEvolutionWrapperPass)
 // INITIALIZE_PASS_DEPENDENCY(LoopSimplify)
 // INITIALIZE_PASS_DEPENDENCY(LCSSA)
-// INITIALIZE_PASS_END(IndVarSimplify, "indvars",
+// INITIALIZE_PASS_END(IndVarSimplify, "sea-indvars",
 //                 "Induction Variable Simplification", false, false)
 
 Pass *llvm_seahorn::createIndVarSimplifyPass() {
@@ -273,7 +273,7 @@ static bool ConvertToSInt(const APFloat &APF, int64_t &IntVal) {
   bool isExact = false;
   // See if we can convert this to an int64_t
   uint64_t UIntVal;
-  if (APF.convertToInteger(&UIntVal, 64, true, APFloat::rmTowardZero,
+  if (APF.convertToInteger(makeMutableArrayRef(UIntVal), 64, true, APFloat::rmTowardZero,
                            &isExact) != APFloat::opOK || !isExact)
     return false;
   IntVal = UIntVal;
@@ -524,11 +524,11 @@ struct RewritePhi {
 }
 
 Value *SeaIndVarSimplify::expandSCEVIfNeeded(SCEVExpander &Rewriter, const SCEV *S,
-                                          Loop *L, Instruction *InsertPt,
-                                          Type *ResultTy) {
+					     Loop *L, Instruction *InsertPt,
+					     Type *ResultTy) {
   // Before expanding S into an expensive LLVM expression, see if we can use an
   // already existing value as the expansion for S.
-  if (Value *ExistingValue = Rewriter.findExistingExpansion(S, InsertPt, L))
+  if (Value *ExistingValue = Rewriter.getExactExistingExpansion(S, InsertPt, L))
     if (ExistingValue->getType() == ResultTy)
       return ExistingValue;
 
@@ -889,7 +889,7 @@ class WidenIV {
   PHINode *WidePhi;
   Instruction *WideInc;
   const SCEV *WideIncExpr;
-  SmallVectorImpl<WeakVH> &DeadInsts;
+  SmallVectorImpl<WeakTrackingVH> &DeadInsts;
 
   SmallPtrSet<Instruction*,16> Widened;
   SmallVector<NarrowIVDefUse, 8> NarrowIVUsers;
@@ -897,7 +897,7 @@ class WidenIV {
 public:
   WidenIV(const WideIVInfo &WI, LoopInfo *LInfo,
           ScalarEvolution *SEv, DominatorTree *DTree,
-          SmallVectorImpl<WeakVH> &DI) :
+          SmallVectorImpl<WeakTrackingVH> &DI) :
     OrigPhi(WI.NarrowIV),
     WideType(WI.WidestNativeType),
     IsSigned(WI.IsSigned),
@@ -1944,7 +1944,7 @@ linearFunctionTestReplace(Loop *L,
   // Insert a new icmp_ne or icmp_eq instruction before the branch.
   BranchInst *BI = cast<BranchInst>(L->getExitingBlock()->getTerminator());
   ICmpInst::Predicate P;
-  // JNL: changes here to avoid !=  
+  // SeaHorn: changes here to avoid !=  
   if (L->contains(BI->getSuccessor(0)))
     P = ICmpInst::ICMP_SLT;
   else
@@ -2101,7 +2101,7 @@ void SeaIndVarSimplify::sinkUnusedInvariants(Loop *L) {
 //===----------------------------------------------------------------------===//
 
 bool SeaIndVarSimplify::runOnLoop(Loop *L, LPPassManager &LPM) {
-  if (skipOptnoneFunction(L))
+  if (skipLoop(L))
     return false;
 
   // If LoopSimplify form is not available, stay out of trouble. Some notes:
@@ -2134,7 +2134,7 @@ bool SeaIndVarSimplify::runOnLoop(Loop *L, LPPassManager &LPM) {
   const SCEV *BackedgeTakenCount = SE->getBackedgeTakenCount(L);
 
   // Create a rewriter object which we'll use to transform the code with.
-  SCEVExpander Rewriter(*SE, DL, "indvars");
+  SCEVExpander Rewriter(*SE, DL, "sea-indvars");
 #ifndef NDEBUG
   Rewriter.setDebugType(DEBUG_TYPE);
 #endif

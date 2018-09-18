@@ -7,75 +7,67 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_TRANSFORMS_INSTCOMBINE_INSTCOMBINEWORKLIST_H
-#define LLVM_TRANSFORMS_INSTCOMBINE_INSTCOMBINEWORKLIST_H
+#ifndef LLVM_SEAHORN_TRANSFORMS_INSTCOMBINE_INSTCOMBINEWORKLIST_H
+#define LLVM_SEAHORN_TRANSFORMS_INSTCOMBINE_INSTCOMBINEWORKLIST_H
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
-#define DEBUG_TYPE "instcombine"
+#define DEBUG_TYPE "sea-instcombine"
 
 namespace llvm_seahorn {
-  using namespace llvm;  
-
+  
 /// InstCombineWorklist - This is the worklist management logic for
 /// InstCombine.
 class InstCombineWorklist {
-  SmallVector<Instruction*, 256> Worklist;
-  DenseMap<Instruction*, unsigned> WorklistMap;
+  llvm::SmallVector<llvm::Instruction*, 256> Worklist;
+  llvm::DenseMap<llvm::Instruction*, unsigned> WorklistMap;
 
-  void operator=(const InstCombineWorklist&RHS) = delete;
-  InstCombineWorklist(const InstCombineWorklist&) = delete;
 public:
-  InstCombineWorklist() {}
+  InstCombineWorklist() = default;
 
-  InstCombineWorklist(InstCombineWorklist &&Arg)
-      : Worklist(std::move(Arg.Worklist)),
-        WorklistMap(std::move(Arg.WorklistMap)) {}
-  InstCombineWorklist &operator=(InstCombineWorklist &&RHS) {
-    Worklist = std::move(RHS.Worklist);
-    WorklistMap = std::move(RHS.WorklistMap);
-    return *this;
-  }
+  InstCombineWorklist(InstCombineWorklist &&) = default;
+  InstCombineWorklist &operator=(InstCombineWorklist &&) = default;
 
   bool isEmpty() const { return Worklist.empty(); }
 
   /// Add - Add the specified instruction to the worklist if it isn't already
   /// in it.
-  void Add(Instruction *I) {
+  void Add(llvm::Instruction *I) {
     if (WorklistMap.insert(std::make_pair(I, Worklist.size())).second) {
       DEBUG(dbgs() << "IC: ADD: " << *I << '\n');
       Worklist.push_back(I);
     }
   }
 
-  void AddValue(Value *V) {
-    if (Instruction *I = dyn_cast<Instruction>(V))
+  void AddValue(llvm::Value *V) {
+    if (llvm::Instruction *I = llvm::dyn_cast<llvm::Instruction>(V))
       Add(I);
   }
 
   /// AddInitialGroup - Add the specified batch of stuff in reverse order.
   /// which should only be done when the worklist is empty and when the group
   /// has no duplicates.
-  void AddInitialGroup(ArrayRef<Instruction *> List) {
+  void AddInitialGroup(llvm::ArrayRef<llvm::Instruction *> List) {
     assert(Worklist.empty() && "Worklist must be empty to add initial group");
     Worklist.reserve(List.size()+16);
-    WorklistMap.resize(List.size());
+    WorklistMap.reserve(List.size());
     DEBUG(dbgs() << "IC: ADDING: " << List.size() << " instrs to worklist\n");
     unsigned Idx = 0;
-    for (Instruction *I : reverse(List)) {
+    for (llvm::Instruction *I : reverse(List)) {
       WorklistMap.insert(std::make_pair(I, Idx++));
       Worklist.push_back(I);
     }
   }
 
   // Remove - remove I from the worklist if it exists.
-  void Remove(Instruction *I) {
-    DenseMap<Instruction*, unsigned>::iterator It = WorklistMap.find(I);
+  void Remove(llvm::Instruction *I) {
+    llvm::DenseMap<llvm::Instruction*, unsigned>::iterator It = WorklistMap.find(I);
     if (It == WorklistMap.end()) return; // Not in worklist.
 
     // Don't bother moving everything down, just null out the slot.
@@ -84,8 +76,8 @@ public:
     WorklistMap.erase(It);
   }
 
-  Instruction *RemoveOne() {
-    Instruction *I = Worklist.pop_back_val();
+  llvm::Instruction *RemoveOne() {
+    llvm::Instruction *I = Worklist.pop_back_val();
     WorklistMap.erase(I);
     return I;
   }
@@ -94,9 +86,9 @@ public:
   /// the instruction to the work lists because they might get more simplified
   /// now.
   ///
-  void AddUsersToWorkList(Instruction &I) {
-    for (User *U : I.users())
-      Add(cast<Instruction>(U));
+  void AddUsersToWorkList(llvm::Instruction &I) {
+    for (llvm::User *U : I.users())
+      Add(llvm::cast<llvm::Instruction>(U));
   }
 
 
@@ -110,7 +102,7 @@ public:
   }
 };
 
-} // end namespace llvm.
+} // end namespace llvm_seahorn
 
 #undef DEBUG_TYPE
 

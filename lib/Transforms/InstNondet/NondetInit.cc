@@ -56,7 +56,7 @@ namespace llvm_seahorn
 	  res = m->getOrInsertFunction 
 	    (boost::str 
 	     (boost::format ("verifier.nondet.%d") % m_ndfn.size ()), 
-             type, NULL);
+             type);
 	  
 	  // -- say that f does not access memory will make llvm
 	  // -- assume that all calls to it return the same value
