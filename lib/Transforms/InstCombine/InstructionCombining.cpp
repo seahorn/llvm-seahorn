@@ -81,11 +81,11 @@ STATISTIC(NumFactor   , "Number of factorizations");
 STATISTIC(NumReassoc  , "Number of reassociations");
 
 static cl::opt<bool>
-EnableExpensiveCombines("expensive-combines",
+EnableExpensiveCombines("sea-expensive-combines",
                         cl::desc("Enable expensive instruction combines"));
 
 static cl::opt<unsigned>
-MaxArraySize("instcombine-maxarray-size", cl::init(1024),
+MaxArraySize("sea-instcombine-maxarray-size", cl::init(1024),
              cl::desc("Maximum array size considered when doing a combine"));
 
 Value *llvm_seahorn::InstCombiner::EmitGEPOffset(User *GEP) {

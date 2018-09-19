@@ -90,4 +90,4 @@ namespace {
 
 char CallGraphPrinter::ID = 0;
 static RegisterPass<CallGraphPrinter>
-  P2("print-callgraph", "Print a call graph");
+  P2("sea-print-callgraph", "Print a call graph");

@@ -62,7 +62,7 @@ using namespace PatternMatch;
 STATISTIC(NumSimplified, "Number of library calls simplified");
 
 static cl::opt<unsigned> UnfoldElementAtomicMemcpyMaxElements(
-    "unfold-element-atomic-memcpy-max-elements",
+    "sea-unfold-element-atomic-memcpy-max-elements",
     cl::init(16),
     cl::desc("Maximum number of elements in atomic memcpy the optimizer is "
              "allowed to unfold"));
