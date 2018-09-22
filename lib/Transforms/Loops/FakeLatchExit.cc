@@ -51,7 +51,8 @@ namespace
     {
       AU.addRequired<LoopInfoWrapperPass>();
       AU.addPreserved<LoopInfoWrapperPass>();
-      AU.setPreservesAll ();
+      // This pass does not preserve dominator tree!
+      // AU.setPreservesAll ();
     }
   };
 
