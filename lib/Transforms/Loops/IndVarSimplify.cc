@@ -553,7 +553,7 @@ Value *SeaIndVarSimplify::expandSCEVIfNeeded(SCEVExpander &Rewriter, const SCEV 
 /// constant operands at the beginning of the loop.
 void SeaIndVarSimplify::rewriteLoopExitValues(Loop *L, SCEVExpander &Rewriter) {
   // Check a pre-condition.
-  assert(L->isRecursivelyLCSSAForm(*DT) && "Indvars did not preserve LCSSA!");
+  assert(L->isRecursivelyLCSSAForm(*DT, *LI) && "Indvars did not preserve LCSSA!");
 
   SmallVector<BasicBlock*, 8> ExitBlocks;
   L->getUniqueExitBlocks(ExitBlocks);
@@ -2201,7 +2201,7 @@ bool SeaIndVarSimplify::runOnLoop(Loop *L, LPPassManager &LPM) {
   Changed |= DeleteDeadPHIs(L->getHeader(), TLI);
 
   // Check a post-condition.
-  assert(L->isRecursivelyLCSSAForm(*DT) && "Indvars did not preserve LCSSA!");
+  assert(L->isRecursivelyLCSSAForm(*DT, *LI) && "Indvars did not preserve LCSSA!");
 
   // Verify that LFTR, and any other change have not interfered with SCEV's
   // ability to compute trip count.
