@@ -15,6 +15,7 @@
 #include "BreakpointPrinter.h"
 #include "NewPMDriver.h"
 #include "PassPrinters.h"
+#include "llvm_seahorn/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/CallGraphSCCPass.h"
@@ -50,7 +51,6 @@
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm_seahorn/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include <algorithm>
 #include <memory>
@@ -60,8 +60,8 @@ using namespace opt_tool;
 // The OptimizationList is automatically populated with registered Passes by the
 // PassNameParser.
 //
-static cl::list<const PassInfo*, bool, PassNameParser>
-PassList(cl::desc("Optimizations available:"));
+static cl::list<const PassInfo *, bool, PassNameParser>
+    PassList(cl::desc("Optimizations available:"));
 
 // This flag specifies a textual description of the optimization pass pipeline
 // to run over the module. This flag switches opt to use the new pass manager
@@ -74,112 +74,107 @@ static cl::opt<std::string> PassPipeline(
 
 // Other command line options...
 //
-static cl::opt<std::string>
-InputFilename(cl::Positional, cl::desc("<input bitcode file>"),
-    cl::init("-"), cl::value_desc("filename"));
+static cl::opt<std::string> InputFilename(cl::Positional,
+                                          cl::desc("<input bitcode file>"),
+                                          cl::init("-"),
+                                          cl::value_desc("filename"));
 
-static cl::opt<std::string>
-OutputFilename("o", cl::desc("Override output filename"),
-               cl::value_desc("filename"));
+static cl::opt<std::string> OutputFilename("o",
+                                           cl::desc("Override output filename"),
+                                           cl::value_desc("filename"));
 
-static cl::opt<bool>
-Force("f", cl::desc("Enable binary output on terminals"));
-
-static cl::opt<bool>
-PrintEachXForm("p", cl::desc("Print module after each transformation"));
+static cl::opt<bool> Force("f", cl::desc("Enable binary output on terminals"));
 
 static cl::opt<bool>
-NoOutput("disable-output",
-         cl::desc("Do not write result bitcode file"), cl::Hidden);
+    PrintEachXForm("p", cl::desc("Print module after each transformation"));
+
+static cl::opt<bool> NoOutput("disable-output",
+                              cl::desc("Do not write result bitcode file"),
+                              cl::Hidden);
+
+static cl::opt<bool> OutputAssembly("S",
+                                    cl::desc("Write output as LLVM assembly"));
+
+static cl::opt<bool> NoVerify("disable-verify",
+                              cl::desc("Do not verify result module"),
+                              cl::Hidden);
+
+static cl::opt<bool> VerifyEach("verify-each",
+                                cl::desc("Verify after each transform"));
 
 static cl::opt<bool>
-OutputAssembly("S", cl::desc("Write output as LLVM assembly"));
+    StripDebug("strip-debug",
+               cl::desc("Strip debugger symbol info from translation unit"));
+
+static cl::opt<bool> DisableInline("disable-inlining",
+                                   cl::desc("Do not run the inliner pass"));
 
 static cl::opt<bool>
-NoVerify("disable-verify", cl::desc("Do not verify result module"), cl::Hidden);
+    DisableOptimizations("disable-opt",
+                         cl::desc("Do not run any optimization passes"));
 
 static cl::opt<bool>
-VerifyEach("verify-each", cl::desc("Verify after each transform"));
+    StandardLinkOpts("std-link-opts",
+                     cl::desc("Include the standard link time optimizations"));
 
 static cl::opt<bool>
-StripDebug("strip-debug",
-           cl::desc("Strip debugger symbol info from translation unit"));
+    OptLevelO1("O1", cl::desc("Optimization level 1. Similar to clang -O1"));
 
 static cl::opt<bool>
-DisableInline("disable-inlining", cl::desc("Do not run the inliner pass"));
+    OptLevelO2("O2", cl::desc("Optimization level 2. Similar to clang -O2"));
+
+static cl::opt<bool> OptLevelOs(
+    "Os",
+    cl::desc(
+        "Like -O2 with extra optimizations for size. Similar to clang -Os"));
+
+static cl::opt<bool> OptLevelOz(
+    "Oz",
+    cl::desc("Like -Os but reduces code size further. Similar to clang -Oz"));
 
 static cl::opt<bool>
-DisableOptimizations("disable-opt",
-                     cl::desc("Do not run any optimization passes"));
-
-static cl::opt<bool>
-StandardLinkOpts("std-link-opts",
-                 cl::desc("Include the standard link time optimizations"));
-
-static cl::opt<bool>
-OptLevelO1("O1",
-           cl::desc("Optimization level 1. Similar to clang -O1"));
-
-static cl::opt<bool>
-OptLevelO2("O2",
-           cl::desc("Optimization level 2. Similar to clang -O2"));
-
-static cl::opt<bool>
-OptLevelOs("Os",
-           cl::desc("Like -O2 with extra optimizations for size. Similar to clang -Os"));
-
-static cl::opt<bool>
-OptLevelOz("Oz",
-           cl::desc("Like -Os but reduces code size further. Similar to clang -Oz"));
-
-static cl::opt<bool>
-OptLevelO3("O3",
-           cl::desc("Optimization level 3. Similar to clang -O3"));
-
-static cl::opt<std::string>
-TargetTriple("mtriple", cl::desc("Override target triple for module"));
-
-static cl::opt<bool>
-UnitAtATime("funit-at-a-time",
-            cl::desc("Enable IPO. This corresponds to gcc's -funit-at-a-time"),
-            cl::init(true));
-
-static cl::opt<bool>
-DisableLoopUnrolling("disable-loop-unrolling",
-                     cl::desc("Disable loop unrolling in all relevant passes"),
-                     cl::init(false));
-static cl::opt<bool>
-DisableLoopVectorization("disable-loop-vectorization",
-                     cl::desc("Disable the loop vectorization pass"),
-                     cl::init(false));
-
-static cl::opt<bool>
-DisableSLPVectorization("disable-slp-vectorization",
-                        cl::desc("Disable the slp vectorization pass"),
-                        cl::init(false));
-
-
-static cl::opt<bool>
-DisableSimplifyLibCalls("disable-simplify-libcalls",
-                        cl::desc("Disable simplify-libcalls"));
-
-static cl::opt<bool>
-Quiet("q", cl::desc("Obsolete option"), cl::Hidden);
-
-static cl::alias
-QuietA("quiet", cl::desc("Alias for -q"), cl::aliasopt(Quiet));
-
-static cl::opt<bool>
-AnalyzeOnly("analyze", cl::desc("Only perform analysis, no optimization"));
-
-static cl::opt<bool>
-PrintBreakpoints("print-breakpoints-for-testing",
-                 cl::desc("Print select breakpoints location for testing"));
+    OptLevelO3("O3", cl::desc("Optimization level 3. Similar to clang -O3"));
 
 static cl::opt<std::string>
-DefaultDataLayout("default-data-layout",
-          cl::desc("data layout string to use if not specified by module"),
-          cl::value_desc("layout-string"), cl::init(""));
+    TargetTriple("mtriple", cl::desc("Override target triple for module"));
+
+static cl::opt<bool> UnitAtATime(
+    "funit-at-a-time",
+    cl::desc("Enable IPO. This corresponds to gcc's -funit-at-a-time"),
+    cl::init(true));
+
+static cl::opt<bool> DisableLoopUnrolling(
+    "disable-loop-unrolling",
+    cl::desc("Disable loop unrolling in all relevant passes"), cl::init(false));
+static cl::opt<bool>
+    DisableLoopVectorization("disable-loop-vectorization",
+                             cl::desc("Disable the loop vectorization pass"),
+                             cl::init(false));
+
+static cl::opt<bool>
+    DisableSLPVectorization("disable-slp-vectorization",
+                            cl::desc("Disable the slp vectorization pass"),
+                            cl::init(false));
+
+static cl::opt<bool>
+    DisableSimplifyLibCalls("disable-simplify-libcalls",
+                            cl::desc("Disable simplify-libcalls"));
+
+static cl::opt<bool> Quiet("q", cl::desc("Obsolete option"), cl::Hidden);
+
+static cl::alias QuietA("quiet", cl::desc("Alias for -q"), cl::aliasopt(Quiet));
+
+static cl::opt<bool>
+    AnalyzeOnly("analyze", cl::desc("Only perform analysis, no optimization"));
+
+static cl::opt<bool>
+    PrintBreakpoints("print-breakpoints-for-testing",
+                     cl::desc("Print select breakpoints location for testing"));
+
+static cl::opt<std::string> DefaultDataLayout(
+    "default-data-layout",
+    cl::desc("data layout string to use if not specified by module"),
+    cl::value_desc("layout-string"), cl::init(""));
 
 static cl::opt<bool> PreserveBitcodeUseListOrder(
     "preserve-bc-uselistorder",
@@ -226,8 +221,9 @@ static void AddOptimizationPasses(legacy::PassManagerBase &MPM,
     Builder.Inliner = createAlwaysInlinerLegacyPass();
   }
   Builder.DisableUnitAtATime = !UnitAtATime;
-  Builder.DisableUnrollLoops = (DisableLoopUnrolling.getNumOccurrences() > 0) ?
-                               DisableLoopUnrolling : OptLevel == 0;
+  Builder.DisableUnrollLoops = (DisableLoopUnrolling.getNumOccurrences() > 0)
+                                   ? DisableLoopUnrolling
+                                   : OptLevel == 0;
 
   // This is final, unless there is a #pragma vectorize enable
   if (DisableLoopVectorization)
@@ -270,20 +266,20 @@ static CodeGenOpt::Level GetCodeGenOptLevel() {
 }
 
 // Returns the TargetMachine instance or zero if no triple is provided.
-static TargetMachine* GetTargetMachine(Triple TheTriple, StringRef CPUStr,
+static TargetMachine *GetTargetMachine(Triple TheTriple, StringRef CPUStr,
                                        StringRef FeaturesStr,
                                        const TargetOptions &Options) {
   std::string Error;
-  const Target *TheTarget = TargetRegistry::lookupTarget(MArch, TheTriple,
-                                                         Error);
+  const Target *TheTarget =
+      TargetRegistry::lookupTarget(MArch, TheTriple, Error);
   // Some modules don't specify a triple, and this is okay.
   if (!TheTarget) {
     return nullptr;
   }
 
   return TheTarget->createTargetMachine(TheTriple.getTriple(), CPUStr,
-					FeaturesStr, Options, getRelocModel(),
-					CMModel, GetCodeGenOptLevel());
+                                        FeaturesStr, Options, getRelocModel(),
+                                        CMModel, GetCodeGenOptLevel());
 }
 
 #ifdef LINK_POLLY_INTO_TOOLS
@@ -302,7 +298,7 @@ int main(int argc, char **argv) {
   // Enable debug stream buffering.
   EnableDebugBuffering = true;
 
-  llvm_shutdown_obj Y;  // Call llvm_shutdown() on exit.
+  llvm_shutdown_obj Y; // Call llvm_shutdown() on exit.
   static LLVMContext Context;
 
   InitializeAllTargets();
@@ -331,11 +327,11 @@ int main(int argc, char **argv) {
   initializeSjLjEHPreparePass(Registry);
 
 #ifdef LINK_POLLY_INTO_TOOLS
-  polly::initializePollyPasses(Registry);
+  // polly::initializePollyPasses(Registry);
 #endif
 
-  cl::ParseCommandLineOptions(argc, argv,
-    "llvm .bc -> .bc modular optimizer and analysis printer\n");
+  cl::ParseCommandLineOptions(
+      argc, argv, "llvm .bc -> .bc modular optimizer and analysis printer\n");
 
   if (AnalyzeOnly && NoOutput) {
     errs() << argv[0] << ": analyze mode conflicts with no-output mode.\n";
@@ -519,8 +515,8 @@ int main(int argc, char **argv) {
     if (PassInf->getNormalCtor())
       P = PassInf->getNormalCtor()();
     else
-      errs() << argv[0] << ": cannot create pass: "
-             << PassInf->getPassName() << "\n";
+      errs() << argv[0] << ": cannot create pass: " << PassInf->getPassName()
+             << "\n";
     if (P) {
       PassKind Kind = P->getPassKind();
       addPass(Passes, P);
@@ -614,10 +610,10 @@ int main(int argc, char **argv) {
   // If requested, run all passes again with the same pass manager to catch
   // bugs caused by persistent state in the passes
   if (RunTwice) {
-      std::unique_ptr<Module> M2(CloneModule(M.get()));
-      Passes.run(*M2);
-      CompileTwiceBuffer = Buffer;
-      Buffer.clear();
+    std::unique_ptr<Module> M2(CloneModule(M.get()));
+    Passes.run(*M2);
+    CompileTwiceBuffer = Buffer;
+    Buffer.clear();
   }
 
   // Now that we have all of the passes ready, run them.
@@ -629,10 +625,11 @@ int main(int argc, char **argv) {
     if (Buffer.size() != CompileTwiceBuffer.size() ||
         (memcmp(Buffer.data(), CompileTwiceBuffer.data(), Buffer.size()) !=
          0)) {
-      errs() << "Running the pass manager twice changed the output.\n"
-                "Writing the result of the second run to the specified output.\n"
-                "To generate the one-run comparison binary, just run without\n"
-                "the compile-twice option\n";
+      errs()
+          << "Running the pass manager twice changed the output.\n"
+             "Writing the result of the second run to the specified output.\n"
+             "To generate the one-run comparison binary, just run without\n"
+             "the compile-twice option\n";
       Out->os() << BOS->str();
       Out->keep();
       return 1;
