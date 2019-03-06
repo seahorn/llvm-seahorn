@@ -951,13 +951,14 @@ static Value *checkForNegativeOperand(BinaryOperator &I,
 }
 
 static Instruction *foldAddWithConstant(BinaryOperator &Add,
-                                        llvm_seahorn::InstCombiner::BuilderTy &Builder) {
+                                        llvm_seahorn::InstCombiner::BuilderTy &Builder,
+                                        bool AvoidBv = false) {
   Value *Op0 = Add.getOperand(0), *Op1 = Add.getOperand(1);
   const APInt *C;
   if (!match(Op1, m_APInt(C)))
     return nullptr;
 
-  if (C->isSignMask()) {
+  if (!AvoidBv && C->isSignMask()) {
     // If wrapping is not allowed, then the addition must set the sign bit:
     // X + (signmask) --> X | signmask
     if (Add.hasNoSignedWrap() || Add.hasNoUnsignedWrap())
@@ -1027,7 +1028,7 @@ Instruction *llvm_seahorn::InstCombiner::visitAdd(BinaryOperator &I) {
   if (Value *V = SimplifyUsingDistributiveLaws(I))
     return replaceInstUsesWith(I, V);
 
-  if (Instruction *X = foldAddWithConstant(I, Builder))
+  if (Instruction *X = foldAddWithConstant(I, Builder, AvoidBv))
     return X;
 
   // FIXME: This should be moved into the above helper function to allow these
@@ -1582,7 +1583,7 @@ Instruction *llvm_seahorn::InstCombiner::visitSub(BinaryOperator &I) {
 
     // Turn this into a xor if LHS is 2^n-1 and the remaining bits are known
     // zero.
-    if (Op0C->isMask()) {
+    if (!AvoidBv && Op0C->isMask()) {
       KnownBits RHSKnown = computeKnownBits(Op1, 0, &I);
       if ((*Op0C | RHSKnown.Zero).isAllOnesValue())
         return BinaryOperator::CreateXor(Op1, Op0);
