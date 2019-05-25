@@ -84,6 +84,11 @@ static cl::opt<bool>
 RunLoopRerolling("reroll-loops", cl::Hidden,
                  cl::desc("Run the loop rerolling pass"));
 
+static cl::opt<bool>
+RunLoopRotation("rotate-loops", cl::Hidden,
+		cl::init(true),
+		cl::desc("Run the loop rotation pass"));
+
 static cl::opt<bool> RunNewGVN("enable-newgvn", cl::init(false), cl::Hidden,
                                cl::desc("Run the NewGVN pass"));
 
@@ -143,6 +148,7 @@ PassManagerBuilder::PassManagerBuilder() {
     SLPVectorize = RunSLPVectorization;
     LoopVectorize = RunLoopVectorization;
     RerollLoops = RunLoopRerolling;
+    RotateLoops = RunLoopRotation;
     NewGVN = RunNewGVN;    
     DisableGVNLoadPRE = false;
     VerifyInput = false;
@@ -336,8 +342,10 @@ void PassManagerBuilder::populateModulePassManager(
   MPM.add(createTailCallEliminationPass()); // Eliminate tail calls
   MPM.add(createCFGSimplificationPass());     // Merge & remove BBs
   MPM.add(createReassociatePass());           // Reassociate expressions
-  // Rotate Loop - disable header duplication at -Oz
-  MPM.add(createLoopRotatePass(SizeLevel == 2 ? 0 : -1));
+  if (RotateLoops) {
+    // Rotate Loop - disable header duplication at -Oz
+    MPM.add(createLoopRotatePass(SizeLevel == 2 ? 0 : -1));
+  }
   MPM.add(createLICMPass());                  // Hoist loop invariants
   MPM.add(createLoopUnswitchPass(SizeLevel || OptLevel < 3));
   MPM.add(createCFGSimplificationPass());
@@ -449,10 +457,12 @@ void PassManagerBuilder::populateModulePassManager(
 
   addExtensionsToPM(EP_VectorizerStart, MPM);
 
-  // Re-rotate loops in all our loop nests. These may have fallout out of
-  // rotated form due to GVN or other transformations, and the vectorizer relies
-  // on the rotated form. Disable header duplication at -Oz.
-  MPM.add(createLoopRotatePass(SizeLevel == 2 ? 0 : -1));
+  if (RotateLoops) {
+    // Re-rotate loops in all our loop nests. These may have fallout out of
+    // rotated form due to GVN or other transformations, and the vectorizer relies
+    // on the rotated form. Disable header duplication at -Oz.
+    MPM.add(createLoopRotatePass(SizeLevel == 2 ? 0 : -1));
+  }
 
   // Distribute loops to allow partial vectorization.  I.e. isolate dependences
   // into separate loop that would otherwise inhibit vectorization.

@@ -155,6 +155,10 @@ static cl::opt<bool>
     DisableSLPVectorization("disable-slp-vectorization",
                             cl::desc("Disable the slp vectorization pass"),
                             cl::init(false));
+static cl::opt<bool>
+    DisableLoopRotate("disable-loop-rotate",
+                            cl::desc("Disable the loop rotate pass"),
+                            cl::init(false));
 
 static cl::opt<bool>
     DisableSimplifyLibCalls("disable-simplify-libcalls",
@@ -236,6 +240,8 @@ static void AddOptimizationPasses(legacy::PassManagerBase &MPM,
   Builder.SLPVectorize =
       DisableSLPVectorization ? false : OptLevel > 1 && SizeLevel < 2;
 
+  Builder.RotateLoops = DisableLoopRotate ? false : OptLevel >= 1;
+    
   Builder.populateFunctionPassManager(FPM);
   Builder.populateModulePassManager(MPM);
 }
