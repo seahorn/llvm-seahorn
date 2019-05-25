@@ -459,7 +459,9 @@ void PassManagerBuilder::populateModulePassManager(
   if (EnableLoopDistribute)
     MPM.add(createLoopDistributePass());
 
-  MPM.add(createLoopVectorizePass(DisableUnrollLoops, LoopVectorize));
+  if (LoopVectorize) {
+    MPM.add(createLoopVectorizePass(DisableUnrollLoops, LoopVectorize));
+  }
 
   // Eliminate loads by forwarding stores from the previous iteration to loads
   // of the current iteration.
@@ -645,7 +647,9 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
   if (EnableLoopInterchange)
     PM.add(createLoopInterchangePass());
 
-  PM.add(createLoopVectorizePass(true, LoopVectorize));
+  if (LoopVectorize) {
+    PM.add(createLoopVectorizePass(true, LoopVectorize));
+  }
 
   // Now that we've optimized loops (in particular loop induction variables),
   // we may have exposed more scalar opportunities. Run parts of the scalar
