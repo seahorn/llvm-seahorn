@@ -627,7 +627,7 @@ static Instruction *combineLoadToOperationType(llvm_seahorn::InstCombiner &IC, L
   // We can do this for BitCastInsts as well as casts from and to pointer types,
   // as long as those are noops (i.e., the source or dest type have the same
   // bitwidth as the target's pointers).
-  if (LI.hasOneUse())
+  if (!IC.seaAvoidIntToPtr() && LI.hasOneUse())
     if (auto* CI = dyn_cast<CastInst>(LI.user_back()))
       if (CI->isNoopCast(DL))
         if (!LI.isAtomic() || isSupportedAtomicType(CI->getDestTy())) {
