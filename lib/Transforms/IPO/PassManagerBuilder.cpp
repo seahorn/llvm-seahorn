@@ -60,44 +60,44 @@ EnableNondet("enable-nondet-init", cl::Hidden,
              cl::init (true));
 
 static cl::opt<bool>
-RunLoopVectorization("vectorize-loops", cl::Hidden,
+RunLoopVectorization("sea-vectorize-loops", cl::Hidden,
                      cl::desc("Run the Loop vectorization passes"));
 
 static cl::opt<bool>
-RunSLPVectorization("vectorize-slp", cl::Hidden,
+RunSLPVectorization("sea-vectorize-slp", cl::Hidden,
                     cl::desc("Run the SLP vectorization passes"));
 
 static cl::opt<bool>
-UseGVNAfterVectorization("use-gvn-after-vectorization",
+UseGVNAfterVectorization("sea-use-gvn-after-vectorization",
   cl::init(false), cl::Hidden,
   cl::desc("Run GVN instead of Early CSE after vectorization passes"));
 
 static cl::opt<bool> ExtraVectorizerPasses(
-    "extra-vectorizer-passes", cl::init(false), cl::Hidden,
+    "sea-extra-vectorizer-passes", cl::init(false), cl::Hidden,
     cl::desc("Run cleanup optimization passes after vectorization."));
 
-static cl::opt<bool> UseNewSROA("use-new-sroa",
+static cl::opt<bool> UseNewSROA("sea-use-new-sroa",
   cl::init(true), cl::Hidden,
   cl::desc("Enable the new, experimental SROA pass"));
 
 static cl::opt<bool>
-RunLoopRerolling("reroll-loops", cl::Hidden,
+RunLoopRerolling("sea-reroll-loops", cl::Hidden,
                  cl::desc("Run the loop rerolling pass"));
 
 static cl::opt<bool>
-RunLoopRotation("rotate-loops", cl::Hidden,
+RunLoopRotation("sea-rotate-loops", cl::Hidden,
 		cl::init(true),
 		cl::desc("Run the loop rotation pass"));
 
-static cl::opt<bool> RunNewGVN("enable-newgvn", cl::init(false), cl::Hidden,
+static cl::opt<bool> RunNewGVN("sea-enable-newgvn", cl::init(false), cl::Hidden,
                                cl::desc("Run the NewGVN pass"));
 
 static cl::opt<bool>
-RunFloat2Int("float-to-int", cl::Hidden, cl::init(true),
+RunFloat2Int("sea-float-to-int", cl::Hidden, cl::init(true),
              cl::desc("Run the float2int (float demotion) pass"));
 
 static cl::opt<bool>
-RunSLPAfterLoopVectorization("run-slp-after-loop-vectorization",
+RunSLPAfterLoopVectorization("sea-run-slp-after-loop-vectorization",
   cl::init(true), cl::Hidden,
   cl::desc("Run the SLP vectorizer (and BB vectorizer) after the Loop "
            "vectorizer instead of before"));
@@ -105,7 +105,7 @@ RunSLPAfterLoopVectorization("run-slp-after-loop-vectorization",
 // Experimental option to use CFL-AA
 enum class CFLAAType { None, Steensgaard, Andersen, Both };
 static cl::opt<CFLAAType>
-    UseCFLAA("use-cfl-aa", cl::init(CFLAAType::None), cl::Hidden,
+    UseCFLAA("sea-use-cfl-aa", cl::init(CFLAAType::None), cl::Hidden,
              cl::desc("Enable the new, experimental CFL alias analysis"),
              cl::values(clEnumValN(CFLAAType::None, "none", "Disable CFL-AA"),
                         clEnumValN(CFLAAType::Steensgaard, "steens",
@@ -116,7 +116,7 @@ static cl::opt<CFLAAType>
                                    "Enable both variants of CFL-AA")));
 
 static cl::opt<bool>
-EnableMLSM("mlsm", cl::init(true), cl::Hidden,
+EnableMLSM("sea-mlsm", cl::init(true), cl::Hidden,
            cl::desc("Enable motion of merged load and store"));
 
 static cl::opt<bool> EnableLoopInterchange(
