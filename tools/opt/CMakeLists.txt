@@ -24,6 +24,7 @@ set(LLVM_NO_DEAD_STRIP 1)
 
 add_llvm_executable(seaopt
   AnalysisWrappers.cpp
+  CallGraphPrinterWrapper.cc
   BreakpointPrinter.cpp
   GraphPrinters.cpp
   NewPMDriver.cpp
