@@ -46,6 +46,16 @@
 using namespace llvm;
 using namespace llvm_seahorn;
 
+#if 1 /*  SEAHORN ADD */
+static cl::opt<bool> SeaEnableIndVar("seaopt-enable-indvar", cl::Hidden,
+                                     cl::desc("Enable indvar pass"),
+                                     cl::init(true));
+
+static cl::opt<bool> SeaEnableLoopIdiom("seaopt-enable-loop-idiom", cl::Hidden,
+                                        cl::desc("Enable loop-idiom pass"),
+                                        cl::init(true));
+#endif
+
 static cl::opt<bool>
     RunPartialInlining("seaopt-enable-partial-inlining", cl::init(false), cl::Hidden,
                        cl::ZeroOrMore, cl::desc("Run Partial inlinining pass"));
@@ -368,8 +378,11 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   MPM.add(createCFGSimplificationPass());
   addInstructionCombiningPass(MPM);
   // We resume loop passes creating a second loop pipeline here.
-  MPM.add(createIndVarSimplifyPass());        // Canonicalize indvars
-  MPM.add(createLoopIdiomPass());             // Recognize idioms like memset.
+  if (SeaEnableIndVar)
+    MPM.add(createIndVarSimplifyPass());        // Canonicalize indvars
+  
+  if (SeaEnableLoopIdiom)
+    MPM.add(createLoopIdiomPass());             // Recognize idioms like memset.
   addExtensionsToPM(EP_LateLoopOptimizations, MPM);
   MPM.add(createLoopDeletionPass());          // Delete dead loops
 
@@ -871,7 +884,8 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
   PM.add(createDeadStoreEliminationPass());
 
   // More loops are countable; try to optimize them.
-  PM.add(createIndVarSimplifyPass());
+  if (SeaEnableIndVar)
+    PM.add(createIndVarSimplifyPass());
   PM.add(createLoopDeletionPass());
   if (EnableLoopInterchange)
     PM.add(createLoopInterchangePass());
