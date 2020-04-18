@@ -47,41 +47,39 @@ using namespace llvm;
 using namespace llvm_seahorn;
 
 static cl::opt<bool>
-    RunPartialInlining("enable-partial-inlining", cl::init(false), cl::Hidden,
+    RunPartialInlining("seaopt-enable-partial-inlining", cl::init(false), cl::Hidden,
                        cl::ZeroOrMore, cl::desc("Run Partial inlinining pass"));
 
 static cl::opt<bool>
-    RunLoopVectorization("vectorize-loops", cl::Hidden,
+    RunLoopVectorization("seaopt-vectorize-loops", cl::Hidden,
                          cl::desc("Run the Loop vectorization passes"));
 static cl::opt<bool>
-RunSLPVectorization("vectorize-slp", cl::Hidden,
+RunSLPVectorization("seaopt-vectorize-slp", cl::Hidden,
                     cl::desc("Run the SLP vectorization passes"));
 static cl::opt<bool>
-UseGVNAfterVectorization("use-gvn-after-vectorization",
+UseGVNAfterVectorization("seaopt-use-gvn-after-vectorization",
   cl::init(false), cl::Hidden,
   cl::desc("Run GVN instead of Early CSE after vectorization passes"));
 
 static cl::opt<bool> ExtraVectorizerPasses(
-    "extra-vectorizer-passes", cl::init(false), cl::Hidden,
+    "seaopt-extra-vectorizer-passes", cl::init(false), cl::Hidden,
     cl::desc("Run cleanup optimization passes after vectorization."));
 
-static cl::opt<bool>
-RunLoopRerolling("reroll-loops", cl::Hidden,
-                 cl::desc("Run the loop rerolling pass"));
+static cl::opt<bool> RunLoopRerolling("seaopt-reroll-loops", cl::Hidden,
+                                      cl::desc("Run the loop rerolling pass"));
 
-static cl::opt<bool> RunNewGVN("enable-newgvn", cl::init(false), cl::Hidden,
-                               cl::desc("Run the NewGVN pass"));
+static cl::opt<bool> RunNewGVN("seaopt-enable-newgvn", cl::init(false),
+                               cl::Hidden, cl::desc("Run the NewGVN pass"));
 
-static cl::opt<bool>
-RunSLPAfterLoopVectorization("run-slp-after-loop-vectorization",
-  cl::init(true), cl::Hidden,
-  cl::desc("Run the SLP vectorizer (and BB vectorizer) after the Loop "
-           "vectorizer instead of before"));
+static cl::opt<bool> RunSLPAfterLoopVectorization(
+    "seaopt-run-slp-after-loop-vectorization", cl::init(true), cl::Hidden,
+    cl::desc("Run the SLP vectorizer (and BB vectorizer) after the Loop "
+             "vectorizer instead of before"));
 
 // Experimental option to use CFL-AA
 enum class CFLAAType { None, Steensgaard, Andersen, Both };
 static cl::opt<CFLAAType>
-    UseCFLAA("use-cfl-aa", cl::init(CFLAAType::None), cl::Hidden,
+    UseCFLAA("seaopt-use-cfl-aa", cl::init(CFLAAType::None), cl::Hidden,
              cl::desc("Enable the new, experimental CFL alias analysis"),
              cl::values(clEnumValN(CFLAAType::None, "none", "Disable CFL-AA"),
                         clEnumValN(CFLAAType::Steensgaard, "steens",
@@ -92,71 +90,72 @@ static cl::opt<CFLAAType>
                                    "Enable both variants of CFL-AA")));
 
 static cl::opt<bool> EnableLoopInterchange(
-    "enable-loopinterchange", cl::init(false), cl::Hidden,
+    "seaopt-enable-loopinterchange", cl::init(false), cl::Hidden,
     cl::desc("Enable the new, experimental LoopInterchange Pass"));
 
-static cl::opt<bool> EnableUnrollAndJam("enable-unroll-and-jam",
+static cl::opt<bool> EnableUnrollAndJam("seaopt-enable-unroll-and-jam",
                                         cl::init(false), cl::Hidden,
                                         cl::desc("Enable Unroll And Jam Pass"));
 
 static cl::opt<bool>
-    EnablePrepareForThinLTO("prepare-for-thinlto", cl::init(false), cl::Hidden,
+    EnablePrepareForThinLTO("seaopt-prepare-for-thinlto", cl::init(false),
+                            cl::Hidden,
                             cl::desc("Enable preparation for ThinLTO."));
 
-cl::opt<bool> EnableHotColdSplit("hot-cold-split", cl::init(false), cl::Hidden,
-    cl::desc("Enable hot-cold splitting pass"));
+cl::opt<bool> EnableHotColdSplit("seaopt-hot-cold-split", cl::init(false),
+                                 cl::Hidden,
+                                 cl::desc("Enable hot-cold splitting pass"));
 
-
-static cl::opt<bool> RunPGOInstrGen(
-    "profile-generate", cl::init(false), cl::Hidden,
-    cl::desc("Enable PGO instrumentation."));
+static cl::opt<bool> RunPGOInstrGen("seaopt-profile-generate", cl::init(false),
+                                    cl::Hidden,
+                                    cl::desc("Enable PGO instrumentation."));
 
 static cl::opt<std::string>
-    PGOOutputFile("profile-generate-file", cl::init(""), cl::Hidden,
-                      cl::desc("Specify the path of profile data file."));
+    PGOOutputFile("seaopt-profile-generate-file", cl::init(""), cl::Hidden,
+                  cl::desc("Specify the path of profile data file."));
 
 static cl::opt<std::string> RunPGOInstrUse(
-    "profile-use", cl::init(""), cl::Hidden, cl::value_desc("filename"),
+    "seaopt-profile-use", cl::init(""), cl::Hidden, cl::value_desc("filename"),
     cl::desc("Enable use phase of PGO instrumentation and specify the path "
              "of profile data file"));
 
 static cl::opt<bool> UseLoopVersioningLICM(
-    "enable-loop-versioning-licm", cl::init(false), cl::Hidden,
+    "seaopt-enable-loop-versioning-licm", cl::init(false), cl::Hidden,
     cl::desc("Enable the experimental Loop Versioning LICM pass"));
 
 static cl::opt<bool>
-    DisablePreInliner("disable-preinline", cl::init(false), cl::Hidden,
+    DisablePreInliner("seaopt-disable-preinline", cl::init(false), cl::Hidden,
                       cl::desc("Disable pre-instrumentation inliner"));
 
 static cl::opt<int> PreInlineThreshold(
-    "preinline-threshold", cl::Hidden, cl::init(75), cl::ZeroOrMore,
+    "seaopt-preinline-threshold", cl::Hidden, cl::init(75), cl::ZeroOrMore,
     cl::desc("Control the amount of inlining in pre-instrumentation inliner "
              "(default = 75)"));
 
 static cl::opt<bool> EnableEarlyCSEMemSSA(
-    "enable-earlycse-memssa", cl::init(true), cl::Hidden,
+    "seaopt-enable-earlycse-memssa", cl::init(true), cl::Hidden,
     cl::desc("Enable the EarlyCSE w/ MemorySSA pass (default = on)"));
 
-static cl::opt<bool> EnableGVNHoist(
-    "enable-gvn-hoist", cl::init(false), cl::Hidden,
-    cl::desc("Enable the GVN hoisting pass (default = off)"));
+static cl::opt<bool>
+    EnableGVNHoist("seaopt-enable-gvn-hoist", cl::init(false), cl::Hidden,
+                   cl::desc("Enable the GVN hoisting pass (default = off)"));
 
 static cl::opt<bool>
-    DisableLibCallsShrinkWrap("disable-libcalls-shrinkwrap", cl::init(false),
-                              cl::Hidden,
+    DisableLibCallsShrinkWrap("seaopt-disable-libcalls-shrinkwrap",
+                              cl::init(false), cl::Hidden,
                               cl::desc("Disable shrink-wrap library calls"));
 
 static cl::opt<bool> EnableSimpleLoopUnswitch(
-    "enable-simple-loop-unswitch", cl::init(false), cl::Hidden,
+    "seaopt-enable-simple-loop-unswitch", cl::init(false), cl::Hidden,
     cl::desc("Enable the simple loop unswitch pass. Also enables independent "
              "cleanup passes integrated into the loop pass manager pipeline."));
 
-static cl::opt<bool> EnableGVNSink(
-    "enable-gvn-sink", cl::init(false), cl::Hidden,
-    cl::desc("Enable the GVN sinking pass (default = off)"));
+static cl::opt<bool>
+    EnableGVNSink("seaopt-enable-gvn-sink", cl::init(false), cl::Hidden,
+                  cl::desc("Enable the GVN sinking pass (default = off)"));
 
 static cl::opt<bool>
-    EnableCHR("enable-chr", cl::init(true), cl::Hidden,
+    EnableCHR("seaopt-enable-chr", cl::init(true), cl::Hidden,
               cl::desc("Enable control height reduction optimization (CHR)"));
 
 PassManagerBuilder::PassManagerBuilder() {
