@@ -28,3 +28,4 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 # remove until ready
 # add_subdirectory(lib/Transforms/InstCombine)
 add_subdirectory(tools/opt)
+add_subdirectory(lib/Transforms/IPO)

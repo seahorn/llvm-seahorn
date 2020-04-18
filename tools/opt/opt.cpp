@@ -54,7 +54,7 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/Coroutines.h"
 #include "llvm/Transforms/IPO/AlwaysInliner.h"
-#include "llvm/Transforms/IPO/PassManagerBuilder.h"
+#include "llvm_seahorn/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include <algorithm>
 #include <memory>
@@ -337,7 +337,7 @@ static void AddOptimizationPasses(legacy::PassManagerBase &MPM,
   if (!NoVerify || VerifyEach)
     FPM.add(createVerifierPass()); // Verify that input is correct
 
-  PassManagerBuilder Builder;
+  llvm_seahorn::PassManagerBuilder Builder;
   Builder.OptLevel = OptLevel;
   Builder.SizeLevel = SizeLevel;
 
@@ -363,18 +363,19 @@ static void AddOptimizationPasses(legacy::PassManagerBase &MPM,
   Builder.SLPVectorize =
       DisableSLPVectorization ? false : OptLevel > 1 && SizeLevel < 2;
 
+#if 0 /*  REMOVE SEAHORN */
   if (TM)
     TM->adjustPassManager(Builder);
-
   if (Coroutines)
     addCoroutinePassesToExtensionPoints(Builder);
+#endif
 
   Builder.populateFunctionPassManager(FPM);
   Builder.populateModulePassManager(MPM);
 }
 
 static void AddStandardLinkPasses(legacy::PassManagerBase &PM) {
-  PassManagerBuilder Builder;
+  llvm_seahorn::PassManagerBuilder Builder;
   Builder.VerifyInput = true;
   if (DisableOptimizations)
     Builder.OptLevel = 0;
