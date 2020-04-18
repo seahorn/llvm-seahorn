@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm_seahorn/Transforms/IPO/PassManagerBuilder.h"
+#include "llvm_seahorn/Transforms/Scalar.h"
 #include "llvm-c/Transforms/PassManagerBuilder.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/BasicAliasAnalysis.h"
@@ -47,6 +48,9 @@ using namespace llvm;
 using namespace llvm_seahorn;
 
 #if 1 /*  SEAHORN ADD */
+static cl::opt<bool>
+NeverTrue ("sea-never-true", cl::Hidden, cl::init (false));
+
 static cl::opt<bool> SeaEnableIndVar("seaopt-enable-indvar", cl::Hidden,
                                      cl::desc("Enable indvar pass"),
                                      cl::init(true));
@@ -379,7 +383,7 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   addInstructionCombiningPass(MPM);
   // We resume loop passes creating a second loop pipeline here.
   if (SeaEnableIndVar)
-    MPM.add(createIndVarSimplifyPass());        // Canonicalize indvars
+    MPM.add(llvm_seahorn::createIndVarSimplifyPass());        // Canonicalize indvars
   
   if (SeaEnableLoopIdiom)
     MPM.add(createLoopIdiomPass());             // Recognize idioms like memset.
@@ -440,6 +444,11 @@ void PassManagerBuilder::populateModulePassManager(
     MPM.add(createPruneEHPass());
     MPM.add(createSampleProfileLoaderPass(PGOSampleUse));
   }
+
+#if 1 /*  SEAHORN ADD */
+  if (NeverTrue)
+    MPM.add (llvm_seahorn::createFakeLatchExitPass ());
+#endif
 
   // Allow forcing function attributes as a debugging and tuning aid.
   MPM.add(createForceFunctionAttrsLegacyPass());
