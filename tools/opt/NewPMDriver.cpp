@@ -210,11 +210,12 @@ static void registerEPCallbacks(PassBuilder &PB, bool VerifyEachPass,
                                    DebugLogging));
         });
 }
-
+#if 0 /*  SEAHORN REMOVE */
 #ifdef LINK_POLLY_INTO_TOOLS
 namespace polly {
 void RegisterPollyPasses(PassBuilder &);
 }
+#endif
 #endif
 
 bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
@@ -278,8 +279,10 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
         return false;
       });
 
+#if 0 /*  SEAHORN REMOVE */
 #ifdef LINK_POLLY_INTO_TOOLS
   polly::RegisterPollyPasses(PB);
+#endif
 #endif
 
   // Specially handle the alias analysis manager so that we can register

@@ -417,12 +417,13 @@ static TargetMachine* GetTargetMachine(Triple TheTriple, StringRef CPUStr,
                                         getCodeModel(), GetCodeGenOptLevel());
 }
 
+#if 0 /*  SEAHORN REMOVE */
 #ifdef LINK_POLLY_INTO_TOOLS
 namespace polly {
 void initializePollyPasses(llvm::PassRegistry &Registry);
 }
 #endif
-
+#endif
 //===----------------------------------------------------------------------===//
 // main for opt
 //
@@ -476,8 +477,10 @@ int main(int argc, char **argv) {
   initializeWasmEHPreparePass(Registry);
   initializeWriteBitcodePassPass(Registry);
 
+#if 0 /*  SEAHORN REMOVE */
 #ifdef LINK_POLLY_INTO_TOOLS
   polly::initializePollyPasses(Registry);
+#endif
 #endif
 
   cl::ParseCommandLineOptions(argc, argv,
