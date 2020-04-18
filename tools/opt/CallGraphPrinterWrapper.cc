@@ -1,4 +1,8 @@
+#include "llvm/Pass.h"
+#include "llvm/Analysis/CallGraph.h"
+
 namespace {
+using namespace llvm;
 struct CallGraphPrinter : public ModulePass {
   static char ID; // Pass ID, replacement for typeid
   CallGraphPrinter() : ModulePass(ID) {}

@@ -1,5 +1,6 @@
 set(LLVM_LINK_COMPONENTS
   ${LLVM_TARGETS_TO_BUILD}
+  AgressiveInstCombine
   Analysis
   BitWriter
   CodeGen
@@ -26,30 +27,24 @@ add_llvm_executable(seaopt
   AnalysisWrappers.cpp
   CallGraphPrinterWrapper.cc
   BreakpointPrinter.cpp
+  Debugify.cpp
   GraphPrinters.cpp
   NewPMDriver.cpp
   PassPrinters.cpp
   PrintSCC.cpp
   opt.cpp
+
+  DEPENDS
+  intrinsics_gen
   )
-target_link_libraries (seaopt SeaLlvmIpo SeaInstCombine SeaInstNondet SeaLoops)
+# TODO re-enable when ready
+#target_link_libraries (seaopt SeaLlvmIpo SeaInstCombine SeaInstNondet SeaLoops)
 
 set_target_properties(seaopt PROPERTIES ENABLE_EXPORTS 1)
 install(TARGETS seaopt RUNTIME DESTINATION bin)
 
-if (SEAHORN_STATIC_EXE)
-  set (CMAKE_EXE_LINKER_FLAGS "-static -static-libgcc -static-libstdc++")
-  set_target_properties(seaopt PROPERTIES ENABLE_EXPORTS FALSE)
-  set_target_properties (seaopt PROPERTIES LINK_SEARCH_START_STATIC ON)
-  set_target_properties (seaopt PROPERTIES LINK_SEARCH_END_STATIC ON)
-endif()
 
 
 if(WITH_POLLY AND LINK_POLLY_INTO_TOOLS)
-  target_link_libraries(seaopt Polly)
-  if(POLLY_LINK_LIBS)
-    foreach(lib ${POLLY_LINK_LIBS})
-      target_link_libraries(seaopt ${lib})
-    endforeach(lib)
-  endif(POLLY_LINK_LIBS)
+  target_link_libraries(opt PRIVATE Polly)
 endif(WITH_POLLY AND LINK_POLLY_INTO_TOOLS)

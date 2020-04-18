@@ -71,4 +71,3 @@ char ExternalFunctionsPassedConstants::ID = 0;
 static RegisterPass<ExternalFunctionsPassedConstants>
   P1("print-externalfnconstants",
      "Print external fn callsites passed constants");
-
