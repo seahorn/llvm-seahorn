@@ -1,5 +1,5 @@
 add_subdirectory(Transforms/IPO)
 add_subdirectory(Transforms/InstCombine)
-add_subdirectory(Transforms/InstNondet)
+#add_subdirectory(Transforms/InstNondet)
 add_subdirectory(Transforms/Loops)
-add_subdirectory(Transforms/Utils)
+#add_subdirectory(Transforms/Utils)
