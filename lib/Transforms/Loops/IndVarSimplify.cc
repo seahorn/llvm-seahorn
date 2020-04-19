@@ -2414,7 +2414,7 @@ static Value *genLoopLimit(PHINode *IndVar, BasicBlock *ExitingBB,
 /// able to rewrite the exit tests of any loop where the SCEV analysis can
 /// determine a loop-invariant trip count of the loop, which is actually a much
 /// broader range than just linear tests.
-bool IndVarSimplify::
+bool SeaIndVarSimplify::
 linearFunctionTestReplace(Loop *L, BasicBlock *ExitingBB,
                           const SCEV *ExitCount,
                           PHINode *IndVar, SCEVExpander &Rewriter) {
