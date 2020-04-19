@@ -740,6 +740,13 @@ public:
   /// Maximum size of array considered when transforming.
   uint64_t MaxArraySizeForCombine;
 
+
+
+#if 1 /* ADD SEAHORN */
+  bool seaAvoidIntToPtr() const { return AvoidIntToPtr; }
+  bool seaAvoidBv() const { return AvoidBv; }
+#endif 
+
 private:
   /// Performs a few simplifications for operators which are associative
   /// or commutative.

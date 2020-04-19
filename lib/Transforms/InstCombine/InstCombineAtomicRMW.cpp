@@ -13,6 +13,7 @@
 #include "llvm/IR/Instructions.h"
 
 using namespace llvm;
+using namespace llvm_seahorn;
 
 namespace {
 /// Return true if and only if the given instruction does not modify the memory

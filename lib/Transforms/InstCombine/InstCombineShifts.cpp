@@ -16,6 +16,7 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/PatternMatch.h"
 using namespace llvm;
+using namespace llvm_seahorn;
 using namespace PatternMatch;
 
 #define DEBUG_TYPE "sea-instcombine"

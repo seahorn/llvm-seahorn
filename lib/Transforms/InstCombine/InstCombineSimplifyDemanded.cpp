@@ -18,6 +18,7 @@
 #include "llvm/Support/KnownBits.h"
 
 using namespace llvm;
+using namespace llvm_seahorn;
 using namespace llvm::PatternMatch;
 
 #define DEBUG_TYPE "sea-instcombine"

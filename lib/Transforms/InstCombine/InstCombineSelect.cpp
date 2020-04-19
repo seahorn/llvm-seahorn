@@ -42,6 +42,7 @@
 #include <utility>
 
 using namespace llvm;
+using namespace llvm_seahorn;
 using namespace PatternMatch;
 
 #define DEBUG_TYPE "sea-instcombine"
