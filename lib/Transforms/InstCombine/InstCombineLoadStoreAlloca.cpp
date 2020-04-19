@@ -18,17 +18,19 @@
 #include "llvm/Analysis/Loads.h"
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/DataLayout.h"
-#include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/MDBuilder.h"
+#include "llvm/IR/PatternMatch.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 using namespace llvm;
+using namespace PatternMatch;
 
-#define DEBUG_TYPE "sea-instcombine"
+#define DEBUG_TYPE "instcombine"
 
-STATISTIC(NumDeadStore,    "Number of dead stores eliminated");
+STATISTIC(NumDeadStore, "Number of dead stores eliminated");
 STATISTIC(NumGlobalCopies, "Number of allocas copied from constant global");
 
 /// pointsToConstantGlobal - Return true if V (possibly indirectly) points to
@@ -71,7 +73,8 @@ isOnlyCopiedFromConstantGlobal(Value *V, MemTransferInst *&TheCopy,
 
       if (auto *LI = dyn_cast<LoadInst>(I)) {
         // Ignore non-volatile loads, they are always ok.
-        if (!LI->isSimple()) return false;
+        if (!LI->isSimple())
+          return false;
         continue;
       }
 
@@ -114,13 +117,10 @@ isOnlyCopiedFromConstantGlobal(Value *V, MemTransferInst *&TheCopy,
       }
 
       // Lifetime intrinsics can be handled by the caller.
-      if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(I)) {
-        if (II->getIntrinsicID() == Intrinsic::lifetime_start ||
-            II->getIntrinsicID() == Intrinsic::lifetime_end) {
-          assert(II->use_empty() && "Lifetime markers have no result to use!");
-          ToDelete.push_back(II);
-          continue;
-        }
+      if (I->isLifetimeStartOrEnd()) {
+        assert(I->use_empty() && "Lifetime markers have no result to use!");
+        ToDelete.push_back(I);
+        continue;
       }
 
       // If this is isn't our memcpy/memmove, reject it as something we can't
@@ -132,19 +132,23 @@ isOnlyCopiedFromConstantGlobal(Value *V, MemTransferInst *&TheCopy,
       // If the transfer is using the alloca as a source of the transfer, then
       // ignore it since it is a load (unless the transfer is volatile).
       if (U.getOperandNo() == 1) {
-        if (MI->isVolatile()) return false;
+        if (MI->isVolatile())
+          return false;
         continue;
       }
 
       // If we already have seen a copy, reject the second one.
-      if (TheCopy) return false;
+      if (TheCopy)
+        return false;
 
       // If the pointer has been offset from the start of the alloca, we can't
       // safely handle this.
-      if (IsOffset) return false;
+      if (IsOffset)
+        return false;
 
       // If the memintrinsic isn't using the alloca as the dest, reject it.
-      if (U.getOperandNo() != 0) return false;
+      if (U.getOperandNo() != 0)
+        return false;
 
       // If the source of the memcpy/move is not a constant global, reject it.
       if (!pointsToConstantGlobal(MI->getSource()))
@@ -181,7 +185,7 @@ static bool isDereferenceableForAllocaSize(const Value *V, const AllocaInst *AI,
                                             APInt(64, AllocaSize), DL);
 }
 
-static Instruction *simplifyAllocaArraySize(llvm_seahorn::InstCombiner &IC, AllocaInst &AI) {
+static Instruction *simplifyAllocaArraySize(InstCombiner &IC, AllocaInst &AI) {
   // Check for array size of 1 (scalar allocation).
   if (!AI.isArrayAllocation()) {
     // i32 1 is the canonical array size for scalar allocations.
@@ -196,30 +200,32 @@ static Instruction *simplifyAllocaArraySize(llvm_seahorn::InstCombiner &IC, Allo
 
   // Convert: alloca Ty, C - where C is a constant != 1 into: alloca [C x Ty], 1
   if (const ConstantInt *C = dyn_cast<ConstantInt>(AI.getArraySize())) {
-    Type *NewTy = ArrayType::get(AI.getAllocatedType(), C->getZExtValue());
-    AllocaInst *New = IC.Builder.CreateAlloca(NewTy, nullptr, AI.getName());
-    New->setAlignment(AI.getAlignment());
+    if (C->getValue().getActiveBits() <= 64) {
+      Type *NewTy = ArrayType::get(AI.getAllocatedType(), C->getZExtValue());
+      AllocaInst *New = IC.Builder.CreateAlloca(NewTy, nullptr, AI.getName());
+      New->setAlignment(AI.getAlignment());
 
-    // Scan to the end of the allocation instructions, to skip over a block of
-    // allocas if possible...also skip interleaved debug info
-    //
-    BasicBlock::iterator It(New);
-    while (isa<AllocaInst>(*It) || isa<DbgInfoIntrinsic>(*It))
-      ++It;
+      // Scan to the end of the allocation instructions, to skip over a block of
+      // allocas if possible...also skip interleaved debug info
+      //
+      BasicBlock::iterator It(New);
+      while (isa<AllocaInst>(*It) || isa<DbgInfoIntrinsic>(*It))
+        ++It;
 
-    // Now that I is pointing to the first non-allocation-inst in the block,
-    // insert our getelementptr instruction...
-    //
-    Type *IdxTy = IC.getDataLayout().getIntPtrType(AI.getType());
-    Value *NullIdx = Constant::getNullValue(IdxTy);
-    Value *Idx[2] = {NullIdx, NullIdx};
-    Instruction *GEP =
-        GetElementPtrInst::CreateInBounds(New, Idx, New->getName() + ".sub");
-    IC.InsertNewInstBefore(GEP, *It);
+      // Now that I is pointing to the first non-allocation-inst in the block,
+      // insert our getelementptr instruction...
+      //
+      Type *IdxTy = IC.getDataLayout().getIntPtrType(AI.getType());
+      Value *NullIdx = Constant::getNullValue(IdxTy);
+      Value *Idx[2] = {NullIdx, NullIdx};
+      Instruction *GEP =
+          GetElementPtrInst::CreateInBounds(New, Idx, New->getName() + ".sub");
+      IC.InsertNewInstBefore(GEP, *It);
 
-    // Now make everything use the getelementptr instead of the original
-    // allocation.
-    return IC.replaceInstUsesWith(AI, GEP);
+      // Now make everything use the getelementptr instead of the original
+      // allocation.
+      return IC.replaceInstUsesWith(AI, GEP);
+    }
   }
 
   if (isa<UndefValue>(AI.getArraySize()))
@@ -250,7 +256,7 @@ namespace {
 // instruction.
 class PointerReplacer {
 public:
-  PointerReplacer(llvm_seahorn::InstCombiner &IC) : IC(IC) {}
+  PointerReplacer(InstCombiner &IC) : IC(IC) {}
   void replacePointer(Instruction &I, Value *V);
 
 private:
@@ -260,7 +266,7 @@ private:
 
   SmallVector<Instruction *, 4> Path;
   MapVector<Value *, Value *> WorkMap;
-  llvm_seahorn::InstCombiner &IC;
+  InstCombiner &IC;
 };
 } // end anonymous namespace
 
@@ -269,7 +275,7 @@ void PointerReplacer::findLoadAndReplace(Instruction &I) {
     auto *Inst = dyn_cast<Instruction>(&*U);
     if (!Inst)
       return;
-    DEBUG(dbgs() << "Found pointer user: " << *U << '\n');
+    LLVM_DEBUG(dbgs() << "Found pointer user: " << *U << '\n');
     if (isa<LoadInst>(Inst)) {
       for (auto P : Path)
         replace(P);
@@ -338,7 +344,7 @@ void PointerReplacer::replacePointer(Instruction &I, Value *V) {
   findLoadAndReplace(I);
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitAllocaInst(AllocaInst &AI) {
+Instruction *InstCombiner::visitAllocaInst(AllocaInst &AI) {
   if (auto *I = simplifyAllocaArraySize(*this, AI))
     return I;
 
@@ -381,8 +387,8 @@ Instruction *llvm_seahorn::InstCombiner::visitAllocaInst(AllocaInst &AI) {
         // Replace this zero-sized alloca with the one at the start of the entry
         // block after ensuring that the address will be aligned enough for both
         // types.
-        unsigned MaxAlign = std::max(EntryAI->getAlignment(),
-                                     AI.getAlignment());
+        unsigned MaxAlign =
+            std::max(EntryAI->getAlignment(), AI.getAlignment());
         EntryAI->setAlignment(MaxAlign);
         if (AI.getType() != EntryAI->getType())
           return new BitCastInst(EntryAI, AI.getType());
@@ -404,8 +410,8 @@ Instruction *llvm_seahorn::InstCombiner::visitAllocaInst(AllocaInst &AI) {
           Copy->getSource(), AI.getAlignment(), DL, &AI, &AC, &DT);
       if (AI.getAlignment() <= SourceAlign &&
           isDereferenceableForAllocaSize(Copy->getSource(), &AI, DL)) {
-        DEBUG(dbgs() << "Found alloca equal to global: " << AI << '\n');
-        DEBUG(dbgs() << "  memcpy = " << *Copy << '\n');
+        LLVM_DEBUG(dbgs() << "Found alloca equal to global: " << AI << '\n');
+        LLVM_DEBUG(dbgs() << "  memcpy = " << *Copy << '\n');
         for (unsigned i = 0, e = ToDelete.size(); i != e; ++i)
           eraseInstFromFunction(*ToDelete[i]);
         Constant *TheSrc = cast<Constant>(Copy->getSource());
@@ -436,10 +442,10 @@ Instruction *llvm_seahorn::InstCombiner::visitAllocaInst(AllocaInst &AI) {
 
 // Are we allowed to form a atomic load or store of this type?
 static bool isSupportedAtomicType(Type *Ty) {
-  return Ty->isIntegerTy() || Ty->isPointerTy() || Ty->isFloatingPointTy();
+  return Ty->isIntOrPtrTy() || Ty->isFloatingPointTy();
 }
 
-/// \brief Helper to combine a load to a new type.
+/// Helper to combine a load to a new type.
 ///
 /// This just does the work of combining a load to a new type. It handles
 /// metadata, etc., and returns the new instruction. The \c NewTy should be the
@@ -447,20 +453,25 @@ static bool isSupportedAtomicType(Type *Ty) {
 /// that pointer type, load it, etc.
 ///
 /// Note that this will create all of the instructions with whatever insert
-/// point the \c llvm_seahorn::InstCombiner currently is using.
-static LoadInst *combineLoadToNewType(llvm_seahorn::InstCombiner &IC, LoadInst &LI, Type *NewTy,
-                                      const Twine &Suffix = "") {
+/// point the \c InstCombiner currently is using.
+static LoadInst *combineLoadToNewType(InstCombiner &IC, LoadInst &LI,
+                                      Type *NewTy, const Twine &Suffix = "") {
   assert((!LI.isAtomic() || isSupportedAtomicType(NewTy)) &&
          "can't fold an atomic load to requested type");
-  
+
   Value *Ptr = LI.getPointerOperand();
   unsigned AS = LI.getPointerAddressSpace();
   SmallVector<std::pair<unsigned, MDNode *>, 8> MD;
   LI.getAllMetadata(MD);
 
+  Value *NewPtr = nullptr;
+  if (!(match(Ptr, m_BitCast(m_Value(NewPtr))) &&
+        NewPtr->getType()->getPointerElementType() == NewTy &&
+        NewPtr->getType()->getPointerAddressSpace() == AS))
+    NewPtr = IC.Builder.CreateBitCast(Ptr, NewTy->getPointerTo(AS));
+
   LoadInst *NewLoad = IC.Builder.CreateAlignedLoad(
-      IC.Builder.CreateBitCast(Ptr, NewTy->getPointerTo(AS)),
-      LI.getAlignment(), LI.isVolatile(), LI.getName() + Suffix);
+      NewPtr, LI.getAlignment(), LI.isVolatile(), LI.getName() + Suffix);
   NewLoad->setAtomic(LI.getOrdering(), LI.getSyncScopeID());
   MDBuilder MDB(NewLoad->getContext());
   for (const auto &MDPair : MD) {
@@ -484,6 +495,7 @@ static LoadInst *combineLoadToNewType(llvm_seahorn::InstCombiner &IC, LoadInst &
     case LLVMContext::MD_noalias:
     case LLVMContext::MD_nontemporal:
     case LLVMContext::MD_mem_parallel_loop_access:
+    case LLVMContext::MD_access_group:
       // All of these directly apply.
       NewLoad->setMetadata(ID, N);
       break;
@@ -506,13 +518,14 @@ static LoadInst *combineLoadToNewType(llvm_seahorn::InstCombiner &IC, LoadInst &
   return NewLoad;
 }
 
-/// \brief Combine a store to a new type.
+/// Combine a store to a new type.
 ///
 /// Returns the newly created store instruction.
-static StoreInst *combineStoreToNewValue(llvm_seahorn::InstCombiner &IC, StoreInst &SI, Value *V) {
+static StoreInst *combineStoreToNewValue(InstCombiner &IC, StoreInst &SI,
+                                         Value *V) {
   assert((!SI.isAtomic() || isSupportedAtomicType(V->getType())) &&
          "can't fold an atomic store of requested type");
-  
+
   Value *Ptr = SI.getPointerOperand();
   unsigned AS = SI.getPointerAddressSpace();
   SmallVector<std::pair<unsigned, MDNode *>, 8> MD;
@@ -543,10 +556,10 @@ static StoreInst *combineStoreToNewValue(llvm_seahorn::InstCombiner &IC, StoreIn
     case LLVMContext::MD_noalias:
     case LLVMContext::MD_nontemporal:
     case LLVMContext::MD_mem_parallel_loop_access:
+    case LLVMContext::MD_access_group:
       // All of these directly apply.
       NewStore->setMetadata(ID, N);
       break;
-
     case LLVMContext::MD_invariant_load:
     case LLVMContext::MD_nonnull:
     case LLVMContext::MD_range:
@@ -561,7 +574,29 @@ static StoreInst *combineStoreToNewValue(llvm_seahorn::InstCombiner &IC, StoreIn
   return NewStore;
 }
 
-/// \brief Combine loads to match the type of their uses' value after looking
+/// Returns true if instruction represent minmax pattern like:
+///   select ((cmp load V1, load V2), V1, V2).
+static bool isMinMaxWithLoads(Value *V) {
+  assert(V->getType()->isPointerTy() && "Expected pointer type.");
+  // Ignore possible ty* to ixx* bitcast.
+  V = peekThroughBitcast(V);
+  // Check that select is select ((cmp load V1, load V2), V1, V2) - minmax
+  // pattern.
+  CmpInst::Predicate Pred;
+  Instruction *L1;
+  Instruction *L2;
+  Value *LHS;
+  Value *RHS;
+  if (!match(V, m_Select(m_Cmp(Pred, m_Instruction(L1), m_Instruction(L2)),
+                         m_Value(LHS), m_Value(RHS))))
+    return false;
+  return (match(L1, m_Load(m_Specific(LHS))) &&
+          match(L2, m_Load(m_Specific(RHS)))) ||
+         (match(L1, m_Load(m_Specific(RHS))) &&
+          match(L2, m_Load(m_Specific(LHS))));
+}
+
+/// Combine loads to match the type of their uses' value after looking
 /// through intervening bitcasts.
 ///
 /// The core idea here is that if the result of a load is used in an operation,
@@ -578,7 +613,7 @@ static StoreInst *combineStoreToNewValue(llvm_seahorn::InstCombiner &IC, StoreIn
 /// or a volatile load. This is debatable, and might be reasonable to change
 /// later. However, it is risky in case some backend or other part of LLVM is
 /// relying on the exact type loaded to select appropriate atomic operations.
-static Instruction *combineLoadToOperationType(llvm_seahorn::InstCombiner &IC, LoadInst &LI) {
+static Instruction *combineLoadToOperationType(InstCombiner &IC, LoadInst &LI) {
   // FIXME: We could probably with some care handle both volatile and ordered
   // atomic loads here but it isn't clear that this is important.
   if (!LI.isUnordered())
@@ -598,10 +633,14 @@ static Instruction *combineLoadToOperationType(llvm_seahorn::InstCombiner &IC, L
   // integers instead of any other type. We only do this when the loaded type
   // is sized and has a size exactly the same as its store size and the store
   // size is a legal integer type.
-  if (!IC.seaAvoidIntToPtr() && !Ty->isIntegerTy() && Ty->isSized() &&
+  // Do not perform canonicalization if minmax pattern is found (to avoid
+  // infinite loop).
+  if (!Ty->isIntegerTy() && Ty->isSized() &&
       DL.isLegalInteger(DL.getTypeStoreSizeInBits(Ty)) &&
       DL.getTypeStoreSizeInBits(Ty) == DL.getTypeSizeInBits(Ty) &&
-      !DL.isNonIntegralPointerType(Ty)) {
+      !DL.isNonIntegralPointerType(Ty) &&
+      !isMinMaxWithLoads(
+          peekThroughBitcast(LI.getPointerOperand(), /*OneUseOnly=*/true))) {
     if (all_of(LI.users(), [&LI](User *U) {
           auto *SI = dyn_cast<StoreInst>(U);
           return SI && SI->getPointerOperand() != &LI &&
@@ -627,8 +666,8 @@ static Instruction *combineLoadToOperationType(llvm_seahorn::InstCombiner &IC, L
   // We can do this for BitCastInsts as well as casts from and to pointer types,
   // as long as those are noops (i.e., the source or dest type have the same
   // bitwidth as the target's pointers).
-  if (!IC.seaAvoidIntToPtr() && LI.hasOneUse())
-    if (auto* CI = dyn_cast<CastInst>(LI.user_back()))
+  if (LI.hasOneUse())
+    if (auto *CI = dyn_cast<CastInst>(LI.user_back()))
       if (CI->isNoopCast(DL))
         if (!LI.isAtomic() || isSupportedAtomicType(CI->getDestTy())) {
           LoadInst *NewLoad = combineLoadToNewType(IC, LI, CI->getDestTy());
@@ -642,7 +681,7 @@ static Instruction *combineLoadToOperationType(llvm_seahorn::InstCombiner &IC, L
   return nullptr;
 }
 
-static Instruction *unpackLoadToAggregate(llvm_seahorn::InstCombiner &IC, LoadInst &LI) {
+static Instruction *unpackLoadToAggregate(InstCombiner &IC, LoadInst &LI) {
   // FIXME: We could probably with some care handle both volatile and atomic
   // stores here but it isn't clear that this is important.
   if (!LI.isSimple())
@@ -659,13 +698,14 @@ static Instruction *unpackLoadToAggregate(llvm_seahorn::InstCombiner &IC, LoadIn
     // If the struct only have one element, we unpack.
     auto NumElements = ST->getNumElements();
     if (NumElements == 1) {
-      LoadInst *NewLoad = combineLoadToNewType(IC, LI, ST->getTypeAtIndex(0U),
-                                               ".unpack");
+      LoadInst *NewLoad =
+          combineLoadToNewType(IC, LI, ST->getTypeAtIndex(0U), ".unpack");
       AAMDNodes AAMD;
       LI.getAAMetadata(AAMD);
       NewLoad->setAAMetadata(AAMD);
-      return IC.replaceInstUsesWith(LI, IC.Builder.CreateInsertValue(
-        UndefValue::get(T), NewLoad, 0, Name));
+      return IC.replaceInstUsesWith(
+          LI,
+          IC.Builder.CreateInsertValue(UndefValue::get(T), NewLoad, 0, Name));
     }
 
     // We don't want to break loads with padding here as we'd loose
@@ -686,8 +726,8 @@ static Instruction *unpackLoadToAggregate(llvm_seahorn::InstCombiner &IC, LoadIn
     Value *V = UndefValue::get(T);
     for (unsigned i = 0; i < NumElements; i++) {
       Value *Indices[2] = {
-        Zero,
-        ConstantInt::get(IdxType, i),
+          Zero,
+          ConstantInt::get(IdxType, i),
       };
       auto *Ptr = IC.Builder.CreateInBoundsGEP(ST, Addr, makeArrayRef(Indices),
                                                Name + ".elt");
@@ -712,8 +752,9 @@ static Instruction *unpackLoadToAggregate(llvm_seahorn::InstCombiner &IC, LoadIn
       AAMDNodes AAMD;
       LI.getAAMetadata(AAMD);
       NewLoad->setAAMetadata(AAMD);
-      return IC.replaceInstUsesWith(LI, IC.Builder.CreateInsertValue(
-        UndefValue::get(T), NewLoad, 0, Name));
+      return IC.replaceInstUsesWith(
+          LI,
+          IC.Builder.CreateInsertValue(UndefValue::get(T), NewLoad, 0, Name));
     }
 
     // Bail out if the array is too large. Ideally we would like to optimize
@@ -737,8 +778,8 @@ static Instruction *unpackLoadToAggregate(llvm_seahorn::InstCombiner &IC, LoadIn
     uint64_t Offset = 0;
     for (uint64_t i = 0; i < NumElements; i++) {
       Value *Indices[2] = {
-        Zero,
-        ConstantInt::get(IdxType, i),
+          Zero,
+          ConstantInt::get(IdxType, i),
       };
       auto *Ptr = IC.Builder.CreateInBoundsGEP(AT, Addr, makeArrayRef(Indices),
                                                Name + ".elt");
@@ -808,7 +849,7 @@ static bool isObjectSizeLessThanOrEq(Value *V, uint64_t MaxSize,
       uint64_t TypeSize = DL.getTypeAllocSize(AI->getAllocatedType());
       // Make sure that, even if the multiplication below would wrap as an
       // uint64_t, we still do the right thing.
-      if ((CS->getValue().zextOrSelf(128)*APInt(128, TypeSize)).ugt(MaxSize))
+      if ((CS->getValue().zextOrSelf(128) * APInt(128, TypeSize)).ugt(MaxSize))
         return false;
       continue;
     }
@@ -844,7 +885,7 @@ static bool isObjectSizeLessThanOrEq(Value *V, uint64_t MaxSize,
 // not zero. Currently, we only handle the first such index. Also, we could
 // also search through non-zero constant indices if we kept track of the
 // offsets those indices implied.
-static bool canReplaceGEPIdxWithZero(llvm_seahorn::InstCombiner &IC, GetElementPtrInst *GEPI,
+static bool canReplaceGEPIdxWithZero(InstCombiner &IC, GetElementPtrInst *GEPI,
                                      Instruction *MemI, unsigned &Idx) {
   if (GEPI->getNumOperands() < 2)
     return false;
@@ -875,7 +916,7 @@ static bool canReplaceGEPIdxWithZero(llvm_seahorn::InstCombiner &IC, GetElementP
 
   SmallVector<Value *, 4> Ops(GEPI->idx_begin(), GEPI->idx_begin() + Idx);
   Type *AllocTy =
-    GetElementPtrInst::getIndexedType(GEPI->getSourceElementType(), Ops);
+      GetElementPtrInst::getIndexedType(GEPI->getSourceElementType(), Ops);
   if (!AllocTy || !AllocTy->isSized())
     return false;
   const DataLayout &DL = IC.getDataLayout();
@@ -886,7 +927,7 @@ static bool canReplaceGEPIdxWithZero(llvm_seahorn::InstCombiner &IC, GetElementP
   // address being computed might be before the base address determined by the
   // first non-zero index.
   auto IsAllNonNegative = [&]() {
-    for (unsigned i = Idx+1, e = GEPI->getNumOperands(); i != e; ++i) {
+    for (unsigned i = Idx + 1, e = GEPI->getNumOperands(); i != e; ++i) {
       KnownBits Known = IC.computeKnownBits(GEPI->getOperand(i), 0, MemI);
       if (Known.isNonNegative())
         continue;
@@ -901,7 +942,7 @@ static bool canReplaceGEPIdxWithZero(llvm_seahorn::InstCombiner &IC, GetElementP
   // (rendering the IsAllNonNegative() check below insufficient). We can do
   // better, ignoring zero indices (and other indices we can prove small
   // enough not to wrap).
-  if (Idx+1 != GEPI->getNumOperands() && !GEPI->isInBounds())
+  if (Idx + 1 != GEPI->getNumOperands() && !GEPI->isInBounds())
     return false;
 
   // Note that isObjectSizeLessThanOrEq will return true only if the pointer is
@@ -914,14 +955,14 @@ static bool canReplaceGEPIdxWithZero(llvm_seahorn::InstCombiner &IC, GetElementP
 // access, but the object has only one element, we can assume that the index
 // will always be zero. If we replace the GEP, return it.
 template <typename T>
-static Instruction *replaceGEPIdxWithZero(llvm_seahorn::InstCombiner &IC, Value *Ptr,
+static Instruction *replaceGEPIdxWithZero(InstCombiner &IC, Value *Ptr,
                                           T &MemI) {
   if (GetElementPtrInst *GEPI = dyn_cast<GetElementPtrInst>(Ptr)) {
     unsigned Idx;
     if (canReplaceGEPIdxWithZero(IC, GEPI, &MemI, Idx)) {
       Instruction *NewGEPI = GEPI->clone();
-      NewGEPI->setOperand(Idx,
-        ConstantInt::get(GEPI->getOperand(Idx)->getType(), 0));
+      NewGEPI->setOperand(
+          Idx, ConstantInt::get(GEPI->getOperand(Idx)->getType(), 0));
       NewGEPI->insertBefore(GEPI);
       MemI.setOperand(MemI.getPointerOperandIndex(), NewGEPI);
       return NewGEPI;
@@ -931,19 +972,32 @@ static Instruction *replaceGEPIdxWithZero(llvm_seahorn::InstCombiner &IC, Value 
   return nullptr;
 }
 
+static bool canSimplifyNullStoreOrGEP(StoreInst &SI) {
+  if (NullPointerIsDefined(SI.getFunction(), SI.getPointerAddressSpace()))
+    return false;
+
+  auto *Ptr = SI.getPointerOperand();
+  if (GetElementPtrInst *GEPI = dyn_cast<GetElementPtrInst>(Ptr))
+    Ptr = GEPI->getOperand(0);
+  return (isa<ConstantPointerNull>(Ptr) &&
+          !NullPointerIsDefined(SI.getFunction(), SI.getPointerAddressSpace()));
+}
+
 static bool canSimplifyNullLoadOrGEP(LoadInst &LI, Value *Op) {
   if (GetElementPtrInst *GEPI = dyn_cast<GetElementPtrInst>(Op)) {
     const Value *GEPI0 = GEPI->getOperand(0);
-    if (isa<ConstantPointerNull>(GEPI0) && GEPI->getPointerAddressSpace() == 0)
+    if (isa<ConstantPointerNull>(GEPI0) &&
+        !NullPointerIsDefined(LI.getFunction(), GEPI->getPointerAddressSpace()))
       return true;
   }
   if (isa<UndefValue>(Op) ||
-      (isa<ConstantPointerNull>(Op) && LI.getPointerAddressSpace() == 0))
+      (isa<ConstantPointerNull>(Op) &&
+       !NullPointerIsDefined(LI.getFunction(), LI.getPointerAddressSpace())))
     return true;
   return false;
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitLoadInst(LoadInst &LI) {
+Instruction *InstCombiner::visitLoadInst(LoadInst &LI) {
   Value *Op = LI.getOperand(0);
 
   // Try to canonicalize the loaded type.
@@ -964,8 +1018,8 @@ Instruction *llvm_seahorn::InstCombiner::visitLoadInst(LoadInst &LI) {
 
   // Replace GEP indices if possible.
   if (Instruction *NewGEPI = replaceGEPIdxWithZero(*this, Op, LI)) {
-      Worklist.Add(NewGEPI);
-      return &LI;
+    Worklist.Add(NewGEPI);
+    return &LI;
   }
 
   if (Instruction *Res = unpackLoadToAggregate(*this, LI))
@@ -979,7 +1033,7 @@ Instruction *llvm_seahorn::InstCombiner::visitLoadInst(LoadInst &LI) {
   if (Value *AvailableVal = FindAvailableLoadedValue(
           &LI, LI.getParent(), BBI, DefMaxInstsToScan, AA, &IsLoadCSE)) {
     if (IsLoadCSE)
-      combineMetadataForCSE(cast<LoadInst>(AvailableVal), &LI);
+      combineMetadataForCSE(cast<LoadInst>(AvailableVal), &LI, false);
 
     return replaceInstUsesWith(
         LI, Builder.CreateBitOrPointerCast(AvailableVal, LI.getType(),
@@ -988,7 +1042,8 @@ Instruction *llvm_seahorn::InstCombiner::visitLoadInst(LoadInst &LI) {
 
   // None of the following transforms are legal for volatile/ordered atomic
   // loads.  Most of them do apply for unordered atomics.
-  if (!LI.isUnordered()) return nullptr;
+  if (!LI.isUnordered())
+    return nullptr;
 
   // load(gep null, ...) -> unreachable
   // load null/undef -> unreachable
@@ -1020,10 +1075,10 @@ Instruction *llvm_seahorn::InstCombiner::visitLoadInst(LoadInst &LI) {
       unsigned Align = LI.getAlignment();
       if (isSafeToLoadUnconditionally(SI->getOperand(1), Align, DL, SI) &&
           isSafeToLoadUnconditionally(SI->getOperand(2), Align, DL, SI)) {
-        LoadInst *V1 = Builder.CreateLoad(SI->getOperand(1),
-                                          SI->getOperand(1)->getName()+".val");
-        LoadInst *V2 = Builder.CreateLoad(SI->getOperand(2),
-                                          SI->getOperand(2)->getName()+".val");
+        LoadInst *V1 = Builder.CreateLoad(
+            SI->getOperand(1), SI->getOperand(1)->getName() + ".val");
+        LoadInst *V2 = Builder.CreateLoad(
+            SI->getOperand(2), SI->getOperand(2)->getName() + ".val");
         assert(LI.isUnordered() && "implied by above");
         V1->setAlignment(Align);
         V1->setAtomic(LI.getOrdering(), LI.getSyncScopeID());
@@ -1034,14 +1089,16 @@ Instruction *llvm_seahorn::InstCombiner::visitLoadInst(LoadInst &LI) {
 
       // load (select (cond, null, P)) -> load P
       if (isa<ConstantPointerNull>(SI->getOperand(1)) &&
-          LI.getPointerAddressSpace() == 0) {
+          !NullPointerIsDefined(SI->getFunction(),
+                                LI.getPointerAddressSpace())) {
         LI.setOperand(0, SI->getOperand(2));
         return &LI;
       }
 
       // load (select (cond, P, null)) -> load P
       if (isa<ConstantPointerNull>(SI->getOperand(2)) &&
-          LI.getPointerAddressSpace() == 0) {
+          !NullPointerIsDefined(SI->getFunction(),
+                                LI.getPointerAddressSpace())) {
         LI.setOperand(0, SI->getOperand(1));
         return &LI;
       }
@@ -1050,7 +1107,7 @@ Instruction *llvm_seahorn::InstCombiner::visitLoadInst(LoadInst &LI) {
   return nullptr;
 }
 
-/// \brief Look for extractelement/insertvalue sequence that acts like a bitcast.
+/// Look for extractelement/insertvalue sequence that acts like a bitcast.
 ///
 /// \returns underlying value that was "cast", or nullptr otherwise.
 ///
@@ -1064,7 +1121,7 @@ Instruction *llvm_seahorn::InstCombiner::visitLoadInst(LoadInst &LI) {
 /// and the layout of a <2 x double> is isomorphic to a [2 x double],
 /// then %V1 can be safely approximated by a conceptual "bitcast" of %U.
 /// Note that %U may contain non-undef values where %V1 has undef.
-static Value *likeBitCastFromVector(llvm_seahorn::InstCombiner &IC, Value *V) {
+static Value *likeBitCastFromVector(InstCombiner &IC, Value *V) {
   Value *U = nullptr;
   while (auto *IV = dyn_cast<InsertValueInst>(V)) {
     auto *E = dyn_cast<ExtractElementInst>(IV->getInsertedValueOperand());
@@ -1076,11 +1133,12 @@ static Value *likeBitCastFromVector(llvm_seahorn::InstCombiner &IC, Value *V) {
     else if (U != W)
       return nullptr;
     auto *CI = dyn_cast<ConstantInt>(E->getIndexOperand());
-    if (!CI || IV->getNumIndices() != 1 || CI->getZExtValue() != *IV->idx_begin())
+    if (!CI || IV->getNumIndices() != 1 ||
+        CI->getZExtValue() != *IV->idx_begin())
       return nullptr;
     V = IV->getAggregateOperand();
   }
-  if (!isa<UndefValue>(V) ||!U)
+  if (!isa<UndefValue>(V) || !U)
     return nullptr;
 
   auto *UT = cast<VectorType>(U->getType());
@@ -1105,16 +1163,16 @@ static Value *likeBitCastFromVector(llvm_seahorn::InstCombiner &IC, Value *V) {
   return U;
 }
 
-/// \brief Combine stores to match the type of value being stored.
+/// Combine stores to match the type of value being stored.
 ///
 /// The core idea here is that the memory does not have any intrinsic type and
 /// where we can we should match the type of a store to the type of value being
 /// stored.
 ///
-/// However, this routine must never change the width of a store or the number of
-/// stores as that would introduce a semantic change. This combine is expected to
-/// be a semantic no-op which just allows stores to more closely model the types
-/// of their incoming values.
+/// However, this routine must never change the width of a store or the number
+/// of stores as that would introduce a semantic change. This combine is
+/// expected to be a semantic no-op which just allows stores to more closely
+/// model the types of their incoming values.
 ///
 /// Currently, we also refuse to change the precise type used for an atomic or
 /// volatile store. This is debatable, and might be reasonable to change later.
@@ -1125,7 +1183,7 @@ static Value *likeBitCastFromVector(llvm_seahorn::InstCombiner &IC, Value *V) {
 /// the caller must erase the store instruction. We have to let the caller erase
 /// the store instruction as otherwise there is no way to signal whether it was
 /// combined or not: IC.EraseInstFromFunction returns a null pointer.
-static bool combineStoreToValueType(llvm_seahorn::InstCombiner &IC, StoreInst &SI) {
+static bool combineStoreToValueType(InstCombiner &IC, StoreInst &SI) {
   // FIXME: We could probably with some care handle both volatile and ordered
   // atomic stores here but it isn't clear that this is important.
   if (!SI.isUnordered())
@@ -1157,7 +1215,7 @@ static bool combineStoreToValueType(llvm_seahorn::InstCombiner &IC, StoreInst &S
   return false;
 }
 
-static bool unpackStoreToAggregate(llvm_seahorn::InstCombiner &IC, StoreInst &SI) {
+static bool unpackStoreToAggregate(InstCombiner &IC, StoreInst &SI) {
   // FIXME: We could probably with some care handle both volatile and atomic
   // stores here but it isn't clear that this is important.
   if (!SI.isSimple())
@@ -1199,8 +1257,8 @@ static bool unpackStoreToAggregate(llvm_seahorn::InstCombiner &IC, StoreInst &SI
     auto *Zero = ConstantInt::get(IdxType, 0);
     for (unsigned i = 0; i < Count; i++) {
       Value *Indices[2] = {
-        Zero,
-        ConstantInt::get(IdxType, i),
+          Zero,
+          ConstantInt::get(IdxType, i),
       };
       auto *Ptr = IC.Builder.CreateInBoundsGEP(ST, Addr, makeArrayRef(Indices),
                                                AddrName);
@@ -1249,8 +1307,8 @@ static bool unpackStoreToAggregate(llvm_seahorn::InstCombiner &IC, StoreInst &SI
     uint64_t Offset = 0;
     for (uint64_t i = 0; i < NumElements; i++) {
       Value *Indices[2] = {
-        Zero,
-        ConstantInt::get(IdxType, i),
+          Zero,
+          ConstantInt::get(IdxType, i),
       };
       auto *Ptr = IC.Builder.CreateInBoundsGEP(AT, Addr, makeArrayRef(Indices),
                                                AddrName);
@@ -1279,16 +1337,15 @@ static bool unpackStoreToAggregate(llvm_seahorn::InstCombiner &IC, StoreInst &SI
 ///
 static bool equivalentAddressValues(Value *A, Value *B) {
   // Test if the values are trivially equivalent.
-  if (A == B) return true;
+  if (A == B)
+    return true;
 
   // Test if the values come form identical arithmetic instructions.
   // This uses isIdenticalToWhenDefined instead of isIdenticalTo because
   // its only used to compare two uses within the same basic block, which
   // means that they'll always either have the same value or one of them
   // will have an undefined value.
-  if (isa<BinaryOperator>(A) ||
-      isa<CastInst>(A) ||
-      isa<PHINode>(A) ||
+  if (isa<BinaryOperator>(A) || isa<CastInst>(A) || isa<PHINode>(A) ||
       isa<GetElementPtrInst>(A))
     if (Instruction *BI = dyn_cast<Instruction>(B))
       if (cast<Instruction>(A)->isIdenticalToWhenDefined(BI))
@@ -1298,7 +1355,47 @@ static bool equivalentAddressValues(Value *A, Value *B) {
   return false;
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitStoreInst(StoreInst &SI) {
+/// Converts store (bitcast (load (bitcast (select ...)))) to
+/// store (load (select ...)), where select is minmax:
+/// select ((cmp load V1, load V2), V1, V2).
+static bool removeBitcastsFromLoadStoreOnMinMax(InstCombiner &IC,
+                                                StoreInst &SI) {
+  // bitcast?
+  if (!match(SI.getPointerOperand(), m_BitCast(m_Value())))
+    return false;
+  // load? integer?
+  Value *LoadAddr;
+  if (!match(SI.getValueOperand(), m_Load(m_BitCast(m_Value(LoadAddr)))))
+    return false;
+  auto *LI = cast<LoadInst>(SI.getValueOperand());
+  if (!LI->getType()->isIntegerTy())
+    return false;
+  if (!isMinMaxWithLoads(LoadAddr))
+    return false;
+
+  if (!all_of(LI->users(), [LI, LoadAddr](User *U) {
+        auto *SI = dyn_cast<StoreInst>(U);
+        return SI && SI->getPointerOperand() != LI &&
+               peekThroughBitcast(SI->getPointerOperand()) != LoadAddr &&
+               !SI->getPointerOperand()->isSwiftError();
+      }))
+    return false;
+
+  IC.Builder.SetInsertPoint(LI);
+  LoadInst *NewLI = combineLoadToNewType(
+      IC, *LI, LoadAddr->getType()->getPointerElementType());
+  // Replace all the stores with stores of the newly loaded value.
+  for (auto *UI : LI->users()) {
+    auto *USI = cast<StoreInst>(UI);
+    IC.Builder.SetInsertPoint(USI);
+    combineStoreToNewValue(IC, *USI, NewLI);
+  }
+  IC.replaceInstUsesWith(*LI, UndefValue::get(LI->getType()));
+  IC.eraseInstFromFunction(*LI);
+  return true;
+}
+
+Instruction *InstCombiner::visitStoreInst(StoreInst &SI) {
   Value *Val = SI.getOperand(0);
   Value *Ptr = SI.getOperand(1);
 
@@ -1322,15 +1419,19 @@ Instruction *llvm_seahorn::InstCombiner::visitStoreInst(StoreInst &SI) {
   if (unpackStoreToAggregate(*this, SI))
     return eraseInstFromFunction(SI);
 
+  if (removeBitcastsFromLoadStoreOnMinMax(*this, SI))
+    return eraseInstFromFunction(SI);
+
   // Replace GEP indices if possible.
   if (Instruction *NewGEPI = replaceGEPIdxWithZero(*this, Ptr, SI)) {
-      Worklist.Add(NewGEPI);
-      return &SI;
+    Worklist.Add(NewGEPI);
+    return &SI;
   }
 
   // Don't hack volatile/ordered stores.
   // FIXME: Some bits are legal for ordered atomic stores; needs refactoring.
-  if (!SI.isUnordered()) return nullptr;
+  if (!SI.isUnordered())
+    return nullptr;
 
   // If the RHS is an alloca with a single use, zapify the store, making the
   // alloca dead.
@@ -1362,8 +1463,8 @@ Instruction *llvm_seahorn::InstCombiner::visitStoreInst(StoreInst &SI) {
 
     if (StoreInst *PrevSI = dyn_cast<StoreInst>(BBI)) {
       // Prev store isn't volatile, and stores to the same location?
-      if (PrevSI->isUnordered() && equivalentAddressValues(PrevSI->getOperand(1),
-                                                        SI.getOperand(1))) {
+      if (PrevSI->isUnordered() &&
+          equivalentAddressValues(PrevSI->getOperand(1), SI.getOperand(1))) {
         ++NumDeadStore;
         ++BBI;
         eraseInstFromFunction(*PrevSI);
@@ -1392,77 +1493,59 @@ Instruction *llvm_seahorn::InstCombiner::visitStoreInst(StoreInst &SI) {
   }
 
   // store X, null    -> turns into 'unreachable' in SimplifyCFG
-  if (isa<ConstantPointerNull>(Ptr) && SI.getPointerAddressSpace() == 0) {
+  // store X, GEP(null, Y) -> turns into 'unreachable' in SimplifyCFG
+  if (canSimplifyNullStoreOrGEP(SI)) {
     if (!isa<UndefValue>(Val)) {
       SI.setOperand(0, UndefValue::get(Val->getType()));
       if (Instruction *U = dyn_cast<Instruction>(Val))
-        Worklist.Add(U);  // Dropped a use.
+        Worklist.Add(U); // Dropped a use.
     }
-    return nullptr;  // Do not modify these!
+    return nullptr; // Do not modify these!
   }
 
   // store undef, Ptr -> noop
   if (isa<UndefValue>(Val))
     return eraseInstFromFunction(SI);
 
-  // If this store is the last instruction in the basic block (possibly
-  // excepting debug info instructions), and if the block ends with an
-  // unconditional branch, try to move it to the successor block.
+  // If this store is the second-to-last instruction in the basic block
+  // (excluding debug info and bitcasts of pointers) and if the block ends with
+  // an unconditional branch, try to move the store to the successor block.
   BBI = SI.getIterator();
   do {
     ++BBI;
   } while (isa<DbgInfoIntrinsic>(BBI) ||
            (isa<BitCastInst>(BBI) && BBI->getType()->isPointerTy()));
+
   if (BranchInst *BI = dyn_cast<BranchInst>(BBI))
     if (BI->isUnconditional())
-      if (SimplifyStoreAtEndOfBlock(SI))
-        return nullptr;  // xform done!
+      mergeStoreIntoSuccessor(SI);
 
   return nullptr;
 }
 
-/// SimplifyStoreAtEndOfBlock - Turn things like:
+/// Try to transform:
 ///   if () { *P = v1; } else { *P = v2 }
-/// into a phi node with a store in the successor.
-///
-/// Simplify things like:
+/// or:
 ///   *P = v1; if () { *P = v2; }
 /// into a phi node with a store in the successor.
-///
-bool llvm_seahorn::InstCombiner::SimplifyStoreAtEndOfBlock(StoreInst &SI) {
+bool InstCombiner::mergeStoreIntoSuccessor(StoreInst &SI) {
   assert(SI.isUnordered() &&
-         "this code has not been auditted for volatile or ordered store case");
+         "This code has not been audited for volatile or ordered store case.");
 
+  // Check if the successor block has exactly 2 incoming edges.
   BasicBlock *StoreBB = SI.getParent();
-
-  // Check to see if the successor block has exactly two incoming edges.  If
-  // so, see if the other predecessor contains a store to the same location.
-  // if so, insert a PHI node (if needed) and move the stores down.
   BasicBlock *DestBB = StoreBB->getTerminator()->getSuccessor(0);
-
-  // Determine whether Dest has exactly two predecessors and, if so, compute
-  // the other predecessor.
-  pred_iterator PI = pred_begin(DestBB);
-  BasicBlock *P = *PI;
-  BasicBlock *OtherBB = nullptr;
-
-  if (P != StoreBB)
-    OtherBB = P;
-
-  if (++PI == pred_end(DestBB))
+  if (!DestBB->hasNPredecessors(2))
     return false;
 
-  P = *PI;
-  if (P != StoreBB) {
-    if (OtherBB)
-      return false;
-    OtherBB = P;
-  }
-  if (++PI != pred_end(DestBB))
-    return false;
+  // Capture the other block (the block that doesn't contain our store).
+  pred_iterator PredIter = pred_begin(DestBB);
+  if (*PredIter == StoreBB)
+    ++PredIter;
+  BasicBlock *OtherBB = *PredIter;
 
-  // Bail out if all the relevant blocks aren't distinct (this can happen,
-  // for example, if SI is in an infinite loop)
+  // Bail out if all of the relevant blocks aren't distinct. This can happen,
+  // for example, if SI is in an infinite loop.
   if (StoreBB == DestBB || OtherBB == DestBB)
     return false;
 
@@ -1473,14 +1556,14 @@ bool llvm_seahorn::InstCombiner::SimplifyStoreAtEndOfBlock(StoreInst &SI) {
     return false;
 
   // If the other block ends in an unconditional branch, check for the 'if then
-  // else' case.  there is an instruction before the branch.
+  // else' case. There is an instruction before the branch.
   StoreInst *OtherStore = nullptr;
   if (OtherBr->isUnconditional()) {
     --BBI;
     // Skip over debugging info.
     while (isa<DbgInfoIntrinsic>(BBI) ||
            (isa<BitCastInst>(BBI) && BBI->getType()->isPointerTy())) {
-      if (BBI==OtherBB->begin())
+      if (BBI == OtherBB->begin())
         return false;
       --BBI;
     }
@@ -1498,7 +1581,7 @@ bool llvm_seahorn::InstCombiner::SimplifyStoreAtEndOfBlock(StoreInst &SI) {
       return false;
 
     // Okay, we know that OtherBr now goes to Dest and StoreBB, so this is an
-    // if/then triangle.  See if there is a store to the same ptr as SI that
+    // if/then triangle. See if there is a store to the same ptr as SI that
     // lives in OtherBB.
     for (;; --BBI) {
       // Check to see if we find the matching store.
@@ -1509,15 +1592,14 @@ bool llvm_seahorn::InstCombiner::SimplifyStoreAtEndOfBlock(StoreInst &SI) {
         break;
       }
       // If we find something that may be using or overwriting the stored
-      // value, or if we run out of instructions, we can't do the xform.
+      // value, or if we run out of instructions, we can't do the transform.
       if (BBI->mayReadFromMemory() || BBI->mayThrow() ||
           BBI->mayWriteToMemory() || BBI == OtherBB->begin())
         return false;
     }
 
-    // In order to eliminate the store in OtherBr, we have to
-    // make sure nothing reads or overwrites the stored value in
-    // StoreBB.
+    // In order to eliminate the store in OtherBr, we have to make sure nothing
+    // reads or overwrites the stored value in StoreBB.
     for (BasicBlock::iterator I = StoreBB->begin(); &*I != &SI; ++I) {
       // FIXME: This should really be AA driven.
       if (I->mayReadFromMemory() || I->mayThrow() || I->mayWriteToMemory())
@@ -1527,25 +1609,24 @@ bool llvm_seahorn::InstCombiner::SimplifyStoreAtEndOfBlock(StoreInst &SI) {
 
   // Insert a PHI node now if we need it.
   Value *MergedVal = OtherStore->getOperand(0);
+  // The debug locations of the original instructions might differ. Merge them.
+  DebugLoc MergedLoc = DILocation::getMergedLocation(SI.getDebugLoc(),
+                                                     OtherStore->getDebugLoc());
   if (MergedVal != SI.getOperand(0)) {
     PHINode *PN = PHINode::Create(MergedVal->getType(), 2, "storemerge");
     PN->addIncoming(SI.getOperand(0), SI.getParent());
     PN->addIncoming(OtherStore->getOperand(0), OtherBB);
     MergedVal = InsertNewInstBefore(PN, DestBB->front());
+    PN->setDebugLoc(MergedLoc);
   }
 
-  // Advance to a place where it is safe to insert the new store and
-  // insert it.
+  // Advance to a place where it is safe to insert the new store and insert it.
   BBI = DestBB->getFirstInsertionPt();
-  StoreInst *NewSI = new StoreInst(MergedVal, SI.getOperand(1),
-                                   SI.isVolatile(),
-                                   SI.getAlignment(),
-                                   SI.getOrdering(),
-                                   SI.getSyncScopeID());
+  StoreInst *NewSI =
+      new StoreInst(MergedVal, SI.getOperand(1), SI.isVolatile(),
+                    SI.getAlignment(), SI.getOrdering(), SI.getSyncScopeID());
   InsertNewInstBefore(NewSI, *BBI);
-  // The debug locations of the original instructions might differ; merge them.
-  NewSI->setDebugLoc(DILocation::getMergedLocation(SI.getDebugLoc(),
-                                                   OtherStore->getDebugLoc()));
+  NewSI->setDebugLoc(MergedLoc);
 
   // If the two stores had AA tags, merge them.
   AAMDNodes AATags;
