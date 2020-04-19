@@ -45,9 +45,9 @@
 using namespace llvm;
 using namespace PatternMatch;
 
-#define DEBUG_TYPE "instcombine"
+#define DEBUG_TYPE "sea-instcombine"
 
-static Value *createMinMax(InstCombiner::BuilderTy &Builder,
+static Value *createMinMax(llvm_seahorn::InstCombiner::BuilderTy &Builder,
                            SelectPatternFlavor SPF, Value *A, Value *B) {
   CmpInst::Predicate Pred = getMinMaxPred(SPF);
   assert(CmpInst::isIntPredicate(Pred) && "Expected integer predicate");
@@ -122,7 +122,7 @@ static Instruction *foldSelectBinOpIdentity(SelectInst &Sel,
 /// With some variations depending if FC is larger than TC, or the shift
 /// isn't needed, or the bit widths don't match.
 static Value *foldSelectICmpAnd(SelectInst &Sel, ICmpInst *Cmp,
-                                InstCombiner::BuilderTy &Builder) {
+                                llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   const APInt *SelTC, *SelFC;
   if (!match(Sel.getTrueValue(), m_APInt(SelTC)) ||
       !match(Sel.getFalseValue(), m_APInt(SelFC)))
@@ -281,7 +281,7 @@ static APInt getSelectFoldableConstant(BinaryOperator *I) {
 }
 
 /// We have (select c, TI, FI), and we know that TI and FI have the same opcode.
-Instruction *InstCombiner::foldSelectOpOp(SelectInst &SI, Instruction *TI,
+Instruction *llvm_seahorn::InstCombiner::foldSelectOpOp(SelectInst &SI, Instruction *TI,
                                           Instruction *FI) {
   // Don't break up min/max patterns. The hasOneUse checks below prevent that
   // for most cases, but vector min/max with bitcasts can be transformed. If the
@@ -411,7 +411,7 @@ static bool isSelect01(const APInt &C1I, const APInt &C2I) {
 
 /// Try to fold the select into one of the operands to allow further
 /// optimization.
-Instruction *InstCombiner::foldSelectIntoOp(SelectInst &SI, Value *TrueVal,
+Instruction *llvm_seahorn::InstCombiner::foldSelectIntoOp(SelectInst &SI, Value *TrueVal,
                                             Value *FalseVal) {
   // See the comment above GetSelectFoldableOperands for a description of the
   // transformation we are doing here.
@@ -490,7 +490,7 @@ Instruction *InstCombiner::foldSelectIntoOp(SelectInst &SI, Value *TrueVal,
 /// instructions, but we got rid of select.
 static Instruction *foldSelectICmpAndAnd(Type *SelType, const ICmpInst *Cmp,
                                          Value *TVal, Value *FVal,
-                                         InstCombiner::BuilderTy &Builder) {
+                                         llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   if (!(Cmp->hasOneUse() && Cmp->getOperand(0)->hasOneUse() &&
         Cmp->getPredicate() == ICmpInst::ICMP_EQ &&
         match(Cmp->getOperand(1), m_Zero()) && match(FVal, m_One())))
@@ -536,7 +536,7 @@ static Instruction *foldSelectICmpAndAnd(Type *SelType, const ICmpInst *Cmp,
 /// 3. The magnitude of C2 and C1 are flipped
 static Value *foldSelectICmpAndOr(const ICmpInst *IC, Value *TrueVal,
                                   Value *FalseVal,
-                                  InstCombiner::BuilderTy &Builder) {
+                                  llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   // Only handle integer compares. Also, if this is a vector select, we need a
   // vector compare.
   if (!TrueVal->getType()->isIntOrIntVectorTy() ||
@@ -634,7 +634,7 @@ static Value *foldSelectICmpAndOr(const ICmpInst *IC, Value *TrueVal,
 static Value *canonicalizeSaturatedSubtract(const ICmpInst *ICI,
                                             const Value *TrueVal,
                                             const Value *FalseVal,
-                                            InstCombiner::BuilderTy &Builder) {
+                                            llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   ICmpInst::Predicate Pred = ICI->getPredicate();
   if (!ICmpInst::isUnsigned(Pred))
     return nullptr;
@@ -690,7 +690,7 @@ static Value *canonicalizeSaturatedSubtract(const ICmpInst *ICI,
 /// into:
 ///   %0 = tail call i32 @llvm.cttz.i32(i32 %x, i1 false)
 static Value *foldSelectCttzCtlz(ICmpInst *ICI, Value *TrueVal, Value *FalseVal,
-                                 InstCombiner::BuilderTy &Builder) {
+                                 llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   ICmpInst::Predicate Pred = ICI->getPredicate();
   Value *CmpLHS = ICI->getOperand(0);
   Value *CmpRHS = ICI->getOperand(1);
@@ -838,7 +838,7 @@ static bool adjustMinMax(SelectInst &Sel, ICmpInst &Cmp) {
 /// constant operand of the select.
 static Instruction *
 canonicalizeMinMaxWithConstant(SelectInst &Sel, ICmpInst &Cmp,
-                               InstCombiner::BuilderTy &Builder) {
+                               llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   if (!Cmp.hasOneUse() || !isa<Constant>(Cmp.getOperand(1)))
     return nullptr;
 
@@ -877,7 +877,7 @@ canonicalizeMinMaxWithConstant(SelectInst &Sel, ICmpInst &Cmp,
 /// Canonicalize all these variants to 1 pattern.
 /// This makes CSE more likely.
 static Instruction *canonicalizeAbsNabs(SelectInst &Sel, ICmpInst &Cmp,
-                                        InstCombiner::BuilderTy &Builder) {
+                                        llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   if (!Cmp.hasOneUse() || !isa<Constant>(Cmp.getOperand(1)))
     return nullptr;
 
@@ -954,7 +954,7 @@ static Instruction *canonicalizeAbsNabs(SelectInst &Sel, ICmpInst &Cmp,
 }
 
 /// Visit a SelectInst that has an ICmpInst as its first operand.
-Instruction *InstCombiner::foldSelectInstWithICmp(SelectInst &SI,
+Instruction *llvm_seahorn::InstCombiner::foldSelectInstWithICmp(SelectInst &SI,
                                                   ICmpInst *ICI) {
   Value *TrueVal = SI.getTrueValue();
   Value *FalseVal = SI.getFalseValue();
@@ -1090,7 +1090,7 @@ static bool canSelectOperandBeMappingIntoPredBlock(const Value *V,
 
 /// We have an SPF (e.g. a min or max) of an SPF of the form:
 ///   SPF2(SPF1(A, B), C)
-Instruction *InstCombiner::foldSPFofSPF(Instruction *Inner,
+Instruction *llvm_seahorn::InstCombiner::foldSPFofSPF(Instruction *Inner,
                                         SelectPatternFlavor SPF1, Value *A,
                                         Value *B, Instruction &Outer,
                                         SelectPatternFlavor SPF2, Value *C) {
@@ -1208,7 +1208,7 @@ Instruction *InstCombiner::foldSPFofSPF(Instruction *Inner,
 /// Turn select C, (X + Y), (X - Y) --> (X + (select C, Y, (-Y))).
 /// This is even legal for FP.
 static Instruction *foldAddSubSelect(SelectInst &SI,
-                                     InstCombiner::BuilderTy &Builder) {
+                                     llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   Value *CondVal = SI.getCondition();
   Value *TrueVal = SI.getTrueValue();
   Value *FalseVal = SI.getFalseValue();
@@ -1277,7 +1277,7 @@ static Instruction *foldAddSubSelect(SelectInst &SI,
   return nullptr;
 }
 
-Instruction *InstCombiner::foldSelectExtConst(SelectInst &Sel) {
+Instruction *llvm_seahorn::InstCombiner::foldSelectExtConst(SelectInst &Sel) {
   Constant *C;
   if (!match(Sel.getTrueValue(), m_Constant(C)) &&
       !match(Sel.getFalseValue(), m_Constant(C)))
@@ -1380,7 +1380,7 @@ static Instruction *canonicalizeSelectToShuffle(SelectInst &SI) {
 /// select (cmp (bitcast C), (bitcast D)), (bitcast' C), (bitcast' D) -->
 /// bitcast (select (cmp (bitcast C), (bitcast D)), (bitcast C), (bitcast D))
 static Instruction *foldSelectCmpBitcasts(SelectInst &Sel,
-                                          InstCombiner::BuilderTy &Builder) {
+                                          llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   Value *Cond = Sel.getCondition();
   Value *TVal = Sel.getTrueValue();
   Value *FVal = Sel.getFalseValue();
@@ -1498,7 +1498,7 @@ static Instruction *foldSelectCmpXchg(SelectInst &SI) {
 /// Reduce a sequence of min/max with a common operand.
 static Instruction *factorizeMinMaxTree(SelectPatternFlavor SPF, Value *LHS,
                                         Value *RHS,
-                                        InstCombiner::BuilderTy &Builder) {
+                                        llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   assert(SelectPatternResult::isMinOrMax(SPF) && "Expected a min/max");
   // TODO: Allow FP min/max with nnan/nsz.
   if (!LHS->getType()->isIntOrIntVectorTy())
@@ -1606,7 +1606,7 @@ static Instruction *foldSelectRotate(SelectInst &Sel) {
   return IntrinsicInst::Create(F, {TVal, TVal, ShAmt});
 }
 
-Instruction *InstCombiner::visitSelectInst(SelectInst &SI) {
+Instruction *llvm_seahorn::InstCombiner::visitSelectInst(SelectInst &SI) {
   Value *CondVal = SI.getCondition();
   Value *TrueVal = SI.getTrueValue();
   Value *FalseVal = SI.getFalseValue();

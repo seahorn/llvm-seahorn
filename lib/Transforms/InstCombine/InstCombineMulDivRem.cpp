@@ -42,12 +42,12 @@
 using namespace llvm;
 using namespace PatternMatch;
 
-#define DEBUG_TYPE "instcombine"
+#define DEBUG_TYPE "sea-instcombine"
 
 /// The specific integer value is used in a context where it is known to be
 /// non-zero.  If this allows us to simplify the computation, do so and return
 /// the new operand, otherwise return null.
-static Value *simplifyValueKnownNonZero(Value *V, InstCombiner &IC,
+static Value *simplifyValueKnownNonZero(Value *V, llvm_seahorn::InstCombiner &IC,
                                         Instruction &CxtI) {
   // If V has multiple uses, then we would have to do more analysis to determine
   // if this is safe.  For example, the use could be in dynamically unreached
@@ -96,7 +96,7 @@ static Value *simplifyValueKnownNonZero(Value *V, InstCombiner &IC,
   return MadeChange ? V : nullptr;
 }
 
-/// A helper routine of InstCombiner::visitMul().
+/// A helper routine of llvm_seahorn::InstCombiner::visitMul().
 ///
 /// If C is a scalar/vector of known powers of 2, then this function returns
 /// a new scalar/vector obtained from logBase2 of C.
@@ -126,7 +126,7 @@ static Constant *getLogBase2(Type *Ty, Constant *C) {
   return ConstantVector::get(Elts);
 }
 
-Instruction *InstCombiner::visitMul(BinaryOperator &I) {
+Instruction *llvm_seahorn::InstCombiner::visitMul(BinaryOperator &I) {
   if (Value *V = SimplifyMulInst(I.getOperand(0), I.getOperand(1),
                                  SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
@@ -169,7 +169,7 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
       return BO;
     }
 
-    if (match(&I, m_Mul(m_Value(NewOp), m_Constant(C1)))) {
+    if (!AvoidBv && match(&I, m_Mul(m_Value(NewOp), m_Constant(C1)))) {
       // Replace X*(2^C) with X << C, where C is either a scalar or a vector.
       if (Constant *NewCst = getLogBase2(NewOp->getType(), C1)) {
         BinaryOperator *Shl = BinaryOperator::CreateShl(NewOp, NewCst);
@@ -344,7 +344,7 @@ Instruction *InstCombiner::visitMul(BinaryOperator &I) {
   return Changed ? &I : nullptr;
 }
 
-Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
+Instruction *llvm_seahorn::InstCombiner::visitFMul(BinaryOperator &I) {
   if (Value *V =
           SimplifyFMulInst(I.getOperand(0), I.getOperand(1),
                            I.getFastMathFlags(), SQ.getWithInstruction(&I)))
@@ -488,7 +488,7 @@ Instruction *InstCombiner::visitFMul(BinaryOperator &I) {
 /// Fold a divide or remainder with a select instruction divisor when one of the
 /// select operands is zero. In that case, we can use the other select operand
 /// because div/rem by zero is undefined.
-bool InstCombiner::simplifyDivRemOfSelectWithZeroOp(BinaryOperator &I) {
+bool llvm_seahorn::InstCombiner::simplifyDivRemOfSelectWithZeroOp(BinaryOperator &I) {
   SelectInst *SI = dyn_cast<SelectInst>(I.getOperand(1));
   if (!SI)
     return false;
@@ -588,7 +588,7 @@ static bool isMultiple(const APInt &C1, const APInt &C2, APInt &Quotient,
 /// instructions (udiv and sdiv). It is called by the visitors to those integer
 /// division instructions.
 /// Common integer divide transforms
-Instruction *InstCombiner::commonIDivTransforms(BinaryOperator &I) {
+Instruction *llvm_seahorn::InstCombiner::commonIDivTransforms(BinaryOperator &I) {
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
   bool IsSigned = I.getOpcode() == Instruction::SDiv;
   Type *Ty = I.getType();
@@ -726,7 +726,7 @@ namespace {
 
 using FoldUDivOperandCb = Instruction *(*)(Value *Op0, Value *Op1,
                                            const BinaryOperator &I,
-                                           InstCombiner &IC);
+                                           llvm_seahorn::InstCombiner &IC);
 
 /// Used to maintain state for visitUDivOperand().
 struct UDivFoldAction {
@@ -755,7 +755,7 @@ struct UDivFoldAction {
 
 // X udiv 2^C -> X >> C
 static Instruction *foldUDivPow2Cst(Value *Op0, Value *Op1,
-                                    const BinaryOperator &I, InstCombiner &IC) {
+                                    const BinaryOperator &I, llvm_seahorn::InstCombiner &IC) {
   Constant *C1 = getLogBase2(Op0->getType(), cast<Constant>(Op1));
   if (!C1)
     llvm_unreachable("Failed to constant fold udiv -> logbase2");
@@ -768,7 +768,7 @@ static Instruction *foldUDivPow2Cst(Value *Op0, Value *Op1,
 // X udiv (C1 << N), where C1 is "1<<C2"  -->  X >> (N+C2)
 // X udiv (zext (C1 << N)), where C1 is "1<<C2"  -->  X >> (N+C2)
 static Instruction *foldUDivShl(Value *Op0, Value *Op1, const BinaryOperator &I,
-                                InstCombiner &IC) {
+                                llvm_seahorn::InstCombiner &IC) {
   Value *ShiftLeft;
   if (!match(Op1, m_ZExt(m_Value(ShiftLeft))))
     ShiftLeft = Op1;
@@ -828,7 +828,7 @@ static size_t visitUDivOperand(Value *Op0, Value *Op1, const BinaryOperator &I,
 /// If we have zero-extended operands of an unsigned div or rem, we may be able
 /// to narrow the operation (sink the zext below the math).
 static Instruction *narrowUDivURem(BinaryOperator &I,
-                                   InstCombiner::BuilderTy &Builder) {
+                                   llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   Instruction::BinaryOps Opcode = I.getOpcode();
   Value *N = I.getOperand(0);
   Value *D = I.getOperand(1);
@@ -862,7 +862,7 @@ static Instruction *narrowUDivURem(BinaryOperator &I,
   return nullptr;
 }
 
-Instruction *InstCombiner::visitUDiv(BinaryOperator &I) {
+Instruction *llvm_seahorn::InstCombiner::visitUDiv(BinaryOperator &I) {
   if (Value *V = SimplifyUDivInst(I.getOperand(0), I.getOperand(1),
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
@@ -943,7 +943,7 @@ Instruction *InstCombiner::visitUDiv(BinaryOperator &I) {
                                   SelectLHS, SelectRHS);
       }
 
-      // If this is the last action to process, return it to the InstCombiner.
+      // If this is the last action to process, return it to the llvm_seahorn::InstCombiner.
       // Otherwise, we insert it before the UDiv and record it so that we may
       // use it as part of a joining action (i.e., a SelectInst).
       if (e - i != 1) {
@@ -956,7 +956,7 @@ Instruction *InstCombiner::visitUDiv(BinaryOperator &I) {
   return nullptr;
 }
 
-Instruction *InstCombiner::visitSDiv(BinaryOperator &I) {
+Instruction *llvm_seahorn::InstCombiner::visitSDiv(BinaryOperator &I) {
   if (Value *V = SimplifySDivInst(I.getOperand(0), I.getOperand(1),
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
@@ -1103,7 +1103,7 @@ static Instruction *foldFDivConstantDividend(BinaryOperator &I) {
   return BinaryOperator::CreateFDivFMF(NewC, X, &I);
 }
 
-Instruction *InstCombiner::visitFDiv(BinaryOperator &I) {
+Instruction *llvm_seahorn::InstCombiner::visitFDiv(BinaryOperator &I) {
   if (Value *V =
           SimplifyFDivInst(I.getOperand(0), I.getOperand(1),
                            I.getFastMathFlags(), SQ.getWithInstruction(&I)))
@@ -1194,7 +1194,7 @@ Instruction *InstCombiner::visitFDiv(BinaryOperator &I) {
 /// instructions (urem and srem). It is called by the visitors to those integer
 /// remainder instructions.
 /// Common integer remainder transforms
-Instruction *InstCombiner::commonIRemTransforms(BinaryOperator &I) {
+Instruction *llvm_seahorn::InstCombiner::commonIRemTransforms(BinaryOperator &I) {
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
 
   // The RHS is known non-zero.
@@ -1234,7 +1234,7 @@ Instruction *InstCombiner::commonIRemTransforms(BinaryOperator &I) {
   return nullptr;
 }
 
-Instruction *InstCombiner::visitURem(BinaryOperator &I) {
+Instruction *llvm_seahorn::InstCombiner::visitURem(BinaryOperator &I) {
   if (Value *V = SimplifyURemInst(I.getOperand(0), I.getOperand(1),
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
@@ -1251,7 +1251,7 @@ Instruction *InstCombiner::visitURem(BinaryOperator &I) {
   // X urem Y -> X and Y-1, where Y is a power of 2,
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
   Type *Ty = I.getType();
-  if (isKnownToBeAPowerOfTwo(Op1, /*OrZero*/ true, 0, &I)) {
+  if (!AvoidBv && isKnownToBeAPowerOfTwo(Op1, /*OrZero*/ true, 0, &I)) {
     Constant *N1 = Constant::getAllOnesValue(Ty);
     Value *Add = Builder.CreateAdd(Op1, N1);
     return BinaryOperator::CreateAnd(Op0, Add);
@@ -1281,7 +1281,7 @@ Instruction *InstCombiner::visitURem(BinaryOperator &I) {
   return nullptr;
 }
 
-Instruction *InstCombiner::visitSRem(BinaryOperator &I) {
+Instruction *llvm_seahorn::InstCombiner::visitSRem(BinaryOperator &I) {
   if (Value *V = SimplifySRemInst(I.getOperand(0), I.getOperand(1),
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
@@ -1354,7 +1354,7 @@ Instruction *InstCombiner::visitSRem(BinaryOperator &I) {
   return nullptr;
 }
 
-Instruction *InstCombiner::visitFRem(BinaryOperator &I) {
+Instruction *llvm_seahorn::InstCombiner::visitFRem(BinaryOperator &I) {
   if (Value *V =
           SimplifyFRemInst(I.getOperand(0), I.getOperand(1),
                            I.getFastMathFlags(), SQ.getWithInstruction(&I)))

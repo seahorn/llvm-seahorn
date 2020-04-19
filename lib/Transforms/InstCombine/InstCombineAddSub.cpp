@@ -36,7 +36,7 @@
 using namespace llvm;
 using namespace PatternMatch;
 
-#define DEBUG_TYPE "instcombine"
+#define DEBUG_TYPE "sea-instcombine"
 
 namespace {
 
@@ -180,7 +180,7 @@ private:
 ///
 class FAddCombine {
 public:
-  FAddCombine(InstCombiner::BuilderTy &B) : Builder(B) {}
+  FAddCombine(llvm_seahorn::InstCombiner::BuilderTy &B) : Builder(B) {}
 
   Value *simplify(Instruction *FAdd);
 
@@ -212,7 +212,7 @@ private:
   void incCreateInstNum() {}
 #endif
 
-  InstCombiner::BuilderTy &Builder;
+  llvm_seahorn::InstCombiner::BuilderTy &Builder;
   Instruction *Instr = nullptr;
 };
 
@@ -773,7 +773,7 @@ Value *FAddCombine::createAddendVal(const FAddend &Opnd, bool &NeedNeg) {
 //   ADD(XOR(AND(Z, C), C), 1) == NEG(OR(Z, ~C))
 //   XOR(AND(Z, C), (C + 1)) == NEG(OR(Z, ~C)) if C is even
 static Value *checkForNegativeOperand(BinaryOperator &I,
-                                      InstCombiner::BuilderTy &Builder) {
+                                      llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   Value *LHS = I.getOperand(0), *RHS = I.getOperand(1);
 
   // This function creates 2 instructions to replace ADD, we need at least one
@@ -828,7 +828,7 @@ static Value *checkForNegativeOperand(BinaryOperator &I,
   return nullptr;
 }
 
-Instruction *InstCombiner::foldAddWithConstant(BinaryOperator &Add) {
+Instruction *llvm_seahorn::InstCombiner::foldAddWithConstant(BinaryOperator &Add) {
   Value *Op0 = Add.getOperand(0), *Op1 = Add.getOperand(1);
   Constant *Op1C;
   if (!match(Op1, m_Constant(Op1C)))
@@ -840,7 +840,7 @@ Instruction *InstCombiner::foldAddWithConstant(BinaryOperator &Add) {
   Value *X, *Y;
 
   // add (sub X, Y), -1 --> add (not Y), X
-  if (match(Op0, m_OneUse(m_Sub(m_Value(X), m_Value(Y)))) &&
+  if (!AvoidBv && match(Op0, m_OneUse(m_Sub(m_Value(X), m_Value(Y)))) &&
       match(Op1, m_AllOnes()))
     return BinaryOperator::CreateAdd(Builder.CreateNot(Y), X);
 
@@ -857,7 +857,7 @@ Instruction *InstCombiner::foldAddWithConstant(BinaryOperator &Add) {
   if (!match(Op1, m_APInt(C)))
     return nullptr;
 
-  if (C->isSignMask()) {
+  if (!AvoidBv && C->isSignMask()) {
     // If wrapping is not allowed, then the addition must set the sign bit:
     // X + (signmask) --> X | signmask
     if (Add.hasNoSignedWrap() || Add.hasNoUnsignedWrap())
@@ -982,7 +982,7 @@ static bool MulWillOverflow(APInt &C0, APInt &C1, bool IsSigned) {
 
 // Simplifies X % C0 + (( X / C0 ) % C1) * C0 to X % (C0 * C1), where (C0 * C1)
 // does not overflow.
-Value *InstCombiner::SimplifyAddWithRemainder(BinaryOperator &I) {
+Value *llvm_seahorn::InstCombiner::SimplifyAddWithRemainder(BinaryOperator &I) {
   Value *LHS = I.getOperand(0), *RHS = I.getOperand(1);
   Value *X, *MulOpV;
   APInt C0, MulOpC;
@@ -1020,7 +1020,7 @@ Value *InstCombiner::SimplifyAddWithRemainder(BinaryOperator &I) {
 /// Because a 'not' is better for bit-tracking analysis and other transforms
 /// than an 'add'. The new shl is always nsw, and is nuw if old `and` was.
 static Instruction *canonicalizeLowbitMask(BinaryOperator &I,
-                                           InstCombiner::BuilderTy &Builder) {
+                                           llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   Value *NBits;
   if (!match(&I, m_Add(m_OneUse(m_Shl(m_One(), m_Value(NBits))), m_AllOnes())))
     return nullptr;
@@ -1037,7 +1037,7 @@ static Instruction *canonicalizeLowbitMask(BinaryOperator &I,
   return BinaryOperator::CreateNot(NotMask, I.getName());
 }
 
-Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
+Instruction *llvm_seahorn::InstCombiner::visitAdd(BinaryOperator &I) {
   if (Value *V =
           SimplifyAddInst(I.getOperand(0), I.getOperand(1), I.hasNoSignedWrap(),
                           I.hasNoUnsignedWrap(), SQ.getWithInstruction(&I)))
@@ -1098,7 +1098,7 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
       }
       // (X + signmask) + C could have gotten canonicalized to (X^signmask) + C,
       // transform them into (X + (signmask ^ C))
-      if (XorRHS->getValue().isSignMask())
+      if (!AvoidBv && XorRHS->getValue().isSignMask())
         return BinaryOperator::CreateAdd(XorLHS,
                                          ConstantExpr::getXor(XorRHS, CI));
     }
@@ -1108,7 +1108,7 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
     return BinaryOperator::CreateXor(LHS, RHS);
 
   // X + X --> X << 1
-  if (LHS == RHS) {
+  if (!AvoidBv && LHS == RHS) {
     auto *Shl = BinaryOperator::CreateShl(LHS, ConstantInt::get(Ty, 1));
     Shl->setHasNoSignedWrap(I.hasNoSignedWrap());
     Shl->setHasNoUnsignedWrap(I.hasNoUnsignedWrap());
@@ -1142,7 +1142,7 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
     return replaceInstUsesWith(I, V);
 
   // A+B --> A|B iff A and B have no bits set in common.
-  if (haveNoCommonBitsSet(LHS, RHS, DL, &AC, &I, &DT))
+  if (!AvoidBv && haveNoCommonBitsSet(LHS, RHS, DL, &AC, &I, &DT))
     return BinaryOperator::CreateOr(LHS, RHS);
 
   // FIXME: We already did a check for ConstantInt RHS above this.
@@ -1236,7 +1236,7 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
 
 /// Factor a common operand out of fadd/fsub of fmul/fdiv.
 static Instruction *factorizeFAddFSub(BinaryOperator &I,
-                                      InstCombiner::BuilderTy &Builder) {
+                                      llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   assert((I.getOpcode() == Instruction::FAdd ||
           I.getOpcode() == Instruction::FSub) &&
          "Expecting fadd/fsub");
@@ -1274,7 +1274,7 @@ static Instruction *factorizeFAddFSub(BinaryOperator &I,
                 : BinaryOperator::CreateFDivFMF(XY, Z, &I);
 }
 
-Instruction *InstCombiner::visitFAdd(BinaryOperator &I) {
+Instruction *llvm_seahorn::InstCombiner::visitFAdd(BinaryOperator &I) {
   if (Value *V =
           SimplifyFAddInst(I.getOperand(0), I.getOperand(1),
                            I.getFastMathFlags(), SQ.getWithInstruction(&I)))
@@ -1372,7 +1372,7 @@ Instruction *InstCombiner::visitFAdd(BinaryOperator &I) {
 /// Optimize pointer differences into the same array into a size.  Consider:
 ///  &A[10] - &A[0]: we should compile this to "10".  LHS/RHS are the pointer
 /// operands to the ptrtoint instructions for the LHS/RHS of the subtract.
-Value *InstCombiner::OptimizePointerDifference(Value *LHS, Value *RHS,
+Value *llvm_seahorn::InstCombiner::OptimizePointerDifference(Value *LHS, Value *RHS,
                                                Type *Ty) {
   // If LHS is a gep based on RHS or RHS is a gep based on LHS, we can optimize
   // this.
@@ -1455,7 +1455,7 @@ Value *InstCombiner::OptimizePointerDifference(Value *LHS, Value *RHS,
   return Builder.CreateIntCast(Result, Ty, true);
 }
 
-Instruction *InstCombiner::visitSub(BinaryOperator &I) {
+Instruction *llvm_seahorn::InstCombiner::visitSub(BinaryOperator &I) {
   if (Value *V =
           SimplifySubInst(I.getOperand(0), I.getOperand(1), I.hasNoSignedWrap(),
                           I.hasNoUnsignedWrap(), SQ.getWithInstruction(&I)))
@@ -1490,7 +1490,7 @@ Instruction *InstCombiner::visitSub(BinaryOperator &I) {
     return BinaryOperator::CreateXor(Op0, Op1);
 
   // Replace (-1 - A) with (~A).
-  if (match(Op0, m_AllOnes()))
+  if (!AvoidBv && match(Op0, m_AllOnes()))
     return BinaryOperator::CreateNot(Op1);
 
   // (~X) - (~Y) --> Y - X
@@ -1583,7 +1583,7 @@ Instruction *InstCombiner::visitSub(BinaryOperator &I) {
 
     // Turn this into a xor if LHS is 2^n-1 and the remaining bits are known
     // zero.
-    if (Op0C->isMask()) {
+    if (!AvoidBv && Op0C->isMask()) {
       KnownBits RHSKnown = computeKnownBits(Op1, 0, &I);
       if ((*Op0C | RHSKnown.Zero).isAllOnesValue())
         return BinaryOperator::CreateXor(Op1, Op0);
@@ -1751,7 +1751,7 @@ Instruction *InstCombiner::visitSub(BinaryOperator &I) {
   return Changed ? &I : nullptr;
 }
 
-Instruction *InstCombiner::visitFSub(BinaryOperator &I) {
+Instruction *llvm_seahorn::InstCombiner::visitFSub(BinaryOperator &I) {
   if (Value *V =
           SimplifyFSubInst(I.getOperand(0), I.getOperand(1),
                            I.getFastMathFlags(), SQ.getWithInstruction(&I)))

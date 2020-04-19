@@ -69,12 +69,12 @@
 using namespace llvm;
 using namespace PatternMatch;
 
-#define DEBUG_TYPE "instcombine"
+#define DEBUG_TYPE "sea-instcombine"
 
 STATISTIC(NumSimplified, "Number of library calls simplified");
 
 static cl::opt<unsigned> GuardWideningWindow(
-    "instcombine-guard-widening-window", cl::init(3),
+    "seaopt-instcombine-guard-widening-window", cl::init(3),
     cl::desc("How wide an instruction window to bypass looking for "
              "another guard"));
 
@@ -105,7 +105,7 @@ static Constant *getNegativeIsTrueBoolVec(ConstantDataVector *V) {
   return ConstantVector::get(BoolVec);
 }
 
-Instruction *InstCombiner::SimplifyAnyMemTransfer(AnyMemTransferInst *MI) {
+Instruction *llvm_seahorn::InstCombiner::SimplifyAnyMemTransfer(AnyMemTransferInst *MI) {
   unsigned DstAlign = getKnownAlignment(MI->getRawDest(), DL, MI, &AC, &DT);
   unsigned CopyDstAlign = MI->getDestAlignment();
   if (CopyDstAlign < DstAlign) {
@@ -210,7 +210,7 @@ Instruction *InstCombiner::SimplifyAnyMemTransfer(AnyMemTransferInst *MI) {
   return MI;
 }
 
-Instruction *InstCombiner::SimplifyAnyMemSet(AnyMemSetInst *MI) {
+Instruction *llvm_seahorn::InstCombiner::SimplifyAnyMemSet(AnyMemSetInst *MI) {
   unsigned Alignment = getKnownAlignment(MI->getDest(), DL, MI, &AC, &DT);
   if (MI->getDestAlignment() < Alignment) {
     MI->setDestAlignment(Alignment);
@@ -264,7 +264,7 @@ Instruction *InstCombiner::SimplifyAnyMemSet(AnyMemSetInst *MI) {
 }
 
 static Value *simplifyX86immShift(const IntrinsicInst &II,
-                                  InstCombiner::BuilderTy &Builder) {
+                                  llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   bool LogicalShift = false;
   bool ShiftLeft = false;
 
@@ -401,7 +401,7 @@ static Value *simplifyX86immShift(const IntrinsicInst &II,
 // Unlike the generic IR shifts, the intrinsics have defined behaviour for out
 // of range shift amounts (logical - set to zero, arithmetic - splat sign bit).
 static Value *simplifyX86varShift(const IntrinsicInst &II,
-                                  InstCombiner::BuilderTy &Builder) {
+                                  llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   bool LogicalShift = false;
   bool ShiftLeft = false;
 
@@ -602,7 +602,7 @@ static Value *simplifyX86pack(IntrinsicInst &II, bool IsSigned) {
 
 // Replace X86-specific intrinsics with generic floor-ceil where applicable.
 static Value *simplifyX86round(IntrinsicInst &II,
-                               InstCombiner::BuilderTy &Builder) {
+                               llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   ConstantInt *Arg = nullptr;
   Intrinsic::ID IntrinsicID = II.getIntrinsicID();
 
@@ -700,7 +700,7 @@ static Value *simplifyX86round(IntrinsicInst &II,
 }
 
 static Value *simplifyX86movmsk(const IntrinsicInst &II,
-                                InstCombiner::BuilderTy &Builder) {
+                                llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   Value *Arg = II.getArgOperand(0);
   Type *ResTy = II.getType();
   Type *ArgTy = Arg->getType();
@@ -740,7 +740,7 @@ static Value *simplifyX86movmsk(const IntrinsicInst &II,
   // TODO: We can also convert a bitcast with wider elements, but that requires
   // duplicating the bool source sign bits to match the number of elements
   // expected by the movmsk call.
-  Arg = peekThroughBitcast(Arg);
+  Arg = llvm_seahorn::peekThroughBitcast(Arg);
   Value *X;
   if (Arg->getType()->isVectorTy() &&
       Arg->getType()->getVectorNumElements() == ArgTy->getVectorNumElements() &&
@@ -756,7 +756,7 @@ static Value *simplifyX86movmsk(const IntrinsicInst &II,
 }
 
 static Value *simplifyX86insertps(const IntrinsicInst &II,
-                                  InstCombiner::BuilderTy &Builder) {
+                                  llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   auto *CInt = dyn_cast<ConstantInt>(II.getArgOperand(2));
   if (!CInt)
     return nullptr;
@@ -816,7 +816,7 @@ static Value *simplifyX86insertps(const IntrinsicInst &II,
 /// or conversion to a shuffle vector.
 static Value *simplifyX86extrq(IntrinsicInst &II, Value *Op0,
                                ConstantInt *CILength, ConstantInt *CIIndex,
-                               InstCombiner::BuilderTy &Builder) {
+                               llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   auto LowConstantHighUndef = [&](uint64_t Val) {
     Type *IntTy64 = Type::getInt64Ty(II.getContext());
     Constant *Args[] = {ConstantInt::get(IntTy64, Val),
@@ -910,7 +910,7 @@ static Value *simplifyX86extrq(IntrinsicInst &II, Value *Op0,
 /// folding or conversion to a shuffle vector.
 static Value *simplifyX86insertq(IntrinsicInst &II, Value *Op0, Value *Op1,
                                  APInt APLength, APInt APIndex,
-                                 InstCombiner::BuilderTy &Builder) {
+                                 llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   // From AMD documentation: "The bit index and field length are each six bits
   // in length other bits of the field are ignored."
   APIndex = APIndex.zextOrTrunc(6);
@@ -1004,7 +1004,7 @@ static Value *simplifyX86insertq(IntrinsicInst &II, Value *Op0, Value *Op1,
 
 /// Attempt to convert pshufb* to shufflevector if the mask is constant.
 static Value *simplifyX86pshufb(const IntrinsicInst &II,
-                                InstCombiner::BuilderTy &Builder) {
+                                llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   Constant *V = dyn_cast<Constant>(II.getArgOperand(1));
   if (!V)
     return nullptr;
@@ -1051,7 +1051,7 @@ static Value *simplifyX86pshufb(const IntrinsicInst &II,
 
 /// Attempt to convert vpermilvar* to shufflevector if the mask is constant.
 static Value *simplifyX86vpermilvar(const IntrinsicInst &II,
-                                    InstCombiner::BuilderTy &Builder) {
+                                    llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   Constant *V = dyn_cast<Constant>(II.getArgOperand(1));
   if (!V)
     return nullptr;
@@ -1101,7 +1101,7 @@ static Value *simplifyX86vpermilvar(const IntrinsicInst &II,
 
 /// Attempt to convert vpermd/vpermps to shufflevector if the mask is constant.
 static Value *simplifyX86vpermv(const IntrinsicInst &II,
-                                InstCombiner::BuilderTy &Builder) {
+                                llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   auto *V = dyn_cast<Constant>(II.getArgOperand(1));
   if (!V)
     return nullptr;
@@ -1138,7 +1138,7 @@ static Value *simplifyX86vpermv(const IntrinsicInst &II,
 
 /// Decode XOP integer vector comparison intrinsics.
 static Value *simplifyX86vpcom(const IntrinsicInst &II,
-                               InstCombiner::BuilderTy &Builder,
+                               llvm_seahorn::InstCombiner::BuilderTy &Builder,
                                bool IsSigned) {
   if (auto *CInt = dyn_cast<ConstantInt>(II.getArgOperand(2))) {
     uint64_t Imm = CInt->getZExtValue() & 0x7;
@@ -1194,7 +1194,7 @@ static bool maskIsAllOneOrUndef(Value *Mask) {
 }
 
 static Value *simplifyMaskedLoad(const IntrinsicInst &II,
-                                 InstCombiner::BuilderTy &Builder) {
+                                 llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   // If the mask is all ones or undefs, this is a plain vector load of the 1st
   // argument.
   if (maskIsAllOneOrUndef(II.getArgOperand(2))) {
@@ -1206,7 +1206,7 @@ static Value *simplifyMaskedLoad(const IntrinsicInst &II,
   return nullptr;
 }
 
-static Instruction *simplifyMaskedStore(IntrinsicInst &II, InstCombiner &IC) {
+static Instruction *simplifyMaskedStore(IntrinsicInst &II, llvm_seahorn::InstCombiner &IC) {
   auto *ConstMask = dyn_cast<Constant>(II.getArgOperand(3));
   if (!ConstMask)
     return nullptr;
@@ -1225,7 +1225,7 @@ static Instruction *simplifyMaskedStore(IntrinsicInst &II, InstCombiner &IC) {
   return nullptr;
 }
 
-static Instruction *simplifyMaskedGather(IntrinsicInst &II, InstCombiner &IC) {
+static Instruction *simplifyMaskedGather(IntrinsicInst &II, llvm_seahorn::InstCombiner &IC) {
   // If the mask is all zeros, return the "passthru" argument of the gather.
   auto *ConstMask = dyn_cast<Constant>(II.getArgOperand(2));
   if (ConstMask && ConstMask->isNullValue())
@@ -1243,7 +1243,7 @@ static Instruction *simplifyMaskedGather(IntrinsicInst &II, InstCombiner &IC) {
 /// This is legal because it preserves the most recent information about
 /// the presence or absence of invariant.group.
 static Instruction *simplifyInvariantGroupIntrinsic(IntrinsicInst &II,
-                                                    InstCombiner &IC) {
+                                                    llvm_seahorn::InstCombiner &IC) {
   auto *Arg = II.getArgOperand(0);
   auto *StrippedArg = Arg->stripPointerCasts();
   auto *StrippedInvariantGroupsArg = Arg->stripPointerCastsAndInvariantGroups();
@@ -1268,7 +1268,7 @@ static Instruction *simplifyInvariantGroupIntrinsic(IntrinsicInst &II,
   return cast<Instruction>(Result);
 }
 
-static Instruction *simplifyMaskedScatter(IntrinsicInst &II, InstCombiner &IC) {
+static Instruction *simplifyMaskedScatter(IntrinsicInst &II, llvm_seahorn::InstCombiner &IC) {
   // If the mask is all zeros, a scatter does nothing.
   auto *ConstMask = dyn_cast<Constant>(II.getArgOperand(3));
   if (ConstMask && ConstMask->isNullValue())
@@ -1277,7 +1277,7 @@ static Instruction *simplifyMaskedScatter(IntrinsicInst &II, InstCombiner &IC) {
   return nullptr;
 }
 
-static Instruction *foldCttzCtlz(IntrinsicInst &II, InstCombiner &IC) {
+static Instruction *foldCttzCtlz(IntrinsicInst &II, llvm_seahorn::InstCombiner &IC) {
   assert((II.getIntrinsicID() == Intrinsic::cttz ||
           II.getIntrinsicID() == Intrinsic::ctlz) &&
          "Expected cttz or ctlz intrinsic");
@@ -1328,7 +1328,7 @@ static Instruction *foldCttzCtlz(IntrinsicInst &II, InstCombiner &IC) {
   return nullptr;
 }
 
-static Instruction *foldCtpop(IntrinsicInst &II, InstCombiner &IC) {
+static Instruction *foldCtpop(IntrinsicInst &II, llvm_seahorn::InstCombiner &IC) {
   assert(II.getIntrinsicID() == Intrinsic::ctpop && "Expected ctpop intrinsic");
   Value *Op0 = II.getArgOperand(0);
   // FIXME: Try to simplify vectors of integers.
@@ -1359,7 +1359,7 @@ static Instruction *foldCtpop(IntrinsicInst &II, InstCombiner &IC) {
 // TODO: If the x86 backend knew how to convert a bool vector mask back to an
 // XMM register mask efficiently, we could transform all x86 masked intrinsics
 // to LLVM masked intrinsics and remove the x86 masked intrinsic defs.
-static Instruction *simplifyX86MaskedLoad(IntrinsicInst &II, InstCombiner &IC) {
+static Instruction *simplifyX86MaskedLoad(IntrinsicInst &II, llvm_seahorn::InstCombiner &IC) {
   Value *Ptr = II.getOperand(0);
   Value *Mask = II.getOperand(1);
   Constant *ZeroVec = Constant::getNullValue(II.getType());
@@ -1395,7 +1395,7 @@ static Instruction *simplifyX86MaskedLoad(IntrinsicInst &II, InstCombiner &IC) {
 // TODO: If the x86 backend knew how to convert a bool vector mask back to an
 // XMM register mask efficiently, we could transform all x86 masked intrinsics
 // to LLVM masked intrinsics and remove the x86 masked intrinsic defs.
-static bool simplifyX86MaskedStore(IntrinsicInst &II, InstCombiner &IC) {
+static bool simplifyX86MaskedStore(IntrinsicInst &II, llvm_seahorn::InstCombiner &IC) {
   Value *Ptr = II.getOperand(0);
   Value *Mask = II.getOperand(1);
   Value *Vec = II.getOperand(2);
@@ -1462,7 +1462,7 @@ static APFloat fmed3AMDGCN(const APFloat &Src0, const APFloat &Src1,
 /// which case we could lower the shufflevector with rev64 instructions
 /// as it's actually a byte reverse.
 static Value *simplifyNeonTbl1(const IntrinsicInst &II,
-                               InstCombiner::BuilderTy &Builder) {
+                               llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   // Bail out if the mask is not a constant.
   auto *C = dyn_cast<Constant>(II.getArgOperand(1));
   if (!C)
@@ -1501,7 +1501,7 @@ static Value *simplifyNeonTbl1(const IntrinsicInst &II,
 /// This is beneficial when the underlying object being addressed comes
 /// from a constant, since we get constant-folding for free.
 static Value *simplifyNeonVld1(const IntrinsicInst &II, unsigned MemAlign,
-                               InstCombiner::BuilderTy &Builder) {
+                               llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   auto *IntrAlign = dyn_cast<ConstantInt>(II.getArgOperand(1));
 
   if (!IntrAlign)
@@ -1541,7 +1541,7 @@ static bool haveSameOperands(const IntrinsicInst &I, const IntrinsicInst &E,
 //   call @llvm.foo.end(i1 0) ; This one will not be skipped: it will be removed
 //   call @llvm.foo.end(i1 0)
 static bool removeTriviallyEmptyRange(IntrinsicInst &I, unsigned StartID,
-                                      unsigned EndID, InstCombiner &IC) {
+                                      unsigned EndID, llvm_seahorn::InstCombiner &IC) {
   assert(I.getIntrinsicID() == StartID &&
          "Start intrinsic does not have expected ID");
   BasicBlock::iterator BI(I), BE(I.getParent()->end());
@@ -1563,7 +1563,7 @@ static bool removeTriviallyEmptyRange(IntrinsicInst &I, unsigned StartID,
 }
 
 // Convert NVVM intrinsics to target-generic LLVM code where possible.
-static Instruction *SimplifyNVVMIntrinsic(IntrinsicInst *II, InstCombiner &IC) {
+static Instruction *SimplifyNVVMIntrinsic(IntrinsicInst *II, llvm_seahorn::InstCombiner &IC) {
   // Each NVVM intrinsic we can simplify can be replaced with one of:
   //
   //  * an LLVM intrinsic,
@@ -1809,12 +1809,12 @@ static Instruction *SimplifyNVVMIntrinsic(IntrinsicInst *II, InstCombiner &IC) {
   llvm_unreachable("All SpecialCase enumerators should be handled in switch.");
 }
 
-Instruction *InstCombiner::visitVAStartInst(VAStartInst &I) {
+Instruction *llvm_seahorn::InstCombiner::visitVAStartInst(VAStartInst &I) {
   removeTriviallyEmptyRange(I, Intrinsic::vastart, Intrinsic::vaend, *this);
   return nullptr;
 }
 
-Instruction *InstCombiner::visitVACopyInst(VACopyInst &I) {
+Instruction *llvm_seahorn::InstCombiner::visitVACopyInst(VACopyInst &I) {
   removeTriviallyEmptyRange(I, Intrinsic::vacopy, Intrinsic::vaend, *this);
   return nullptr;
 }
@@ -1833,7 +1833,7 @@ static Instruction *canonicalizeConstantArg0ToArg1(CallInst &Call) {
 /// CallInst simplification. This mostly only handles folding of intrinsic
 /// instructions. For normal calls, it allows visitCallSite to do the heavy
 /// lifting.
-Instruction *InstCombiner::visitCallInst(CallInst &CI) {
+Instruction *llvm_seahorn::InstCombiner::visitCallInst(CallInst &CI) {
   if (Value *V = SimplifyCall(&CI, SQ.getWithInstruction(&CI)))
     return replaceInstUsesWith(CI, V);
 
@@ -4044,7 +4044,7 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
 }
 
 // Fence instruction simplification
-Instruction *InstCombiner::visitFenceInst(FenceInst &FI) {
+Instruction *llvm_seahorn::InstCombiner::visitFenceInst(FenceInst &FI) {
   // Remove identical consecutive fences.
   Instruction *Next = FI.getNextNonDebugInstruction();
   if (auto *NFI = dyn_cast<FenceInst>(Next))
@@ -4054,7 +4054,7 @@ Instruction *InstCombiner::visitFenceInst(FenceInst &FI) {
 }
 
 // InvokeInst simplification
-Instruction *InstCombiner::visitInvokeInst(InvokeInst &II) {
+Instruction *llvm_seahorn::InstCombiner::visitInvokeInst(InvokeInst &II) {
   return visitCallSite(&II);
 }
 
@@ -4091,7 +4091,7 @@ static bool isSafeToEliminateVarargsCast(const CallSite CS,
   return true;
 }
 
-Instruction *InstCombiner::tryOptimizeCall(CallInst *CI) {
+Instruction *llvm_seahorn::InstCombiner::tryOptimizeCall(CallInst *CI) {
   if (!CI->getCalledFunction())
     return nullptr;
 
@@ -4186,7 +4186,7 @@ static IntrinsicInst *findInitTrampoline(Value *Callee) {
 }
 
 /// Improvements for call and invoke instructions.
-Instruction *InstCombiner::visitCallSite(CallSite CS) {
+Instruction *llvm_seahorn::InstCombiner::visitCallSite(CallSite CS) {
   if (isAllocLikeFn(CS.getInstruction(), &TLI))
     return visitAllocSite(*CS.getInstruction());
 
@@ -4325,7 +4325,7 @@ Instruction *InstCombiner::visitCallSite(CallSite CS) {
 
 /// If the callee is a constexpr cast of a function, attempt to move the cast to
 /// the arguments of the call/invoke.
-bool InstCombiner::transformConstExprCastCall(CallSite CS) {
+bool llvm_seahorn::InstCombiner::transformConstExprCastCall(CallSite CS) {
   auto *Callee = dyn_cast<Function>(CS.getCalledValue()->stripPointerCasts());
   if (!Callee)
     return false;
@@ -4596,7 +4596,7 @@ bool InstCombiner::transformConstExprCastCall(CallSite CS) {
 /// Turn a call to a function created by init_trampoline / adjust_trampoline
 /// intrinsic pair into a direct call to the underlying function.
 Instruction *
-InstCombiner::transformCallThroughTrampoline(CallSite CS,
+llvm_seahorn::InstCombiner::transformCallThroughTrampoline(CallSite CS,
                                              IntrinsicInst *Tramp) {
   Value *Callee = CS.getCalledValue();
   PointerType *PTy = cast<PointerType>(Callee->getType());

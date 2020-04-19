@@ -13,8 +13,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_LIB_TRANSFORMS_INSTCOMBINE_INSTCOMBINEINTERNAL_H
-#define LLVM_LIB_TRANSFORMS_INSTCOMBINE_INSTCOMBINEINTERNAL_H
+#ifndef LLVM_SEAHORN_TRANSFORMS_INSTCOMBINE_INSTCOMBINEINTERNAL_H
+#define LLVM_SEAHORN_TRANSFORMS_INSTCOMBINE_INSTCOMBINEINTERNAL_H
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/Analysis/AliasAnalysis.h"
@@ -45,12 +45,11 @@
 #include <cassert>
 #include <cstdint>
 
-#define DEBUG_TYPE "instcombine"
+#define DEBUG_TYPE "sea-instcombine"
 
 using namespace llvm::PatternMatch;
 
 namespace llvm {
-
 class APInt;
 class AssumptionCache;
 class CallSite;
@@ -62,34 +61,38 @@ class LoopInfo;
 class OptimizationRemarkEmitter;
 class TargetLibraryInfo;
 class User;
+} // namespace llvm
 
-/// Assign a complexity or rank value to LLVM Values. This is used to reduce
-/// the amount of pattern matching needed for compares and commutative
-/// instructions. For example, if we have:
-///   icmp ugt X, Constant
-/// or
-///   xor (add X, Constant), cast Z
-///
-/// We do not have to consider the commuted variants of these patterns because
-/// canonicalization based on complexity guarantees the above ordering.
-///
-/// This routine maps IR values to various complexity ranks:
-///   0 -> undef
-///   1 -> Constants
-///   2 -> Other non-instructions
-///   3 -> Arguments
-///   4 -> Cast and (f)neg/not instructions
-///   5 -> Other instructions
-static inline unsigned getComplexity(Value *V) {
-  if (isa<Instruction>(V)) {
-    if (isa<CastInst>(V) || match(V, m_Neg(m_Value())) ||
-        match(V, m_Not(m_Value())) || match(V, m_FNeg(m_Value())))
-      return 4;
-    return 5;
-  }
-  if (isa<Argument>(V))
-    return 3;
-  return isa<Constant>(V) ? (isa<UndefValue>(V) ? 0 : 1) : 2;
+namespace llvm_seahorn {
+
+  using namespace llvm;
+  /// Assign a complexity or rank value to LLVM Values. This is used to reduce
+  /// the amount of pattern matching needed for compares and commutative
+  /// instructions. For example, if we have:
+  ///   icmp ugt X, Constant
+  /// or
+  ///   xor (add X, Constant), cast Z
+  ///
+  /// We do not have to consider the commuted variants of these patterns because
+  /// canonicalization based on complexity guarantees the above ordering.
+  ///
+  /// This routine maps IR values to various complexity ranks:
+  ///   0 -> undef
+  ///   1 -> Constants
+  ///   2 -> Other non-instructions
+  ///   3 -> Arguments
+  ///   4 -> Cast and (f)neg/not instructions
+  ///   5 -> Other instructions
+  static inline unsigned getComplexity(Value * V) {
+    if (isa<Instruction>(V)) {
+      if (isa<CastInst>(V) || match(V, m_Neg(m_Value())) ||
+          match(V, m_Not(m_Value())) || match(V, m_FNeg(m_Value())))
+        return 4;
+      return 5;
+    }
+    if (isa<Argument>(V))
+      return 3;
+    return isa<Constant>(V) ? (isa<UndefValue>(V) ? 0 : 1) : 2;
 }
 
 /// Predicate canonicalization reduces the number of patterns that need to be
@@ -297,6 +300,16 @@ private:
 
   /// Enable combines that trigger rarely but are costly in compiletime.
   const bool ExpensiveCombines;
+
+#if 1 /* SEAHORN ADD */
+  // Avoid transforming linear operations into nonlinear
+  bool AvoidBv;
+  // Avoid transforming from signed comparisons to unsigned ones
+  bool AvoidUnsignedICmp;
+  // Avoid generating IntToPtr instructions.
+  // /Accessible with IC.seaAvoidIntToPtr().
+  bool AvoidIntToPtr;
+#endif
 
   AliasAnalysis *AA;
 
@@ -724,6 +737,7 @@ public:
     return llvm::computeOverflowForSignedAdd(LHS, RHS, DL, &AC, CxtI, &DT);
   }
 
+
   OverflowResult computeOverflowForUnsignedSub(const Value *LHS,
                                                const Value *RHS,
                                                const Instruction *CxtI) const {
@@ -734,6 +748,13 @@ public:
                                              const Instruction *CxtI) const {
     return llvm::computeOverflowForSignedSub(LHS, RHS, DL, &AC, CxtI, &DT);
   }
+
+
+
+#if 1 /* ADD SEAHORN */
+  bool seaAvoidIntToPtr() const { return AvoidIntToPtr; }
+  bool seaAvoidBv() const { return AvoidBv; }
+#endif 
 
   /// Maximum size of array considered when transforming.
   uint64_t MaxArraySizeForCombine;
@@ -943,8 +964,8 @@ private:
   Value *Descale(Value *Val, APInt Scale, bool &NoSignedWrap);
 };
 
-} // end namespace llvm
+} // end namespace llvm_seahorn.
 
 #undef DEBUG_TYPE
 
-#endif // LLVM_LIB_TRANSFORMS_INSTCOMBINE_INSTCOMBINEINTERNAL_H
+#endif

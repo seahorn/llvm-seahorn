@@ -1,8 +1,4 @@
-set(LLVM_TARGET_DEFINITIONS InstCombineTables.td)
-tablegen(LLVM InstCombineTables.inc -gen-searchable-tables)
-add_public_tablegen_target(InstCombineTableGen)
-
-add_llvm_library(LLVMInstCombine
+add_llvm_library(SeaInstCombine
   InstructionCombining.cpp
   InstCombineAddSub.cpp
   InstCombineAndOrXor.cpp

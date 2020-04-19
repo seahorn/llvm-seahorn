@@ -29,7 +29,7 @@
 using namespace llvm;
 using namespace PatternMatch;
 
-#define DEBUG_TYPE "instcombine"
+#define DEBUG_TYPE "sea-instcombine"
 
 // How many times is a select replaced by one of its operands?
 STATISTIC(NumSel, "Number of select opts");
@@ -170,7 +170,7 @@ static void computeUnsignedMinMaxValuesFromKnownBits(const KnownBits &Known,
 ///
 /// If AndCst is non-null, then the loaded value is masked with that constant
 /// before doing the comparison. This handles cases like "A[i]&4 == 0".
-Instruction *InstCombiner::foldCmpLoadFromIndexedGlobal(GetElementPtrInst *GEP,
+Instruction *llvm_seahorn::InstCombiner::foldCmpLoadFromIndexedGlobal(GetElementPtrInst *GEP,
                                                         GlobalVariable *GV,
                                                         CmpInst &ICI,
                                                         ConstantInt *AndCst) {
@@ -456,7 +456,7 @@ Instruction *InstCombiner::foldCmpLoadFromIndexedGlobal(GetElementPtrInst *GEP,
 ///
 /// If we can't emit an optimized form for this expression, this returns null.
 ///
-static Value *evaluateGEPOffsetExpression(User *GEP, InstCombiner &IC,
+static Value *evaluateGEPOffsetExpression(User *GEP, llvm_seahorn::InstCombiner &IC,
                                           const DataLayout &DL) {
   gep_type_iterator GTI = gep_type_begin(GEP);
 
@@ -872,7 +872,7 @@ static Instruction *transformToIndexedCompare(GEPOperator *GEPLHS, Value *RHS,
 
 /// Fold comparisons between a GEP instruction and something else. At this point
 /// we know that the GEP is on the LHS of the comparison.
-Instruction *InstCombiner::foldGEPICmp(GEPOperator *GEPLHS, Value *RHS,
+Instruction *llvm_seahorn::InstCombiner::foldGEPICmp(GEPOperator *GEPLHS, Value *RHS,
                                        ICmpInst::Predicate Cond,
                                        Instruction &I) {
   // Don't transform signed compares of GEPs into index compares. Even if the
@@ -1013,7 +1013,7 @@ Instruction *InstCombiner::foldGEPICmp(GEPOperator *GEPLHS, Value *RHS,
   return transformToIndexedCompare(GEPLHS, RHS, Cond, DL);
 }
 
-Instruction *InstCombiner::foldAllocaCmp(ICmpInst &ICI,
+Instruction *llvm_seahorn::InstCombiner::foldAllocaCmp(ICmpInst &ICI,
                                          const AllocaInst *Alloca,
                                          const Value *Other) {
   assert(ICI.isEquality() && "Cannot fold non-equality comparison.");
@@ -1094,7 +1094,7 @@ Instruction *InstCombiner::foldAllocaCmp(ICmpInst &ICI,
 }
 
 /// Fold "icmp pred (X+C), X".
-Instruction *InstCombiner::foldICmpAddOpConst(Value *X, const APInt &C,
+Instruction *llvm_seahorn::InstCombiner::foldICmpAddOpConst(Value *X, const APInt &C,
                                               ICmpInst::Predicate Pred) {
   // From this point on, we know that (X+C <= X) --> (X+C < X) because C != 0,
   // so the values can never be equal.  Similarly for all other "or equals"
@@ -1144,7 +1144,7 @@ Instruction *InstCombiner::foldICmpAddOpConst(Value *X, const APInt &C,
 /// Handle "(icmp eq/ne (ashr/lshr AP2, A), AP1)" ->
 /// (icmp eq/ne A, Log2(AP2/AP1)) ->
 /// (icmp eq/ne A, Log2(AP2) - Log2(AP1)).
-Instruction *InstCombiner::foldICmpShrConstConst(ICmpInst &I, Value *A,
+Instruction *llvm_seahorn::InstCombiner::foldICmpShrConstConst(ICmpInst &I, Value *A,
                                                  const APInt &AP1,
                                                  const APInt &AP2) {
   assert(I.isEquality() && "Cannot fold icmp gt/lt");
@@ -1203,7 +1203,7 @@ Instruction *InstCombiner::foldICmpShrConstConst(ICmpInst &I, Value *A,
 
 /// Handle "(icmp eq/ne (shl AP2, A), AP1)" ->
 /// (icmp eq/ne A, TrailingZeros(AP1) - TrailingZeros(AP2)).
-Instruction *InstCombiner::foldICmpShlConstConst(ICmpInst &I, Value *A,
+Instruction *llvm_seahorn::InstCombiner::foldICmpShlConstConst(ICmpInst &I, Value *A,
                                                  const APInt &AP1,
                                                  const APInt &AP2) {
   assert(I.isEquality() && "Cannot fold icmp gt/lt");
@@ -1249,7 +1249,7 @@ Instruction *InstCombiner::foldICmpShlConstConst(ICmpInst &I, Value *A,
 ///
 static Instruction *processUGT_ADDCST_ADD(ICmpInst &I, Value *A, Value *B,
                                           ConstantInt *CI2, ConstantInt *CI1,
-                                          InstCombiner &IC) {
+                                          llvm_seahorn::InstCombiner &IC) {
   // The transformation we're trying to do here is to transform this into an
   // llvm.sadd.with.overflow.  To do this, we have to replace the original add
   // with a narrower add, and discard the add-with-constant that is part of the
@@ -1310,7 +1310,7 @@ static Instruction *processUGT_ADDCST_ADD(ICmpInst &I, Value *A, Value *B,
   Value *F = Intrinsic::getDeclaration(I.getModule(),
                                        Intrinsic::sadd_with_overflow, NewType);
 
-  InstCombiner::BuilderTy &Builder = IC.Builder;
+  llvm_seahorn::InstCombiner::BuilderTy &Builder = IC.Builder;
 
   // Put the new code above the original add, in case there are any uses of the
   // add between the add and the compare.
@@ -1331,7 +1331,7 @@ static Instruction *processUGT_ADDCST_ADD(ICmpInst &I, Value *A, Value *B,
 }
 
 // Handle (icmp sgt smin(PosA, B) 0) -> (icmp sgt B 0)
-Instruction *InstCombiner::foldICmpWithZero(ICmpInst &Cmp) {
+Instruction *llvm_seahorn::InstCombiner::foldICmpWithZero(ICmpInst &Cmp) {
   CmpInst::Predicate Pred = Cmp.getPredicate();
   Value *X = Cmp.getOperand(0);
 
@@ -1353,7 +1353,7 @@ Instruction *InstCombiner::foldICmpWithZero(ICmpInst &Cmp) {
 /// should be moved to some other helper and extended as noted below (it is also
 /// possible that code has been made unnecessary - do we canonicalize IR to
 /// overflow/saturating intrinsics or not?).
-Instruction *InstCombiner::foldICmpWithConstant(ICmpInst &Cmp) {
+Instruction *llvm_seahorn::InstCombiner::foldICmpWithConstant(ICmpInst &Cmp) {
   // Match the following pattern, which is a common idiom when writing
   // overflow-safe integer arithmetic functions. The source performs an addition
   // in wider type and explicitly checks for overflow using comparisons against
@@ -1378,7 +1378,7 @@ Instruction *InstCombiner::foldICmpWithConstant(ICmpInst &Cmp) {
 }
 
 /// Canonicalize icmp instructions based on dominating conditions.
-Instruction *InstCombiner::foldICmpWithDominatingICmp(ICmpInst &Cmp) {
+Instruction *llvm_seahorn::InstCombiner::foldICmpWithDominatingICmp(ICmpInst &Cmp) {
   // This is a cheap/incomplete check for dominance - just match a single
   // predecessor with a conditional branch.
   BasicBlock *CmpBB = Cmp.getParent();
@@ -1448,7 +1448,7 @@ Instruction *InstCombiner::foldICmpWithDominatingICmp(ICmpInst &Cmp) {
 }
 
 /// Fold icmp (trunc X, Y), C.
-Instruction *InstCombiner::foldICmpTruncConstant(ICmpInst &Cmp,
+Instruction *llvm_seahorn::InstCombiner::foldICmpTruncConstant(ICmpInst &Cmp,
                                                  TruncInst *Trunc,
                                                  const APInt &C) {
   ICmpInst::Predicate Pred = Cmp.getPredicate();
@@ -1481,7 +1481,7 @@ Instruction *InstCombiner::foldICmpTruncConstant(ICmpInst &Cmp,
 }
 
 /// Fold icmp (xor X, Y), C.
-Instruction *InstCombiner::foldICmpXorConstant(ICmpInst &Cmp,
+Instruction *llvm_seahorn::InstCombiner::foldICmpXorConstant(ICmpInst &Cmp,
                                                BinaryOperator *Xor,
                                                const APInt &C) {
   Value *X = Xor->getOperand(0);
@@ -1553,7 +1553,7 @@ Instruction *InstCombiner::foldICmpXorConstant(ICmpInst &Cmp,
 }
 
 /// Fold icmp (and (sh X, Y), C2), C1.
-Instruction *InstCombiner::foldICmpAndShift(ICmpInst &Cmp, BinaryOperator *And,
+Instruction *llvm_seahorn::InstCombiner::foldICmpAndShift(ICmpInst &Cmp, BinaryOperator *And,
                                             const APInt &C1, const APInt &C2) {
   BinaryOperator *Shift = dyn_cast<BinaryOperator>(And->getOperand(0));
   if (!Shift || !Shift->isShift())
@@ -1636,7 +1636,7 @@ Instruction *InstCombiner::foldICmpAndShift(ICmpInst &Cmp, BinaryOperator *And,
 }
 
 /// Fold icmp (and X, C2), C1.
-Instruction *InstCombiner::foldICmpAndConstConst(ICmpInst &Cmp,
+Instruction *llvm_seahorn::InstCombiner::foldICmpAndConstConst(ICmpInst &Cmp,
                                                  BinaryOperator *And,
                                                  const APInt &C1) {
   // For vectors: icmp ne (and X, 1), 0 --> trunc X to N x i1
@@ -1722,7 +1722,7 @@ Instruction *InstCombiner::foldICmpAndConstConst(ICmpInst &Cmp,
 }
 
 /// Fold icmp (and X, Y), C.
-Instruction *InstCombiner::foldICmpAndConstant(ICmpInst &Cmp,
+Instruction *llvm_seahorn::InstCombiner::foldICmpAndConstant(ICmpInst &Cmp,
                                                BinaryOperator *And,
                                                const APInt &C) {
   if (Instruction *I = foldICmpAndConstConst(Cmp, And, C))
@@ -1776,7 +1776,7 @@ Instruction *InstCombiner::foldICmpAndConstant(ICmpInst &Cmp,
 }
 
 /// Fold icmp (or X, Y), C.
-Instruction *InstCombiner::foldICmpOrConstant(ICmpInst &Cmp, BinaryOperator *Or,
+Instruction *llvm_seahorn::InstCombiner::foldICmpOrConstant(ICmpInst &Cmp, BinaryOperator *Or,
                                               const APInt &C) {
   ICmpInst::Predicate Pred = Cmp.getPredicate();
   if (C.isOneValue()) {
@@ -1828,7 +1828,7 @@ Instruction *InstCombiner::foldICmpOrConstant(ICmpInst &Cmp, BinaryOperator *Or,
 }
 
 /// Fold icmp (mul X, Y), C.
-Instruction *InstCombiner::foldICmpMulConstant(ICmpInst &Cmp,
+Instruction *llvm_seahorn::InstCombiner::foldICmpMulConstant(ICmpInst &Cmp,
                                                BinaryOperator *Mul,
                                                const APInt &C) {
   const APInt *MulC;
@@ -1911,7 +1911,7 @@ static Instruction *foldICmpShlOne(ICmpInst &Cmp, Instruction *Shl,
 }
 
 /// Fold icmp (shl X, Y), C.
-Instruction *InstCombiner::foldICmpShlConstant(ICmpInst &Cmp,
+Instruction *llvm_seahorn::InstCombiner::foldICmpShlConstant(ICmpInst &Cmp,
                                                BinaryOperator *Shl,
                                                const APInt &C) {
   const APInt *ShiftVal;
@@ -2030,7 +2030,7 @@ Instruction *InstCombiner::foldICmpShlConstant(ICmpInst &Cmp,
 }
 
 /// Fold icmp ({al}shr X, Y), C.
-Instruction *InstCombiner::foldICmpShrConstant(ICmpInst &Cmp,
+Instruction *llvm_seahorn::InstCombiner::foldICmpShrConstant(ICmpInst &Cmp,
                                                BinaryOperator *Shr,
                                                const APInt &C) {
   // An exact shr only shifts out zero bits, so:
@@ -2123,7 +2123,7 @@ Instruction *InstCombiner::foldICmpShrConstant(ICmpInst &Cmp,
 }
 
 /// Fold icmp (udiv X, Y), C.
-Instruction *InstCombiner::foldICmpUDivConstant(ICmpInst &Cmp,
+Instruction *llvm_seahorn::InstCombiner::foldICmpUDivConstant(ICmpInst &Cmp,
                                                 BinaryOperator *UDiv,
                                                 const APInt &C) {
   const APInt *C2;
@@ -2152,7 +2152,7 @@ Instruction *InstCombiner::foldICmpUDivConstant(ICmpInst &Cmp,
 }
 
 /// Fold icmp ({su}div X, Y), C.
-Instruction *InstCombiner::foldICmpDivConstant(ICmpInst &Cmp,
+Instruction *llvm_seahorn::InstCombiner::foldICmpDivConstant(ICmpInst &Cmp,
                                                BinaryOperator *Div,
                                                const APInt &C) {
   // Fold: icmp pred ([us]div X, C2), C -> range test
@@ -2319,7 +2319,7 @@ Instruction *InstCombiner::foldICmpDivConstant(ICmpInst &Cmp,
 }
 
 /// Fold icmp (sub X, Y), C.
-Instruction *InstCombiner::foldICmpSubConstant(ICmpInst &Cmp,
+Instruction *llvm_seahorn::InstCombiner::foldICmpSubConstant(ICmpInst &Cmp,
                                                BinaryOperator *Sub,
                                                const APInt &C) {
   Value *X = Sub->getOperand(0), *Y = Sub->getOperand(1);
@@ -2354,20 +2354,20 @@ Instruction *InstCombiner::foldICmpSubConstant(ICmpInst &Cmp,
 
   // C2 - Y <u C -> (Y | (C - 1)) == C2
   //   iff (C2 & (C - 1)) == C - 1 and C is a power of 2
-  if (Pred == ICmpInst::ICMP_ULT && C.isPowerOf2() &&
+  if (!AvoidBv && Pred == ICmpInst::ICMP_ULT && C.isPowerOf2() &&
       (*C2 & (C - 1)) == (C - 1))
     return new ICmpInst(ICmpInst::ICMP_EQ, Builder.CreateOr(Y, C - 1), X);
 
   // C2 - Y >u C -> (Y | C) != C2
   //   iff C2 & C == C and C + 1 is a power of 2
-  if (Pred == ICmpInst::ICMP_UGT && (C + 1).isPowerOf2() && (*C2 & C) == C)
+  if (!AvoidBv && Pred == ICmpInst::ICMP_UGT && (C + 1).isPowerOf2() && (*C2 & C) == C)
     return new ICmpInst(ICmpInst::ICMP_NE, Builder.CreateOr(Y, C), X);
 
   return nullptr;
 }
 
 /// Fold icmp (add X, Y), C.
-Instruction *InstCombiner::foldICmpAddConstant(ICmpInst &Cmp,
+Instruction *llvm_seahorn::InstCombiner::foldICmpAddConstant(ICmpInst &Cmp,
                                                BinaryOperator *Add,
                                                const APInt &C) {
   Value *Y = Add->getOperand(1);
@@ -2419,21 +2419,21 @@ Instruction *InstCombiner::foldICmpAddConstant(ICmpInst &Cmp,
   // X+C <u C2 -> (X & -C2) == C
   //   iff C & (C2-1) == 0
   //       C2 is a power of 2
-  if (Pred == ICmpInst::ICMP_ULT && C.isPowerOf2() && (*C2 & (C - 1)) == 0)
+  if (!AvoidBv && Pred == ICmpInst::ICMP_ULT && C.isPowerOf2() && (*C2 & (C - 1)) == 0)
     return new ICmpInst(ICmpInst::ICMP_EQ, Builder.CreateAnd(X, -C),
                         ConstantExpr::getNeg(cast<Constant>(Y)));
 
   // X+C >u C2 -> (X & ~C2) != C
   //   iff C & C2 == 0
   //       C2+1 is a power of 2
-  if (Pred == ICmpInst::ICMP_UGT && (C + 1).isPowerOf2() && (*C2 & C) == 0)
+  if (!AvoidBv && Pred == ICmpInst::ICMP_UGT && (C + 1).isPowerOf2() && (*C2 & C) == 0)
     return new ICmpInst(ICmpInst::ICMP_NE, Builder.CreateAnd(X, ~C),
                         ConstantExpr::getNeg(cast<Constant>(Y)));
 
   return nullptr;
 }
 
-bool InstCombiner::matchThreeWayIntCompare(SelectInst *SI, Value *&LHS,
+bool llvm_seahorn::InstCombiner::matchThreeWayIntCompare(SelectInst *SI, Value *&LHS,
                                            Value *&RHS, ConstantInt *&Less,
                                            ConstantInt *&Equal,
                                            ConstantInt *&Greater) {
@@ -2456,7 +2456,7 @@ bool InstCombiner::matchThreeWayIntCompare(SelectInst *SI, Value *&LHS,
   return false;
 }
 
-Instruction *InstCombiner::foldICmpSelectConstant(ICmpInst &Cmp,
+Instruction *llvm_seahorn::InstCombiner::foldICmpSelectConstant(ICmpInst &Cmp,
                                                   SelectInst *Select,
                                                   ConstantInt *C) {
 
@@ -2507,7 +2507,7 @@ Instruction *InstCombiner::foldICmpSelectConstant(ICmpInst &Cmp,
   return nullptr;
 }
 
-Instruction *InstCombiner::foldICmpBitCastConstant(ICmpInst &Cmp,
+Instruction *llvm_seahorn::InstCombiner::foldICmpBitCastConstant(ICmpInst &Cmp,
                                                    BitCastInst *Bitcast,
                                                    const APInt &C) {
   // Folding: icmp <pred> iN X, C
@@ -2548,7 +2548,7 @@ Instruction *InstCombiner::foldICmpBitCastConstant(ICmpInst &Cmp,
 
 /// Try to fold integer comparisons with a constant operand: icmp Pred X, C
 /// where X is some kind of instruction.
-Instruction *InstCombiner::foldICmpInstWithConstant(ICmpInst &Cmp) {
+Instruction *llvm_seahorn::InstCombiner::foldICmpInstWithConstant(ICmpInst &Cmp) {
   const APInt *C;
   if (!match(Cmp.getOperand(1), m_APInt(C)))
     return nullptr;
@@ -2633,7 +2633,7 @@ Instruction *InstCombiner::foldICmpInstWithConstant(ICmpInst &Cmp) {
 
 /// Fold an icmp equality instruction with binary operator LHS and constant RHS:
 /// icmp eq/ne BO, C.
-Instruction *InstCombiner::foldICmpBinOpEqualityWithConstant(ICmpInst &Cmp,
+Instruction *llvm_seahorn::InstCombiner::foldICmpBinOpEqualityWithConstant(ICmpInst &Cmp,
                                                              BinaryOperator *BO,
                                                              const APInt &C) {
   // TODO: Some of these folds could work with arbitrary constants, but this
@@ -2771,7 +2771,7 @@ Instruction *InstCombiner::foldICmpBinOpEqualityWithConstant(ICmpInst &Cmp,
 }
 
 /// Fold an icmp with LLVM intrinsic and constant operand: icmp Pred II, C.
-Instruction *InstCombiner::foldICmpIntrinsicWithConstant(ICmpInst &Cmp,
+Instruction *llvm_seahorn::InstCombiner::foldICmpIntrinsicWithConstant(ICmpInst &Cmp,
                                                          const APInt &C) {
   IntrinsicInst *II = dyn_cast<IntrinsicInst>(Cmp.getOperand(0));
   if (!II || !Cmp.isEquality())
@@ -2838,7 +2838,7 @@ Instruction *InstCombiner::foldICmpIntrinsicWithConstant(ICmpInst &Cmp,
 }
 
 /// Handle icmp with constant (but not simple integer constant) RHS.
-Instruction *InstCombiner::foldICmpInstWithConstantNotInt(ICmpInst &I) {
+Instruction *llvm_seahorn::InstCombiner::foldICmpInstWithConstantNotInt(ICmpInst &I) {
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
   Constant *RHSC = dyn_cast<Constant>(Op1);
   Instruction *LHSI = dyn_cast<Instruction>(Op0);
@@ -2949,7 +2949,7 @@ Instruction *InstCombiner::foldICmpInstWithConstantNotInt(ICmpInst &I) {
 /// For some predicates, the operands are commutative.
 /// For others, x can only be on a specific side.
 static Value *foldICmpWithLowBitMaskedVal(ICmpInst &I,
-                                          InstCombiner::BuilderTy &Builder) {
+                                          llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   ICmpInst::Predicate SrcPred;
   Value *X, *M, *Y;
   auto m_VariableMask = m_CombineOr(
@@ -3042,7 +3042,7 @@ static Value *foldICmpWithLowBitMaskedVal(ICmpInst &I,
 /// Where  KeptBits = bitwidth(%x) - MaskedBits
 static Value *
 foldICmpWithTruncSignExtendedVal(ICmpInst &I,
-                                 InstCombiner::BuilderTy &Builder) {
+                                 llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   ICmpInst::Predicate SrcPred;
   Value *X;
   const APInt *C0, *C1; // FIXME: non-splats, potentially with undef.
@@ -3111,7 +3111,7 @@ foldICmpWithTruncSignExtendedVal(ICmpInst &I,
 /// TODO: A large part of this logic is duplicated in InstSimplify's
 /// simplifyICmpWithBinOp(). We should be able to share that and avoid the code
 /// duplication.
-Instruction *InstCombiner::foldICmpBinOp(ICmpInst &I) {
+Instruction *llvm_seahorn::InstCombiner::foldICmpBinOp(ICmpInst &I) {
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
 
   // Special logic for binary operators.
@@ -3403,6 +3403,8 @@ Instruction *InstCombiner::foldICmpBinOp(ICmpInst &I) {
         // icmp eq/ne (X * C), (Y * C) --> icmp (X & Mask), (Y & Mask)
         // Mask = -1 >> count-trailing-zeros(C).
         if (unsigned TZs = C->countTrailingZeros()) {
+          if (AvoidBv)
+            return nullptr;
           Constant *Mask = ConstantInt::get(
               BO0->getType(),
               APInt::getLowBitsSet(C->getBitWidth(), C->getBitWidth() - TZs));
@@ -3552,7 +3554,7 @@ static Instruction *foldICmpWithMinMax(ICmpInst &Cmp) {
   return nullptr;
 }
 
-Instruction *InstCombiner::foldICmpEquality(ICmpInst &I) {
+Instruction *llvm_seahorn::InstCombiner::foldICmpEquality(ICmpInst &I) {
   if (!I.isEquality())
     return nullptr;
 
@@ -3707,7 +3709,7 @@ Instruction *InstCombiner::foldICmpEquality(ICmpInst &I) {
 
 /// Handle icmp (cast x to y), (cast/cst). We only handle extending casts so
 /// far.
-Instruction *InstCombiner::foldICmpWithCastAndCast(ICmpInst &ICmp) {
+Instruction *llvm_seahorn::InstCombiner::foldICmpWithCastAndCast(ICmpInst &ICmp) {
   const CastInst *LHSCI = cast<CastInst>(ICmp.getOperand(0));
   Value *LHSCIOp = LHSCI->getOperand(0);
   Type *SrcTy = LHSCIOp->getType();
@@ -3827,7 +3829,7 @@ Instruction *InstCombiner::foldICmpWithCastAndCast(ICmpInst &ICmp) {
   return BinaryOperator::CreateNot(Result);
 }
 
-bool InstCombiner::OptimizeOverflowCheck(OverflowCheckFlavor OCF, Value *LHS,
+bool llvm_seahorn::InstCombiner::OptimizeOverflowCheck(OverflowCheckFlavor OCF, Value *LHS,
                                          Value *RHS, Instruction &OrigI,
                                          Value *&Result, Constant *&Overflow) {
   if (OrigI.isCommutative() && isa<Constant>(LHS) && !isa<Constant>(RHS))
@@ -3942,7 +3944,7 @@ bool InstCombiner::OptimizeOverflowCheck(OverflowCheckFlavor OCF, Value *LHS,
 /// \returns Instruction which must replace the compare instruction, NULL if no
 ///          replacement required.
 static Instruction *processUMulZExtIdiom(ICmpInst &I, Value *MulVal,
-                                         Value *OtherVal, InstCombiner &IC) {
+                                         Value *OtherVal, llvm_seahorn::InstCombiner &IC) {
   // Don't bother doing this transformation for pointers, don't do it for
   // vectors.
   if (!isa<IntegerType>(MulVal->getType()))
@@ -4089,7 +4091,7 @@ static Instruction *processUMulZExtIdiom(ICmpInst &I, Value *MulVal,
     return nullptr;
   }
 
-  InstCombiner::BuilderTy &Builder = IC.Builder;
+  llvm_seahorn::InstCombiner::BuilderTy &Builder = IC.Builder;
   Builder.SetInsertPoint(MulInstr);
 
   // Replace: mul(zext A, zext B) --> mul.with.overflow(A, B)
@@ -4236,7 +4238,7 @@ static bool swapMayExposeCSEOpportunities(const Value *Op0, const Value *Op1) {
 /// \return true when \p UI is the only use of \p DI in the parent block
 /// and all other uses of \p DI are in blocks dominated by \p DB.
 ///
-bool InstCombiner::dominatesAllUses(const Instruction *DI,
+bool llvm_seahorn::InstCombiner::dominatesAllUses(const Instruction *DI,
                                     const Instruction *UI,
                                     const BasicBlock *DB) const {
   assert(DI && UI && "Instruction not defined\n");
@@ -4311,7 +4313,7 @@ static bool isChainSelectCmpBranch(const SelectInst *SI) {
 /// major restriction since a NE compare should be 'normalized' to an equal
 /// compare, which usually happens in the combiner and test case
 /// select-cmp-br.ll checks for it.
-bool InstCombiner::replacedSelectWithOperand(SelectInst *SI,
+bool llvm_seahorn::InstCombiner::replacedSelectWithOperand(SelectInst *SI,
                                              const ICmpInst *Icmp,
                                              const unsigned SIOpd) {
   assert((SIOpd == 1 || SIOpd == 2) && "Invalid select operand!");
@@ -4339,7 +4341,7 @@ bool InstCombiner::replacedSelectWithOperand(SelectInst *SI,
 
 /// Try to fold the comparison based on range information we can get by checking
 /// whether bits are known to be zero or one in the inputs.
-Instruction *InstCombiner::foldICmpUsingKnownBits(ICmpInst &I) {
+Instruction *llvm_seahorn::InstCombiner::foldICmpUsingKnownBits(ICmpInst &I) {
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
   Type *Ty = Op0->getType();
   ICmpInst::Predicate Pred = I.getPredicate();
@@ -4556,7 +4558,7 @@ Instruction *InstCombiner::foldICmpUsingKnownBits(ICmpInst &I) {
 
   // Turn a signed comparison into an unsigned one if both operands are known to
   // have the same sign.
-  if (I.isSigned() &&
+  if (!AvoidUnsignedICmp && I.isSigned() &&
       ((Op0Known.Zero.isNegative() && Op1Known.Zero.isNegative()) ||
        (Op0Known.One.isNegative() && Op1Known.One.isNegative())))
     return new ICmpInst(I.getUnsignedPredicate(), Op0, Op1);
@@ -4623,8 +4625,9 @@ static ICmpInst *canonicalizeCmpWithConstant(ICmpInst &I) {
 }
 
 /// Integer compare with boolean values can always be turned into bitwise ops.
-static Instruction *canonicalizeICmpBool(ICmpInst &I,
-                                         InstCombiner::BuilderTy &Builder) {
+static Instruction *
+canonicalizeICmpBool(ICmpInst &I, llvm_seahorn::InstCombiner &IC,
+                                         llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   Value *A = I.getOperand(0), *B = I.getOperand(1);
   assert(A->getType()->isIntOrIntVectorTy(1) && "Bools only");
 
@@ -4655,10 +4658,14 @@ static Instruction *canonicalizeICmpBool(ICmpInst &I,
   default:
     llvm_unreachable("Invalid icmp instruction!");
   case ICmpInst::ICMP_EQ:
+    if (IC.seaAvoidBv())
+      return nullptr;
     // icmp eq i1 A, B -> ~(A ^ B)
     return BinaryOperator::CreateNot(Builder.CreateXor(A, B));
 
   case ICmpInst::ICMP_NE:
+    if (IC.seaAvoidBv())
+      return nullptr;
     // icmp ne i1 A, B -> A ^ B
     return BinaryOperator::CreateXor(A, B);
 
@@ -4667,6 +4674,8 @@ static Instruction *canonicalizeICmpBool(ICmpInst &I,
     std::swap(A, B);
     LLVM_FALLTHROUGH;
   case ICmpInst::ICMP_ULT:
+    if (IC.seaAvoidBv())
+      return nullptr;
     // icmp ult i1 A, B -> ~A & B
     return BinaryOperator::CreateAnd(Builder.CreateNot(A), B);
 
@@ -4675,6 +4684,8 @@ static Instruction *canonicalizeICmpBool(ICmpInst &I,
     std::swap(A, B);
     LLVM_FALLTHROUGH;
   case ICmpInst::ICMP_SLT:
+    if (IC.seaAvoidBv())
+      return nullptr;
     // icmp slt i1 A, B -> A & ~B
     return BinaryOperator::CreateAnd(Builder.CreateNot(B), A);
 
@@ -4683,6 +4694,8 @@ static Instruction *canonicalizeICmpBool(ICmpInst &I,
     std::swap(A, B);
     LLVM_FALLTHROUGH;
   case ICmpInst::ICMP_ULE:
+    if (IC.seaAvoidBv())
+      return nullptr;
     // icmp ule i1 A, B -> ~A | B
     return BinaryOperator::CreateOr(Builder.CreateNot(A), B);
 
@@ -4691,6 +4704,8 @@ static Instruction *canonicalizeICmpBool(ICmpInst &I,
     std::swap(A, B);
     LLVM_FALLTHROUGH;
   case ICmpInst::ICMP_SLE:
+    if (IC.seaAvoidBv())
+      return nullptr;
     // icmp sle i1 A, B -> A | ~B
     return BinaryOperator::CreateOr(Builder.CreateNot(B), A);
   }
@@ -4703,7 +4718,7 @@ static Instruction *canonicalizeICmpBool(ICmpInst &I,
 //   (X l>> Y) != 0
 //   (X l>> Y) == 0
 static Instruction *foldICmpWithHighBitMask(ICmpInst &Cmp,
-                                            InstCombiner::BuilderTy &Builder) {
+                                            llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   ICmpInst::Predicate Pred, NewPred;
   Value *X, *Y;
   if (match(&Cmp,
@@ -4754,7 +4769,7 @@ static Instruction *foldICmpWithHighBitMask(ICmpInst &Cmp,
 }
 
 static Instruction *foldVectorCmp(CmpInst &Cmp,
-                                  InstCombiner::BuilderTy &Builder) {
+                                  llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   // If both arguments of the cmp are shuffles that use the same mask and
   // shuffle within a single vector, move the shuffle after the cmp.
   Value *LHS = Cmp.getOperand(0), *RHS = Cmp.getOperand(1);
@@ -4773,7 +4788,7 @@ static Instruction *foldVectorCmp(CmpInst &Cmp,
   return nullptr;
 }
 
-Instruction *InstCombiner::visitICmpInst(ICmpInst &I) {
+Instruction *llvm_seahorn::InstCombiner::visitICmpInst(ICmpInst &I) {
   bool Changed = false;
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
   unsigned Op0Cplxity = getComplexity(Op0);
@@ -4810,7 +4825,7 @@ Instruction *InstCombiner::visitICmpInst(ICmpInst &I) {
   }
 
   if (Op0->getType()->isIntOrIntVectorTy(1))
-    if (Instruction *Res = canonicalizeICmpBool(I, Builder))
+    if (Instruction *Res = canonicalizeICmpBool(I, *this, Builder))
       return Res;
 
   if (ICmpInst *NewICmp = canonicalizeCmpWithConstant(I))
@@ -5057,7 +5072,7 @@ Instruction *InstCombiner::visitICmpInst(ICmpInst &I) {
 }
 
 /// Fold fcmp ([us]itofp x, cst) if possible.
-Instruction *InstCombiner::foldFCmpIntToFPConst(FCmpInst &I, Instruction *LHSI,
+Instruction *llvm_seahorn::InstCombiner::foldFCmpIntToFPConst(FCmpInst &I, Instruction *LHSI,
                                                 Constant *RHSC) {
   if (!isa<ConstantFP>(RHSC))
     return nullptr;
@@ -5409,7 +5424,7 @@ static Instruction *foldFabsWithFcmpZero(FCmpInst &I) {
   }
 }
 
-Instruction *InstCombiner::visitFCmpInst(FCmpInst &I) {
+Instruction *llvm_seahorn::InstCombiner::visitFCmpInst(FCmpInst &I) {
   bool Changed = false;
 
   /// Orders the operands of the compare so that they are listed from most

@@ -10,27 +10,29 @@
 ///
 /// This file provides the primary interface to the instcombine pass. This pass
 /// is suitable for use in the new pass manager. For a pass that works with the
-/// legacy pass manager, use \c createInstructionCombiningPass().
+/// legacy pass manager, use \c createSeaInstructionCombiningPass().
 ///
 //===----------------------------------------------------------------------===//
 
 #ifndef LLVM_TRANSFORMS_INSTCOMBINE_INSTCOMBINE_H
 #define LLVM_TRANSFORMS_INSTCOMBINE_INSTCOMBINE_H
 
+#include "llvm_seahorn/InitializePasses.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Transforms/InstCombine/InstCombineWorklist.h"
 
-namespace llvm {
+namespace llvm_seahorn {
+using namespace llvm;
 
-class InstCombinePass : public PassInfoMixin<InstCombinePass> {
+class SeaInstCombinePass : public PassInfoMixin<SeaInstCombinePass> {
   InstCombineWorklist Worklist;
   bool ExpensiveCombines;
 
 public:
-  static StringRef name() { return "InstCombinePass"; }
+  static StringRef name() { return "SeaInstCombinePass"; }
 
-  explicit InstCombinePass(bool ExpensiveCombines = true)
+  explicit SeaInstCombinePass(bool ExpensiveCombines = true)
       : ExpensiveCombines(ExpensiveCombines) {}
 
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
@@ -40,16 +42,16 @@ public:
 ///
 /// This is a basic whole-function wrapper around the instcombine utility. It
 /// will try to combine all instructions in the function.
-class InstructionCombiningPass : public FunctionPass {
+class SeaInstructionCombiningPass : public FunctionPass {
   InstCombineWorklist Worklist;
   const bool ExpensiveCombines;
 
 public:
   static char ID; // Pass identification, replacement for typeid
 
-  InstructionCombiningPass(bool ExpensiveCombines = true)
+  SeaInstructionCombiningPass(bool ExpensiveCombines = true)
       : FunctionPass(ID), ExpensiveCombines(ExpensiveCombines) {
-    initializeInstructionCombiningPassPass(*PassRegistry::getPassRegistry());
+    initializeSeaInstructionCombiningPassPass(*PassRegistry::getPassRegistry());
   }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override;
@@ -68,7 +70,8 @@ public:
 // into:
 //    %Z = add int 2, %X
 //
-FunctionPass *createInstructionCombiningPass(bool ExpensiveCombines = true);
 }
+
+llvm::FunctionPass *createSeaInstructionCombiningPass(bool ExpensiveCombines = true);
 
 #endif

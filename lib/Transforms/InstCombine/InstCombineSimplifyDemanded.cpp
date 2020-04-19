@@ -21,7 +21,7 @@
 using namespace llvm;
 using namespace llvm::PatternMatch;
 
-#define DEBUG_TYPE "instcombine"
+#define DEBUG_TYPE "sea-instcombine"
 
 namespace {
 
@@ -29,8 +29,10 @@ struct AMDGPUImageDMaskIntrinsic {
   unsigned Intr;
 };
 
+#if 0 /*  SEAHORN REMOVED */
 #define GET_AMDGPUImageDMaskIntrinsicTable_IMPL
 #include "InstCombineTables.inc"
+#endif
 
 } // end anonymous namespace
 
@@ -60,7 +62,7 @@ static bool ShrinkDemandedConstant(Instruction *I, unsigned OpNo,
 
 /// Inst is an integer instruction that SimplifyDemandedBits knows about. See if
 /// the instruction has any properties that allow us to simplify its operands.
-bool InstCombiner::SimplifyDemandedInstructionBits(Instruction &Inst) {
+bool llvm_seahorn::InstCombiner::SimplifyDemandedInstructionBits(Instruction &Inst) {
   unsigned BitWidth = Inst.getType()->getScalarSizeInBits();
   KnownBits Known(BitWidth);
   APInt DemandedMask(APInt::getAllOnesValue(BitWidth));
@@ -77,7 +79,7 @@ bool InstCombiner::SimplifyDemandedInstructionBits(Instruction &Inst) {
 /// This form of SimplifyDemandedBits simplifies the specified instruction
 /// operand if possible, updating it in place. It returns true if it made any
 /// change and false otherwise.
-bool InstCombiner::SimplifyDemandedBits(Instruction *I, unsigned OpNo,
+bool llvm_seahorn::InstCombiner::SimplifyDemandedBits(Instruction *I, unsigned OpNo,
                                         const APInt &DemandedMask,
                                         KnownBits &Known, unsigned Depth) {
   Use &U = I->getOperandUse(OpNo);
@@ -112,7 +114,7 @@ bool InstCombiner::SimplifyDemandedBits(Instruction *I, unsigned OpNo,
 /// operands based on the information about what bits are demanded. This returns
 /// some other non-null value if it found out that V is equal to another value
 /// in the context where the specified bits are demanded, but not for all users.
-Value *InstCombiner::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
+Value *llvm_seahorn::InstCombiner::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
                                              KnownBits &Known, unsigned Depth,
                                              Instruction *CxtI) {
   assert(V != nullptr && "Null pointer of Value???");
@@ -761,7 +763,7 @@ Value *InstCombiner::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
 /// Helper routine of SimplifyDemandedUseBits. It computes Known
 /// bits. It also tries to handle simplifications that can be done based on
 /// DemandedMask, but without modifying the Instruction.
-Value *InstCombiner::SimplifyMultipleUseDemandedBits(Instruction *I,
+Value *llvm_seahorn::InstCombiner::SimplifyMultipleUseDemandedBits(Instruction *I,
                                                      const APInt &DemandedMask,
                                                      KnownBits &Known,
                                                      unsigned Depth,
@@ -898,7 +900,7 @@ Value *InstCombiner::SimplifyMultipleUseDemandedBits(Instruction *I,
 ///
 /// As with SimplifyDemandedUseBits, it returns NULL if the simplification was
 /// not successful.
-Value *InstCombiner::simplifyShrShlDemandedBits(
+Value *llvm_seahorn::InstCombiner::simplifyShrShlDemandedBits(
     Instruction *Shr, const APInt &ShrOp1, Instruction *Shl,
     const APInt &ShlOp1, const APInt &DemandedMask, KnownBits &Known) {
   if (!ShlOp1 || !ShrOp1)
@@ -961,7 +963,7 @@ Value *InstCombiner::simplifyShrShlDemandedBits(
 }
 
 /// Implement SimplifyDemandedVectorElts for amdgcn buffer and image intrinsics.
-Value *InstCombiner::simplifyAMDGCNMemoryIntrinsicDemanded(IntrinsicInst *II,
+Value *llvm_seahorn::InstCombiner::simplifyAMDGCNMemoryIntrinsicDemanded(IntrinsicInst *II,
                                                            APInt DemandedElts,
                                                            int DMaskIdx,
                                                            int TFCIdx) {
@@ -1085,7 +1087,7 @@ Value *InstCombiner::simplifyAMDGCNMemoryIntrinsicDemanded(IntrinsicInst *II,
 /// If the information about demanded elements can be used to simplify the
 /// operation, the operation is simplified, then the resultant value is
 /// returned.  This returns null if no change was made.
-Value *InstCombiner::SimplifyDemandedVectorElts(Value *V, APInt DemandedElts,
+Value *llvm_seahorn::InstCombiner::SimplifyDemandedVectorElts(Value *V, APInt DemandedElts,
                                                 APInt &UndefElts,
                                                 unsigned Depth) {
   unsigned VWidth = V->getType()->getVectorNumElements();
@@ -1637,7 +1639,7 @@ Value *InstCombiner::SimplifyDemandedVectorElts(Value *V, APInt DemandedElts,
     case Intrinsic::amdgcn_struct_buffer_load_format:
       return simplifyAMDGCNMemoryIntrinsicDemanded(II, DemandedElts);
     default: {
-      if (getAMDGPUImageDMaskIntrinsic(II->getIntrinsicID()))
+      if (false /*  SEAHORN REMOVED *//*getAMDGPUImageDMaskIntrinsic(II->getIntrinsicID())*/)
         return simplifyAMDGCNMemoryIntrinsicDemanded(
             II, DemandedElts, 0, II->getNumArgOperands() - 2);
 

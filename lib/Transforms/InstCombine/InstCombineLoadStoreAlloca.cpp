@@ -26,9 +26,10 @@
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 using namespace llvm;
+using namespace llvm_seahorn;
 using namespace PatternMatch;
 
-#define DEBUG_TYPE "instcombine"
+#define DEBUG_TYPE "sea-instcombine"
 
 STATISTIC(NumDeadStore, "Number of dead stores eliminated");
 STATISTIC(NumGlobalCopies, "Number of allocas copied from constant global");
@@ -185,7 +186,7 @@ static bool isDereferenceableForAllocaSize(const Value *V, const AllocaInst *AI,
                                             APInt(64, AllocaSize), DL);
 }
 
-static Instruction *simplifyAllocaArraySize(InstCombiner &IC, AllocaInst &AI) {
+static Instruction *simplifyAllocaArraySize(llvm_seahorn::InstCombiner &IC, AllocaInst &AI) {
   // Check for array size of 1 (scalar allocation).
   if (!AI.isArrayAllocation()) {
     // i32 1 is the canonical array size for scalar allocations.
@@ -256,7 +257,7 @@ namespace {
 // instruction.
 class PointerReplacer {
 public:
-  PointerReplacer(InstCombiner &IC) : IC(IC) {}
+  PointerReplacer(llvm_seahorn::InstCombiner &IC) : IC(IC) {}
   void replacePointer(Instruction &I, Value *V);
 
 private:
@@ -266,7 +267,7 @@ private:
 
   SmallVector<Instruction *, 4> Path;
   MapVector<Value *, Value *> WorkMap;
-  InstCombiner &IC;
+  llvm_seahorn::InstCombiner &IC;
 };
 } // end anonymous namespace
 
@@ -344,7 +345,7 @@ void PointerReplacer::replacePointer(Instruction &I, Value *V) {
   findLoadAndReplace(I);
 }
 
-Instruction *InstCombiner::visitAllocaInst(AllocaInst &AI) {
+Instruction *llvm_seahorn::InstCombiner::visitAllocaInst(AllocaInst &AI) {
   if (auto *I = simplifyAllocaArraySize(*this, AI))
     return I;
 
@@ -453,8 +454,8 @@ static bool isSupportedAtomicType(Type *Ty) {
 /// that pointer type, load it, etc.
 ///
 /// Note that this will create all of the instructions with whatever insert
-/// point the \c InstCombiner currently is using.
-static LoadInst *combineLoadToNewType(InstCombiner &IC, LoadInst &LI,
+/// point the \c llvm_seahorn::InstCombiner currently is using.
+static LoadInst *combineLoadToNewType(llvm_seahorn::InstCombiner &IC, LoadInst &LI,
                                       Type *NewTy, const Twine &Suffix = "") {
   assert((!LI.isAtomic() || isSupportedAtomicType(NewTy)) &&
          "can't fold an atomic load to requested type");
@@ -521,7 +522,7 @@ static LoadInst *combineLoadToNewType(InstCombiner &IC, LoadInst &LI,
 /// Combine a store to a new type.
 ///
 /// Returns the newly created store instruction.
-static StoreInst *combineStoreToNewValue(InstCombiner &IC, StoreInst &SI,
+static StoreInst *combineStoreToNewValue(llvm_seahorn::InstCombiner &IC, StoreInst &SI,
                                          Value *V) {
   assert((!SI.isAtomic() || isSupportedAtomicType(V->getType())) &&
          "can't fold an atomic store of requested type");
@@ -613,7 +614,7 @@ static bool isMinMaxWithLoads(Value *V) {
 /// or a volatile load. This is debatable, and might be reasonable to change
 /// later. However, it is risky in case some backend or other part of LLVM is
 /// relying on the exact type loaded to select appropriate atomic operations.
-static Instruction *combineLoadToOperationType(InstCombiner &IC, LoadInst &LI) {
+static Instruction *combineLoadToOperationType(llvm_seahorn::InstCombiner &IC, LoadInst &LI) {
   // FIXME: We could probably with some care handle both volatile and ordered
   // atomic loads here but it isn't clear that this is important.
   if (!LI.isUnordered())
@@ -633,9 +634,7 @@ static Instruction *combineLoadToOperationType(InstCombiner &IC, LoadInst &LI) {
   // integers instead of any other type. We only do this when the loaded type
   // is sized and has a size exactly the same as its store size and the store
   // size is a legal integer type.
-  // Do not perform canonicalization if minmax pattern is found (to avoid
-  // infinite loop).
-  if (!Ty->isIntegerTy() && Ty->isSized() &&
+  if (!IC.seaAvoidIntToPtr() && !Ty->isIntegerTy() && Ty->isSized() &&
       DL.isLegalInteger(DL.getTypeStoreSizeInBits(Ty)) &&
       DL.getTypeStoreSizeInBits(Ty) == DL.getTypeSizeInBits(Ty) &&
       !DL.isNonIntegralPointerType(Ty) &&
@@ -666,7 +665,7 @@ static Instruction *combineLoadToOperationType(InstCombiner &IC, LoadInst &LI) {
   // We can do this for BitCastInsts as well as casts from and to pointer types,
   // as long as those are noops (i.e., the source or dest type have the same
   // bitwidth as the target's pointers).
-  if (LI.hasOneUse())
+  if (!IC.seaAvoidIntToPtr() && LI.hasOneUse())
     if (auto *CI = dyn_cast<CastInst>(LI.user_back()))
       if (CI->isNoopCast(DL))
         if (!LI.isAtomic() || isSupportedAtomicType(CI->getDestTy())) {
@@ -681,7 +680,7 @@ static Instruction *combineLoadToOperationType(InstCombiner &IC, LoadInst &LI) {
   return nullptr;
 }
 
-static Instruction *unpackLoadToAggregate(InstCombiner &IC, LoadInst &LI) {
+static Instruction *unpackLoadToAggregate(llvm_seahorn::InstCombiner &IC, LoadInst &LI) {
   // FIXME: We could probably with some care handle both volatile and atomic
   // stores here but it isn't clear that this is important.
   if (!LI.isSimple())
@@ -885,7 +884,7 @@ static bool isObjectSizeLessThanOrEq(Value *V, uint64_t MaxSize,
 // not zero. Currently, we only handle the first such index. Also, we could
 // also search through non-zero constant indices if we kept track of the
 // offsets those indices implied.
-static bool canReplaceGEPIdxWithZero(InstCombiner &IC, GetElementPtrInst *GEPI,
+static bool canReplaceGEPIdxWithZero(llvm_seahorn::InstCombiner &IC, GetElementPtrInst *GEPI,
                                      Instruction *MemI, unsigned &Idx) {
   if (GEPI->getNumOperands() < 2)
     return false;
@@ -955,7 +954,7 @@ static bool canReplaceGEPIdxWithZero(InstCombiner &IC, GetElementPtrInst *GEPI,
 // access, but the object has only one element, we can assume that the index
 // will always be zero. If we replace the GEP, return it.
 template <typename T>
-static Instruction *replaceGEPIdxWithZero(InstCombiner &IC, Value *Ptr,
+static Instruction *replaceGEPIdxWithZero(llvm_seahorn::InstCombiner &IC, Value *Ptr,
                                           T &MemI) {
   if (GetElementPtrInst *GEPI = dyn_cast<GetElementPtrInst>(Ptr)) {
     unsigned Idx;
@@ -997,7 +996,7 @@ static bool canSimplifyNullLoadOrGEP(LoadInst &LI, Value *Op) {
   return false;
 }
 
-Instruction *InstCombiner::visitLoadInst(LoadInst &LI) {
+Instruction *llvm_seahorn::InstCombiner::visitLoadInst(LoadInst &LI) {
   Value *Op = LI.getOperand(0);
 
   // Try to canonicalize the loaded type.
@@ -1121,7 +1120,7 @@ Instruction *InstCombiner::visitLoadInst(LoadInst &LI) {
 /// and the layout of a <2 x double> is isomorphic to a [2 x double],
 /// then %V1 can be safely approximated by a conceptual "bitcast" of %U.
 /// Note that %U may contain non-undef values where %V1 has undef.
-static Value *likeBitCastFromVector(InstCombiner &IC, Value *V) {
+static Value *likeBitCastFromVector(llvm_seahorn::InstCombiner &IC, Value *V) {
   Value *U = nullptr;
   while (auto *IV = dyn_cast<InsertValueInst>(V)) {
     auto *E = dyn_cast<ExtractElementInst>(IV->getInsertedValueOperand());
@@ -1183,7 +1182,7 @@ static Value *likeBitCastFromVector(InstCombiner &IC, Value *V) {
 /// the caller must erase the store instruction. We have to let the caller erase
 /// the store instruction as otherwise there is no way to signal whether it was
 /// combined or not: IC.EraseInstFromFunction returns a null pointer.
-static bool combineStoreToValueType(InstCombiner &IC, StoreInst &SI) {
+static bool combineStoreToValueType(llvm_seahorn::InstCombiner &IC, StoreInst &SI) {
   // FIXME: We could probably with some care handle both volatile and ordered
   // atomic stores here but it isn't clear that this is important.
   if (!SI.isUnordered())
@@ -1215,7 +1214,7 @@ static bool combineStoreToValueType(InstCombiner &IC, StoreInst &SI) {
   return false;
 }
 
-static bool unpackStoreToAggregate(InstCombiner &IC, StoreInst &SI) {
+static bool unpackStoreToAggregate(llvm_seahorn::InstCombiner &IC, StoreInst &SI) {
   // FIXME: We could probably with some care handle both volatile and atomic
   // stores here but it isn't clear that this is important.
   if (!SI.isSimple())
@@ -1358,7 +1357,7 @@ static bool equivalentAddressValues(Value *A, Value *B) {
 /// Converts store (bitcast (load (bitcast (select ...)))) to
 /// store (load (select ...)), where select is minmax:
 /// select ((cmp load V1, load V2), V1, V2).
-static bool removeBitcastsFromLoadStoreOnMinMax(InstCombiner &IC,
+static bool removeBitcastsFromLoadStoreOnMinMax(llvm_seahorn::InstCombiner &IC,
                                                 StoreInst &SI) {
   // bitcast?
   if (!match(SI.getPointerOperand(), m_BitCast(m_Value())))
@@ -1395,7 +1394,7 @@ static bool removeBitcastsFromLoadStoreOnMinMax(InstCombiner &IC,
   return true;
 }
 
-Instruction *InstCombiner::visitStoreInst(StoreInst &SI) {
+Instruction *llvm_seahorn::InstCombiner::visitStoreInst(StoreInst &SI) {
   Value *Val = SI.getOperand(0);
   Value *Ptr = SI.getOperand(1);
 
@@ -1528,7 +1527,7 @@ Instruction *InstCombiner::visitStoreInst(StoreInst &SI) {
 /// or:
 ///   *P = v1; if () { *P = v2; }
 /// into a phi node with a store in the successor.
-bool InstCombiner::mergeStoreIntoSuccessor(StoreInst &SI) {
+bool llvm_seahorn::InstCombiner::mergeStoreIntoSuccessor(StoreInst &SI) {
   assert(SI.isUnordered() &&
          "This code has not been audited for volatile or ordered store case.");
 

@@ -41,9 +41,10 @@
 #include <utility>
 
 using namespace llvm;
+using namespace llvm_seahorn;
 using namespace PatternMatch;
 
-#define DEBUG_TYPE "instcombine"
+#define DEBUG_TYPE "sea-instcombine"
 
 /// Return true if the value is cheaper to scalarize than it is to leave as a
 /// vector operation. IsConstantExtractIndex indicates whether we are extracting
@@ -82,7 +83,7 @@ static bool cheapToScalarize(Value *V, bool IsConstantExtractIndex) {
 // If we have a PHI node with a vector type that is only used to feed
 // itself and be an operand of extractelement at a constant location,
 // try to replace the PHI of the vector type with a PHI of a scalar type.
-Instruction *InstCombiner::scalarizePHI(ExtractElementInst &EI, PHINode *PN) {
+Instruction *llvm_seahorn::InstCombiner::scalarizePHI(ExtractElementInst &EI, PHINode *PN) {
   SmallVector<Instruction *, 2> Extracts;
   // The users we want the PHI to have are:
   // 1) The EI ExtractElement (we already know this)
@@ -162,7 +163,7 @@ Instruction *InstCombiner::scalarizePHI(ExtractElementInst &EI, PHINode *PN) {
 }
 
 static Instruction *foldBitcastExtElt(ExtractElementInst &Ext,
-                                      InstCombiner::BuilderTy &Builder,
+                                      llvm_seahorn::InstCombiner::BuilderTy &Builder,
                                       bool IsBigEndian) {
   Value *X;
   uint64_t ExtIndexC;
@@ -255,7 +256,7 @@ static Instruction *foldBitcastExtElt(ExtractElementInst &Ext,
   return nullptr;
 }
 
-Instruction *InstCombiner::visitExtractElementInst(ExtractElementInst &EI) {
+Instruction *llvm_seahorn::InstCombiner::visitExtractElementInst(ExtractElementInst &EI) {
   Value *SrcVec = EI.getVectorOperand();
   Value *Index = EI.getIndexOperand();
   if (Value *V =
@@ -442,7 +443,7 @@ static bool collectSingleShuffleElements(Value *V, Value *LHS, Value *RHS,
 /// shufflevector to replace one or more insert/extract pairs.
 static void replaceExtractElements(InsertElementInst *InsElt,
                                    ExtractElementInst *ExtElt,
-                                   InstCombiner &IC) {
+                                   llvm_seahorn::InstCombiner &IC) {
   VectorType *InsVecType = InsElt->getType();
   VectorType *ExtVecType = ExtElt->getVectorOperandType();
   unsigned NumInsElts = InsVecType->getVectorNumElements();
@@ -527,7 +528,7 @@ using ShuffleOps = std::pair<Value *, Value *>;
 static ShuffleOps collectShuffleElements(Value *V,
                                          SmallVectorImpl<Constant *> &Mask,
                                          Value *PermittedRHS,
-                                         InstCombiner &IC) {
+                                         llvm_seahorn::InstCombiner &IC) {
   assert(V->getType()->isVectorTy() && "Invalid shuffle!");
   unsigned NumElts = V->getType()->getVectorNumElements();
 
@@ -615,7 +616,7 @@ static ShuffleOps collectShuffleElements(Value *V,
 /// first one, making the first one redundant.
 /// It should be transformed to:
 ///  %0 = insertvalue { i8, i32 } undef, i8 %y, 0
-Instruction *InstCombiner::visitInsertValueInst(InsertValueInst &I) {
+Instruction *llvm_seahorn::InstCombiner::visitInsertValueInst(InsertValueInst &I) {
   bool IsRedundant = false;
   ArrayRef<unsigned int> FirstIndices = I.getIndices();
 
@@ -735,7 +736,7 @@ static Instruction *foldInsSequenceIntoBroadcast(InsertElementInst &InsElt) {
 /// This has the potential of eliminating the 2nd insertelement instruction
 /// via constant folding of the scalar constant into a vector constant.
 static Instruction *hoistInsEltConst(InsertElementInst &InsElt2,
-                                     InstCombiner::BuilderTy &Builder) {
+                                     llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   auto *InsElt1 = dyn_cast<InsertElementInst>(InsElt2.getOperand(0));
   if (!InsElt1 || !InsElt1->hasOneUse())
     return nullptr;
@@ -854,7 +855,7 @@ static Instruction *foldConstantInsEltIntoShuffle(InsertElementInst &InsElt) {
   return nullptr;
 }
 
-Instruction *InstCombiner::visitInsertElementInst(InsertElementInst &IE) {
+Instruction *llvm_seahorn::InstCombiner::visitInsertElementInst(InsertElementInst &IE) {
   Value *VecOp = IE.getOperand(0);
   Value *ScalarOp = IE.getOperand(1);
   Value *IdxOp = IE.getOperand(2);
@@ -1341,7 +1342,7 @@ static Instruction *foldSelectShuffleWith1Binop(ShuffleVectorInst &Shuf) {
 
 /// Try to fold shuffles that are the equivalent of a vector select.
 static Instruction *foldSelectShuffle(ShuffleVectorInst &Shuf,
-                                      InstCombiner::BuilderTy &Builder,
+                                      llvm_seahorn::InstCombiner::BuilderTy &Builder,
                                       const DataLayout &DL) {
   if (!Shuf.isSelect())
     return nullptr;
@@ -1459,7 +1460,7 @@ static Instruction *foldSelectShuffle(ShuffleVectorInst &Shuf,
 /// narrowing (concatenating with undef and extracting back to the original
 /// length). This allows replacing the wide select with a narrow select.
 static Instruction *narrowVectorSelect(ShuffleVectorInst &Shuf,
-                                       InstCombiner::BuilderTy &Builder) {
+                                       llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   // This must be a narrowing identity shuffle. It extracts the 1st N elements
   // of the 1st vector operand of a shuffle.
   if (!match(Shuf.getOperand(1), m_Undef()) || !Shuf.isIdentityWithExtract())
@@ -1590,7 +1591,7 @@ static Instruction *foldShuffleWithInsert(ShuffleVectorInst &Shuf) {
   return nullptr;
 }
 
-Instruction *InstCombiner::visitShuffleVectorInst(ShuffleVectorInst &SVI) {
+Instruction *llvm_seahorn::InstCombiner::visitShuffleVectorInst(ShuffleVectorInst &SVI) {
   Value *LHS = SVI.getOperand(0);
   Value *RHS = SVI.getOperand(1);
   if (auto *V = SimplifyShuffleVectorInst(
