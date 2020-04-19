@@ -1,9 +1,8 @@
 //===- InstCombineShifts.cpp ----------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -20,6 +19,51 @@ using namespace llvm;
 using namespace PatternMatch;
 
 #define DEBUG_TYPE "sea-instcombine"
+
+// Given pattern:
+//   (x shiftopcode Q) shiftopcode K
+// we should rewrite it as
+//   x shiftopcode (Q+K)  iff (Q+K) u< bitwidth(x)
+// This is valid for any shift, but they must be identical.
+static Instruction *
+reassociateShiftAmtsOfTwoSameDirectionShifts(BinaryOperator *Sh0,
+                                             const SimplifyQuery &SQ) {
+  // Look for:  (x shiftopcode ShAmt0) shiftopcode ShAmt1
+  Value *X, *ShAmt1, *ShAmt0;
+  Instruction *Sh1;
+  if (!match(Sh0, m_Shift(m_CombineAnd(m_Shift(m_Value(X), m_Value(ShAmt1)),
+                                       m_Instruction(Sh1)),
+                          m_Value(ShAmt0))))
+    return nullptr;
+
+  // The shift opcodes must be identical.
+  Instruction::BinaryOps ShiftOpcode = Sh0->getOpcode();
+  if (ShiftOpcode != Sh1->getOpcode())
+    return nullptr;
+  // Can we fold (ShAmt0+ShAmt1) ?
+  Value *NewShAmt = SimplifyBinOp(Instruction::BinaryOps::Add, ShAmt0, ShAmt1,
+                                  SQ.getWithInstruction(Sh0));
+  if (!NewShAmt)
+    return nullptr; // Did not simplify.
+  // Is the new shift amount smaller than the bit width?
+  // FIXME: could also rely on ConstantRange.
+  unsigned BitWidth = X->getType()->getScalarSizeInBits();
+  if (!match(NewShAmt, m_SpecificInt_ICMP(ICmpInst::Predicate::ICMP_ULT,
+                                          APInt(BitWidth, BitWidth))))
+    return nullptr;
+  // All good, we can do this fold.
+  BinaryOperator *NewShift = BinaryOperator::Create(ShiftOpcode, X, NewShAmt);
+  // If both of the original shifts had the same flag set, preserve the flag.
+  if (ShiftOpcode == Instruction::BinaryOps::Shl) {
+    NewShift->setHasNoUnsignedWrap(Sh0->hasNoUnsignedWrap() &&
+                                   Sh1->hasNoUnsignedWrap());
+    NewShift->setHasNoSignedWrap(Sh0->hasNoSignedWrap() &&
+                                 Sh1->hasNoSignedWrap());
+  } else {
+    NewShift->setIsExact(Sh0->isExact() && Sh1->isExact());
+  }
+  return NewShift;
+}
 
 Instruction *llvm_seahorn::InstCombiner::commonShiftTransforms(BinaryOperator &I) {
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
@@ -38,6 +82,10 @@ Instruction *llvm_seahorn::InstCombiner::commonShiftTransforms(BinaryOperator &I
   if (Constant *CUI = dyn_cast<Constant>(Op1))
     if (Instruction *Res = FoldShiftByConstant(Op0, CUI, I))
       return Res;
+
+  if (Instruction *NewShift =
+          reassociateShiftAmtsOfTwoSameDirectionShifts(&I, SQ))
+    return NewShift;
 
   // (C1 shift (A add C2)) -> (C1 shift C2) shift A)
   // iff A and C2 are both positive.
@@ -126,8 +174,7 @@ static bool canEvaluateShifted(Value *V, unsigned NumBits, bool IsLeftShift,
     return true;
 
   Instruction *I = dyn_cast<Instruction>(V);
-  if (!I)
-    return false;
+  if (!I) return false;
 
   // If this is the opposite shift, we can directly reuse the input of the shift
   // if the needed bits are already zero in the input.  This allows us to reuse
@@ -150,17 +197,16 @@ static bool canEvaluateShifted(Value *V, unsigned NumBits, bool IsLeftShift,
         return CanEvaluateTruncated(I->getOperand(0), Ty);
       }
 #endif
+
     }
   }
 
   // We can't mutate something that has multiple uses: doing so would
   // require duplicating the instruction in general, which isn't profitable.
-  if (!I->hasOneUse())
-    return false;
+  if (!I->hasOneUse()) return false;
 
   switch (I->getOpcode()) {
-  default:
-    return false;
+  default: return false;
   case Instruction::And:
   case Instruction::Or:
   case Instruction::Xor:
@@ -277,8 +323,7 @@ static Value *getShiftedValue(Value *V, unsigned NumBits, bool isLeftShift,
   IC.Worklist.Add(I);
 
   switch (I->getOpcode()) {
-  default:
-    llvm_unreachable("Inconsistency with CanEvaluateShifted");
+  default: llvm_unreachable("Inconsistency with CanEvaluateShifted");
   case Instruction::And:
   case Instruction::Or:
   case Instruction::Xor:
@@ -316,36 +361,17 @@ static Value *getShiftedValue(Value *V, unsigned NumBits, bool isLeftShift,
 // If this is a bitwise operator or add with a constant RHS we might be able
 // to pull it through a shift.
 static bool canShiftBinOpWithConstantRHS(BinaryOperator &Shift,
-                                         BinaryOperator *BO, const APInt &C) {
-  bool IsValid = true;     // Valid only for And, Or Xor,
-  bool HighBitSet = false; // Transform ifhigh bit of constant set?
-
+                                         BinaryOperator *BO) {
   switch (BO->getOpcode()) {
   default:
-    IsValid = false;
-    break; // Do not perform transform!
+    return false; // Do not perform transform!
   case Instruction::Add:
-    IsValid = Shift.getOpcode() == Instruction::Shl;
-    break;
+    return Shift.getOpcode() == Instruction::Shl;
   case Instruction::Or:
   case Instruction::Xor:
-    HighBitSet = false;
-    break;
   case Instruction::And:
-    HighBitSet = true;
-    break;
+    return true;
   }
-
-  // If this is a signed shift right, and the high bit is modified
-  // by the logical operation, do not perform the transformation.
-  // The HighBitSet boolean indicates the value of the high bit of
-  // the constant which would cause it to be modified for this
-  // operation.
-  //
-  if (IsValid && Shift.getOpcode() == Instruction::AShr)
-    IsValid = C.isNegative() == HighBitSet;
-
-  return IsValid;
 }
 
 Instruction *llvm_seahorn::InstCombiner::FoldShiftByConstant(Value *Op0, Constant *Op1,
@@ -415,8 +441,9 @@ Instruction *llvm_seahorn::InstCombiner::FoldShiftByConstant(Value *Op0, Constan
       }
 
       // shift1 & 0x00FF
-      Value *And = Builder.CreateAnd(
-          NSh, ConstantInt::get(I.getContext(), MaskV), TI->getName());
+      Value *And = Builder.CreateAnd(NSh,
+                                     ConstantInt::get(I.getContext(), MaskV),
+                                     TI->getName());
 
       // Return the value truncated to the interesting size.
       return new TruncInst(And, I.getType());
@@ -429,8 +456,7 @@ Instruction *llvm_seahorn::InstCombiner::FoldShiftByConstant(Value *Op0, Constan
       Value *V1, *V2;
       ConstantInt *CC;
       switch (Op0BO->getOpcode()) {
-      default:
-        break;
+      default: break;
       case Instruction::Add:
       case Instruction::And:
       case Instruction::Or:
@@ -438,7 +464,8 @@ Instruction *llvm_seahorn::InstCombiner::FoldShiftByConstant(Value *Op0, Constan
         // These operators commute.
         // Turn (Y + (X >> C)) << C  ->  (X + (Y << C)) & (~0 << C)
         if (isLeftShift && Op0BO->getOperand(1)->hasOneUse() &&
-            match(Op0BO->getOperand(1), m_Shr(m_Value(V1), m_Specific(Op1)))) {
+            match(Op0BO->getOperand(1), m_Shr(m_Value(V1),
+                  m_Specific(Op1)))) {
           Value *YS = // (Y << C)
               Builder.CreateShl(Op0BO->getOperand(0), Op1, Op0BO->getName());
           // (X + (Y << C))
@@ -456,7 +483,8 @@ Instruction *llvm_seahorn::InstCombiner::FoldShiftByConstant(Value *Op0, Constan
         // Turn (Y + ((X >> C) & CC)) << C  ->  ((X & (CC << C)) + (Y << C))
         Value *Op0BOOp1 = Op0BO->getOperand(1);
         if (isLeftShift && Op0BOOp1->hasOneUse() &&
-            match(Op0BOOp1, m_And(m_OneUse(m_Shr(m_Value(V1), m_Specific(Op1))),
+            match(Op0BOOp1,
+                  m_And(m_OneUse(m_Shr(m_Value(V1), m_Specific(Op1))),
                                   m_ConstantInt(CC)))) {
           Value *YS = // (Y << C)
               Builder.CreateShl(Op0BO->getOperand(0), Op1, Op0BO->getName());
@@ -471,7 +499,8 @@ Instruction *llvm_seahorn::InstCombiner::FoldShiftByConstant(Value *Op0, Constan
       case Instruction::Sub: {
         // Turn ((X >> C) + Y) << C  ->  (X + (Y << C)) & (~0 << C)
         if (isLeftShift && Op0BO->getOperand(0)->hasOneUse() &&
-            match(Op0BO->getOperand(0), m_Shr(m_Value(V1), m_Specific(Op1)))) {
+            match(Op0BO->getOperand(0), m_Shr(m_Value(V1),
+                  m_Specific(Op1)))) {
           Value *YS = // (Y << C)
               Builder.CreateShl(Op0BO->getOperand(1), Op1, Op0BO->getName());
           // (X + (Y << C))
@@ -490,8 +519,7 @@ Instruction *llvm_seahorn::InstCombiner::FoldShiftByConstant(Value *Op0, Constan
         if (isLeftShift && Op0BO->getOperand(0)->hasOneUse() &&
             match(Op0BO->getOperand(0),
                   m_And(m_OneUse(m_Shr(m_Value(V1), m_Value(V2))),
-                        m_ConstantInt(CC))) &&
-            V2 == Op1) {
+                        m_ConstantInt(CC))) && V2 == Op1) {
           Value *YS = // (Y << C)
               Builder.CreateShl(Op0BO->getOperand(1), Op1, Op0BO->getName());
           // X & (CC << C)
@@ -505,19 +533,21 @@ Instruction *llvm_seahorn::InstCombiner::FoldShiftByConstant(Value *Op0, Constan
       }
       }
 
+
       // If the operand is a bitwise operator with a constant RHS, and the
       // shift is the only use, we can pull it out of the shift.
       const APInt *Op0C;
       if (match(Op0BO->getOperand(1), m_APInt(Op0C))) {
-        if (canShiftBinOpWithConstantRHS(I, Op0BO, *Op0C)) {
-          Constant *NewRHS = ConstantExpr::get(
-              I.getOpcode(), cast<Constant>(Op0BO->getOperand(1)), Op1);
+        if (canShiftBinOpWithConstantRHS(I, Op0BO)) {
+          Constant *NewRHS = ConstantExpr::get(I.getOpcode(),
+                                     cast<Constant>(Op0BO->getOperand(1)), Op1);
 
           Value *NewShift =
               Builder.CreateBinOp(I.getOpcode(), Op0BO->getOperand(0), Op1);
           NewShift->takeName(Op0BO);
 
-          return BinaryOperator::Create(Op0BO->getOpcode(), NewShift, NewRHS);
+          return BinaryOperator::Create(Op0BO->getOpcode(), NewShift,
+                                        NewRHS);
         }
       }
 
@@ -526,8 +556,8 @@ Instruction *llvm_seahorn::InstCombiner::FoldShiftByConstant(Value *Op0, Constan
       // This folds (shl (sub C1, X), C2) -> (sub (C1 << C2), (shl X, C2))
       if (isLeftShift && Op0BO->getOpcode() == Instruction::Sub &&
           match(Op0BO->getOperand(0), m_APInt(Op0C))) {
-        Constant *NewRHS = ConstantExpr::get(
-            I.getOpcode(), cast<Constant>(Op0BO->getOperand(0)), Op1);
+        Constant *NewRHS = ConstantExpr::get(I.getOpcode(),
+                                   cast<Constant>(Op0BO->getOperand(0)), Op1);
 
         Value *NewShift = Builder.CreateShl(Op0BO->getOperand(1), Op1);
         NewShift->takeName(Op0BO);
@@ -552,12 +582,14 @@ Instruction *llvm_seahorn::InstCombiner::FoldShiftByConstant(Value *Op0, Constan
       const APInt *C;
       if (!isa<Constant>(FalseVal) && TBO->getOperand(0) == FalseVal &&
           match(TBO->getOperand(1), m_APInt(C)) &&
-          canShiftBinOpWithConstantRHS(I, TBO, *C)) {
-        Constant *NewRHS = ConstantExpr::get(
-            I.getOpcode(), cast<Constant>(TBO->getOperand(1)), Op1);
+          canShiftBinOpWithConstantRHS(I, TBO)) {
+        Constant *NewRHS = ConstantExpr::get(I.getOpcode(),
+                                       cast<Constant>(TBO->getOperand(1)), Op1);
 
-        Value *NewShift = Builder.CreateBinOp(I.getOpcode(), FalseVal, Op1);
-        Value *NewOp = Builder.CreateBinOp(TBO->getOpcode(), NewShift, NewRHS);
+        Value *NewShift =
+          Builder.CreateBinOp(I.getOpcode(), FalseVal, Op1);
+        Value *NewOp = Builder.CreateBinOp(TBO->getOpcode(), NewShift,
+                                           NewRHS);
         return SelectInst::Create(Cond, NewOp, NewShift);
       }
     }
@@ -569,12 +601,14 @@ Instruction *llvm_seahorn::InstCombiner::FoldShiftByConstant(Value *Op0, Constan
       const APInt *C;
       if (!isa<Constant>(TrueVal) && FBO->getOperand(0) == TrueVal &&
           match(FBO->getOperand(1), m_APInt(C)) &&
-          canShiftBinOpWithConstantRHS(I, FBO, *C)) {
-        Constant *NewRHS = ConstantExpr::get(
-            I.getOpcode(), cast<Constant>(FBO->getOperand(1)), Op1);
+          canShiftBinOpWithConstantRHS(I, FBO)) {
+        Constant *NewRHS = ConstantExpr::get(I.getOpcode(),
+                                       cast<Constant>(FBO->getOperand(1)), Op1);
 
-        Value *NewShift = Builder.CreateBinOp(I.getOpcode(), TrueVal, Op1);
-        Value *NewOp = Builder.CreateBinOp(FBO->getOpcode(), NewShift, NewRHS);
+        Value *NewShift =
+          Builder.CreateBinOp(I.getOpcode(), TrueVal, Op1);
+        Value *NewOp = Builder.CreateBinOp(FBO->getOpcode(), NewShift,
+                                           NewRHS);
         return SelectInst::Create(Cond, NewShift, NewOp);
       }
     }
@@ -584,9 +618,9 @@ Instruction *llvm_seahorn::InstCombiner::FoldShiftByConstant(Value *Op0, Constan
 }
 
 Instruction *llvm_seahorn::InstCombiner::visitShl(BinaryOperator &I) {
-  if (Value *V =
-          SimplifyShlInst(I.getOperand(0), I.getOperand(1), I.hasNoSignedWrap(),
-                          I.hasNoUnsignedWrap(), SQ.getWithInstruction(&I)))
+  if (Value *V = SimplifyShlInst(I.getOperand(0), I.getOperand(1),
+                                 I.hasNoSignedWrap(), I.hasNoUnsignedWrap(),
+                                 SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
   if (Instruction *X = foldVectorBinop(I))
@@ -597,6 +631,8 @@ Instruction *llvm_seahorn::InstCombiner::visitShl(BinaryOperator &I) {
 
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
   Type *Ty = I.getType();
+  unsigned BitWidth = Ty->getScalarSizeInBits();
+
   const APInt *ShAmtAPInt;
   if (match(Op1, m_APInt(ShAmtAPInt))) {
     unsigned ShAmt = ShAmtAPInt->getZExtValue();
@@ -684,6 +720,12 @@ Instruction *llvm_seahorn::InstCombiner::visitShl(BinaryOperator &I) {
     if (match(Op0, m_Mul(m_Value(X), m_Constant(C2))))
       return BinaryOperator::CreateMul(X, ConstantExpr::getShl(C2, C1));
   }
+
+  // (1 << (C - x)) -> ((1 << C) >> x) if C is bitwidth - 1
+  if (match(Op0, m_One()) &&
+      match(Op1, m_Sub(m_SpecificInt(BitWidth - 1), m_Value(X))))
+    return BinaryOperator::CreateLShr(
+        ConstantInt::get(Ty, APInt::getSignMask(BitWidth)), X);
 
   return nullptr;
 }

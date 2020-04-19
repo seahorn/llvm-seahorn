@@ -1,9 +1,8 @@
 //===- InstCombinePHI.cpp -------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -15,9 +14,9 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Analysis/InstructionSimplify.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/PatternMatch.h"
-#include "llvm/Transforms/Utils/Local.h"
 using namespace llvm;
 using namespace llvm::PatternMatch;
 
@@ -307,10 +306,8 @@ Instruction *llvm_seahorn::InstCombiner::FoldPHIArgBinOpIntoPHI(PHINode &PN) {
         return nullptr;
 
     // Keep track of which operand needs a phi node.
-    if (I->getOperand(0) != LHSVal)
-      LHSVal = nullptr;
-    if (I->getOperand(1) != RHSVal)
-      RHSVal = nullptr;
+    if (I->getOperand(0) != LHSVal) LHSVal = nullptr;
+    if (I->getOperand(1) != RHSVal) RHSVal = nullptr;
   }
 
   // If both LHS and RHS would need a PHI, don't do this transformation,
@@ -377,8 +374,7 @@ Instruction *llvm_seahorn::InstCombiner::FoldPHIArgBinOpIntoPHI(PHINode &PN) {
 }
 
 Instruction *llvm_seahorn::InstCombiner::FoldPHIArgGEPIntoPHI(PHINode &PN) {
-  GetElementPtrInst *FirstInst =
-      cast<GetElementPtrInst>(PN.getIncomingValue(0));
+  GetElementPtrInst *FirstInst =cast<GetElementPtrInst>(PN.getIncomingValue(0));
 
   SmallVector<Value *, 16> FixedOperands(FirstInst->op_begin(),
                                          FirstInst->op_end());
@@ -395,8 +391,7 @@ Instruction *llvm_seahorn::InstCombiner::FoldPHIArgGEPIntoPHI(PHINode &PN) {
 
   // Scan to see if all operands are the same opcode, and all have one use.
   for (unsigned i = 1; i != PN.getNumIncomingValues(); ++i) {
-    GetElementPtrInst *GEP =
-        dyn_cast<GetElementPtrInst>(PN.getIncomingValue(i));
+    GetElementPtrInst *GEP= dyn_cast<GetElementPtrInst>(PN.getIncomingValue(i));
     if (!GEP || !GEP->hasOneUse() || GEP->getType() != FirstInst->getType() ||
         GEP->getNumOperands() != FirstInst->getNumOperands())
       return nullptr;
@@ -405,7 +400,8 @@ Instruction *llvm_seahorn::InstCombiner::FoldPHIArgGEPIntoPHI(PHINode &PN) {
 
     // Keep track of whether or not all GEPs are of alloca pointers.
     if (AllBasePointersAreAllocas &&
-        (!isa<AllocaInst>(GEP->getOperand(0)) || !GEP->hasAllConstantIndices()))
+        (!isa<AllocaInst>(GEP->getOperand(0)) ||
+         !GEP->hasAllConstantIndices()))
       AllBasePointersAreAllocas = false;
 
     // Compare the operand lists.
@@ -422,8 +418,7 @@ Instruction *llvm_seahorn::InstCombiner::FoldPHIArgGEPIntoPHI(PHINode &PN) {
           isa<ConstantInt>(GEP->getOperand(op)))
         return nullptr;
 
-      if (FirstInst->getOperand(op)->getType() !=
-          GEP->getOperand(op)->getType())
+      if (FirstInst->getOperand(op)->getType() !=GEP->getOperand(op)->getType())
         return nullptr;
 
       // If we already needed a PHI for an earlier operand, and another operand
@@ -453,11 +448,10 @@ Instruction *llvm_seahorn::InstCombiner::FoldPHIArgGEPIntoPHI(PHINode &PN) {
 
   bool HasAnyPHIs = false;
   for (unsigned i = 0, e = FixedOperands.size(); i != e; ++i) {
-    if (FixedOperands[i])
-      continue; // operand doesn't need a phi.
+    if (FixedOperands[i]) continue;  // operand doesn't need a phi.
     Value *FirstOp = FirstInst->getOperand(i);
-    PHINode *NewPN =
-        PHINode::Create(FirstOp->getType(), e, FirstOp->getName() + ".pn");
+    PHINode *NewPN = PHINode::Create(FirstOp->getType(), e,
+                                     FirstOp->getName()+".pn");
     InsertNewInstBefore(NewPN, PN);
 
     NewPN->addIncoming(FirstOp, PN.getIncomingBlock(0));
@@ -466,11 +460,11 @@ Instruction *llvm_seahorn::InstCombiner::FoldPHIArgGEPIntoPHI(PHINode &PN) {
     HasAnyPHIs = true;
   }
 
+
   // Add all operands to the new PHIs.
   if (HasAnyPHIs) {
     for (unsigned i = 1, e = PN.getNumIncomingValues(); i != e; ++i) {
-      GetElementPtrInst *InGEP =
-          cast<GetElementPtrInst>(PN.getIncomingValue(i));
+      GetElementPtrInst *InGEP =cast<GetElementPtrInst>(PN.getIncomingValue(i));
       BasicBlock *InBB = PN.getIncomingBlock(i);
 
       for (unsigned op = 0, e = OperandPhis.size(); op != e; ++op)
@@ -483,11 +477,11 @@ Instruction *llvm_seahorn::InstCombiner::FoldPHIArgGEPIntoPHI(PHINode &PN) {
   GetElementPtrInst *NewGEP =
       GetElementPtrInst::Create(FirstInst->getSourceElementType(), Base,
                                 makeArrayRef(FixedOperands).slice(1));
-  if (AllInBounds)
-    NewGEP->setIsInBounds();
+  if (AllInBounds) NewGEP->setIsInBounds();
   PHIArgMergedDebugLoc(NewGEP, PN);
   return NewGEP;
 }
+
 
 /// Return true if we know that it is safe to sink the load out of the block
 /// that defines it. This means that it must be obvious the value of the load is
@@ -508,12 +502,10 @@ static bool isSafeAndProfitableToSinkLoad(LoadInst *L) {
   if (AllocaInst *AI = dyn_cast<AllocaInst>(L->getOperand(0))) {
     bool isAddressTaken = false;
     for (User *U : AI->users()) {
-      if (isa<LoadInst>(U))
-        continue;
+      if (isa<LoadInst>(U)) continue;
       if (StoreInst *SI = dyn_cast<StoreInst>(U)) {
         // If storing TO the alloca, then the address isn't taken.
-        if (SI->getOperand(1) == AI)
-          continue;
+        if (SI->getOperand(1) == AI) continue;
       }
       isAddressTaken = true;
       break;
@@ -590,19 +582,21 @@ Instruction *llvm_seahorn::InstCombiner::FoldPHIArgLoadIntoPHI(PHINode &PN) {
     // If the PHI is of volatile loads and the load block has multiple
     // successors, sinking it would remove a load of the volatile value from
     // the path through the other successor.
-    if (isVolatile && LI->getParent()->getTerminator()->getNumSuccessors() != 1)
+    if (isVolatile &&
+        LI->getParent()->getTerminator()->getNumSuccessors() != 1)
       return nullptr;
   }
 
   // Okay, they are all the same operation.  Create a new PHI node of the
   // correct type, and PHI together all of the LHS's of the instructions.
-  PHINode *NewPN =
-      PHINode::Create(FirstLI->getOperand(0)->getType(),
-                      PN.getNumIncomingValues(), PN.getName() + ".in");
+  PHINode *NewPN = PHINode::Create(FirstLI->getOperand(0)->getType(),
+                                   PN.getNumIncomingValues(),
+                                   PN.getName()+".in");
 
   Value *InVal = FirstLI->getOperand(0);
   NewPN->addIncoming(InVal, PN.getIncomingBlock(0));
-  LoadInst *NewLI = new LoadInst(NewPN, "", isVolatile, LoadAlignment);
+  LoadInst *NewLI =
+      new LoadInst(FirstLI->getType(), NewPN, "", isVolatile, LoadAlignment);
 
   unsigned KnownIDs[] = {
       LLVMContext::MD_tbaa,
@@ -715,8 +709,8 @@ Instruction *llvm_seahorn::InstCombiner::FoldPHIArgZextsIntoPHI(PHINode &Phi) {
   // All incoming values are zexts or constants that are safe to truncate.
   // Create a new phi node of the narrow type, phi together all of the new
   // operands, and zext the result back to the original type.
-  PHINode *NewPhi =
-      PHINode::Create(NarrowType, NumIncomingValues, Phi.getName() + ".shrunk");
+  PHINode *NewPhi = PHINode::Create(NarrowType, NumIncomingValues,
+                                    Phi.getName() + ".shrunk");
   for (unsigned i = 0; i != NumIncomingValues; ++i)
     NewPhi->addIncoming(NewIncoming[i], Phi.getIncomingBlock(i));
 
@@ -782,9 +776,9 @@ Instruction *llvm_seahorn::InstCombiner::FoldPHIArgOpIntoPHI(PHINode &PN) {
 
   // Okay, they are all the same operation.  Create a new PHI node of the
   // correct type, and PHI together all of the LHS's of the instructions.
-  PHINode *NewPN =
-      PHINode::Create(FirstInst->getOperand(0)->getType(),
-                      PN.getNumIncomingValues(), PN.getName() + ".in");
+  PHINode *NewPN = PHINode::Create(FirstInst->getOperand(0)->getType(),
+                                   PN.getNumIncomingValues(),
+                                   PN.getName()+".in");
 
   Value *InVal = FirstInst->getOperand(0);
   NewPN->addIncoming(InVal, PN.getIncomingBlock(0));
@@ -810,8 +804,8 @@ Instruction *llvm_seahorn::InstCombiner::FoldPHIArgOpIntoPHI(PHINode &PN) {
 
   // Insert and return the new operation.
   if (CastInst *FirstCI = dyn_cast<CastInst>(FirstInst)) {
-    CastInst *NewCI =
-        CastInst::Create(FirstCI->getOpcode(), PhiVal, PN.getType());
+    CastInst *NewCI = CastInst::Create(FirstCI->getOpcode(), PhiVal,
+                                       PN.getType());
     PHIArgMergedDebugLoc(NewCI, PN);
     return NewCI;
   }
@@ -837,10 +831,8 @@ Instruction *llvm_seahorn::InstCombiner::FoldPHIArgOpIntoPHI(PHINode &PN) {
 /// Return true if this PHI node is only used by a PHI node cycle that is dead.
 static bool DeadPHICycle(PHINode *PN,
                          SmallPtrSetImpl<PHINode *> &PotentiallyDeadPHIs) {
-  if (PN->use_empty())
-    return true;
-  if (!PN->hasOneUse())
-    return false;
+  if (PN->use_empty()) return true;
+  if (!PN->hasOneUse()) return false;
 
   // Remember this node, and if we find the cycle, return.
   if (!PotentiallyDeadPHIs.insert(PN).second)
@@ -903,14 +895,10 @@ struct PHIUsageRecord {
       : PHIId(pn), Shift(Sh), Inst(User) {}
 
   bool operator<(const PHIUsageRecord &RHS) const {
-    if (PHIId < RHS.PHIId)
-      return true;
-    if (PHIId > RHS.PHIId)
-      return false;
-    if (Shift < RHS.Shift)
-      return true;
-    if (Shift > RHS.Shift)
-      return false;
+    if (PHIId < RHS.PHIId) return true;
+    if (PHIId > RHS.PHIId) return false;
+    if (Shift < RHS.Shift) return true;
+    if (Shift > RHS.Shift) return false;
     return Inst->getType()->getPrimitiveSizeInBits() <
            RHS.Inst->getType()->getPrimitiveSizeInBits();
   }
@@ -925,12 +913,14 @@ struct LoweredPHIRecord {
       : PN(pn), Shift(Sh), Width(Ty->getPrimitiveSizeInBits()) {}
 
   // Ctor form used by DenseMap.
-  LoweredPHIRecord(PHINode *pn, unsigned Sh) : PN(pn), Shift(Sh), Width(0) {}
+  LoweredPHIRecord(PHINode *pn, unsigned Sh)
+    : PN(pn), Shift(Sh), Width(0) {}
 };
-} // namespace
+}
 
 namespace llvm {
-template <> struct DenseMapInfo<LoweredPHIRecord> {
+  template<>
+  struct DenseMapInfo<LoweredPHIRecord> {
   static inline LoweredPHIRecord getEmptyKey() {
     return LoweredPHIRecord(nullptr, 0);
   }
@@ -943,10 +933,12 @@ template <> struct DenseMapInfo<LoweredPHIRecord> {
   }
   static bool isEqual(const LoweredPHIRecord &LHS,
                       const LoweredPHIRecord &RHS) {
-    return LHS.PN == RHS.PN && LHS.Shift == RHS.Shift && LHS.Width == RHS.Width;
+      return LHS.PN == RHS.PN && LHS.Shift == RHS.Shift &&
+             LHS.Width == RHS.Width;
   }
 };
-} // namespace llvm
+}
+
 
 /// This is an integer PHI and we know that it has an illegal type: see if it is
 /// only used by trunc or trunc(lshr) operations. If so, we split the PHI into
@@ -980,8 +972,7 @@ Instruction *llvm_seahorn::InstCombiner::SliceUpIllegalIntegerPHI(PHINode &First
     // bail out.
     for (unsigned i = 0, e = PN->getNumIncomingValues(); i != e; ++i) {
       InvokeInst *II = dyn_cast<InvokeInst>(PN->getIncomingValue(i));
-      if (!II)
-        continue;
+      if (!II) continue;
       if (II->getParent() != PN->getIncomingBlock(i))
         continue;
 
@@ -1008,9 +999,14 @@ Instruction *llvm_seahorn::InstCombiner::SliceUpIllegalIntegerPHI(PHINode &First
       }
 
       // Otherwise it must be a lshr which can only be used by one trunc.
-      if (UserI->getOpcode() != Instruction::LShr || !UserI->hasOneUse() ||
-          !isa<TruncInst>(UserI->user_back()) ||
+      if (UserI->getOpcode() != Instruction::LShr ||
+          !UserI->hasOneUse() || !isa<TruncInst>(UserI->user_back()) ||
           !isa<ConstantInt>(UserI->getOperand(1)))
+        return nullptr;
+
+      // Bail on out of range shifts.
+      unsigned SizeInBits = UserI->getType()->getScalarSizeInBits();
+      if (cast<ConstantInt>(UserI->getOperand(1))->getValue().uge(SizeInBits))
         return nullptr;
 
       unsigned Shift = cast<ConstantInt>(UserI->getOperand(1))->getZExtValue();
@@ -1088,8 +1084,8 @@ Instruction *llvm_seahorn::InstCombiner::SliceUpIllegalIntegerPHI(PHINode &First
         Builder.SetInsertPoint(Pred->getTerminator());
         Value *Res = InVal;
         if (Offset)
-          Res = Builder.CreateLShr(
-              Res, ConstantInt::get(InVal->getType(), Offset), "extract");
+          Res = Builder.CreateLShr(Res, ConstantInt::get(InVal->getType(),
+                                                          Offset), "extract");
         Res = Builder.CreateTrunc(Res, Ty, "extract.t");
         PredVal = Res;
         EltPHI->addIncoming(Res, Pred);
@@ -1102,8 +1098,8 @@ Instruction *llvm_seahorn::InstCombiner::SliceUpIllegalIntegerPHI(PHINode &First
           if (PHIsInspected.count(OldInVal)) {
             unsigned RefPHIId =
                 find(PHIsToSlice, OldInVal) - PHIsToSlice.begin();
-            PHIUsers.push_back(
-                PHIUsageRecord(RefPHIId, Offset, cast<Instruction>(Res)));
+            PHIUsers.push_back(PHIUsageRecord(RefPHIId, Offset,
+                                              cast<Instruction>(Res)));
             ++UserE;
           }
       }

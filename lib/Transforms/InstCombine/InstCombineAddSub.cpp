@@ -1,9 +1,8 @@
 //===- InstCombineAddSub.cpp ------------------------------------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -64,8 +63,7 @@ public:
 
   void set(short C) {
     assert(!insaneIntVal(C) && "Insane coefficient");
-    IsFp = false;
-    IntVal = C;
+      IsFp = false; IntVal = C;
   }
 
   void set(const APFloat &C);
@@ -83,13 +81,11 @@ public:
 private:
   bool insaneIntVal(int V) { return V > 4 || V < -4; }
 
-  APFloat *getFpValPtr() {
-    return reinterpret_cast<APFloat *>(&FpValBuf.buffer[0]);
-  }
+    APFloat *getFpValPtr()
+      { return reinterpret_cast<APFloat *>(&FpValBuf.buffer[0]); }
 
-  const APFloat *getFpValPtr() const {
-    return reinterpret_cast<const APFloat *>(&FpValBuf.buffer[0]);
-  }
+    const APFloat *getFpValPtr() const
+      { return reinterpret_cast<const APFloat *>(&FpValBuf.buffer[0]); }
 
   const APFloat &getFpVal() const {
     assert(IsFp && BufHasFpVal && "Incorret state");
@@ -332,8 +328,9 @@ void FAddendCoef::negate() {
 }
 
 Value *FAddendCoef::getValue(Type *Ty) const {
-  return isInt() ? ConstantFP::get(Ty, float(IntVal))
-                 : ConstantFP::get(Ty->getContext(), getFpVal());
+  return isInt() ?
+    ConstantFP::get(Ty, float(IntVal)) :
+    ConstantFP::get(Ty->getContext(), getFpVal());
 }
 
 // The definition of <Val>     Addends
@@ -346,8 +343,8 @@ Value *FAddendCoef::getValue(Type *Ty) const {
 //  0 +/- 0                   <0, NULL> (corner case)
 //
 // Legend: A and B are not constant, C is constant
-unsigned FAddend::drillValueDownOneStep(Value *Val, FAddend &Addend0,
-                                        FAddend &Addend1) {
+unsigned FAddend::drillValueDownOneStep
+  (Value *Val, FAddend &Addend0, FAddend &Addend1) {
   Instruction *I = nullptr;
   if (!Val || !(I = dyn_cast<Instruction>(Val)))
     return 0;
@@ -409,8 +406,8 @@ unsigned FAddend::drillValueDownOneStep(Value *Val, FAddend &Addend0,
 // Try to break *this* addend into two addends. e.g. Suppose this addend is
 // <2.3, V>, and V = X + Y, by calling this function, we obtain two addends,
 // i.e. <2.3, X> and <2.3, Y>.
-unsigned FAddend::drillAddendDownOneStep(FAddend &Addend0,
-                                         FAddend &Addend1) const {
+unsigned FAddend::drillAddendDownOneStep
+  (FAddend &Addend0, FAddend &Addend1) const {
   if (isConstant())
     return 0;
 
@@ -435,8 +432,7 @@ Value *FAddCombine::simplify(Instruction *I) {
     return nullptr;
 
   assert((I->getOpcode() == Instruction::FAdd ||
-          I->getOpcode() == Instruction::FSub) &&
-         "Expect add/sub");
+          I->getOpcode() == Instruction::FSub) && "Expect add/sub");
 
   // Save the instruction before calling other member-functions.
   Instr = I;
@@ -472,9 +468,7 @@ Value *FAddCombine::simplify(Instruction *I) {
     Value *V0 = I->getOperand(0);
     Value *V1 = I->getOperand(1);
     InstQuota = ((!isa<Constant>(V0) && V0->hasOneUse()) &&
-                 (!isa<Constant>(V1) && V1->hasOneUse()))
-                    ? 2
-                    : 1;
+                 (!isa<Constant>(V1) && V1->hasOneUse())) ? 2 : 1;
 
     if (Value *R = simplifyFAdd(AllOpnds, InstQuota))
       return R;
@@ -554,8 +548,8 @@ Value *FAddCombine::simplifyFAdd(AddendVect &Addends, unsigned InstrQuota) {
     // example, if the symbolic value "y" is being processed, the inner loop
     // will collect two addends "<b1,y>" and "<b2,Y>". These two addends will
     // be later on folded into "<b1+b2, y>".
-    for (unsigned SameSymIdx = SymIdx + 1; SameSymIdx < AddendNum;
-         SameSymIdx++) {
+    for (unsigned SameSymIdx = SymIdx + 1;
+         SameSymIdx < AddendNum; SameSymIdx++) {
       const FAddend *T = Addends[SameSymIdx];
       if (T && T->getSymVal() == Val) {
         // Set null such that next iteration of the outer loop will not process
@@ -603,8 +597,8 @@ Value *FAddCombine::simplifyFAdd(AddendVect &Addends, unsigned InstrQuota) {
   return Result;
 }
 
-Value *FAddCombine::createNaryFAdd(const AddendVect &Opnds,
-                                   unsigned InstrQuota) {
+Value *FAddCombine::createNaryFAdd
+  (const AddendVect &Opnds, unsigned InstrQuota) {
   assert(!Opnds.empty() && "Expect at least one addend");
 
   // Step 1: Check if the # of instructions needed exceeds the quota.
@@ -828,6 +822,47 @@ static Value *checkForNegativeOperand(BinaryOperator &I,
   return nullptr;
 }
 
+/// Wrapping flags may allow combining constants separated by an extend.
+static Instruction *foldNoWrapAdd(BinaryOperator &Add,
+                                  InstCombiner::BuilderTy &Builder) {
+  Value *Op0 = Add.getOperand(0), *Op1 = Add.getOperand(1);
+  Type *Ty = Add.getType();
+  Constant *Op1C;
+  if (!match(Op1, m_Constant(Op1C)))
+    return nullptr;
+
+  // Try this match first because it results in an add in the narrow type.
+  // (zext (X +nuw C2)) + C1 --> zext (X + (C2 + trunc(C1)))
+  Value *X;
+  const APInt *C1, *C2;
+  if (match(Op1, m_APInt(C1)) &&
+      match(Op0, m_OneUse(m_ZExt(m_NUWAdd(m_Value(X), m_APInt(C2))))) &&
+      C1->isNegative() && C1->sge(-C2->sext(C1->getBitWidth()))) {
+    Constant *NewC =
+        ConstantInt::get(X->getType(), *C2 + C1->trunc(C2->getBitWidth()));
+    return new ZExtInst(Builder.CreateNUWAdd(X, NewC), Ty);
+  }
+
+  // More general combining of constants in the wide type.
+  // (sext (X +nsw NarrowC)) + C --> (sext X) + (sext(NarrowC) + C)
+  Constant *NarrowC;
+  if (match(Op0, m_OneUse(m_SExt(m_NSWAdd(m_Value(X), m_Constant(NarrowC)))))) {
+    Constant *WideC = ConstantExpr::getSExt(NarrowC, Ty);
+    Constant *NewC = ConstantExpr::getAdd(WideC, Op1C);
+    Value *WideX = Builder.CreateSExt(X, Ty);
+    return BinaryOperator::CreateAdd(WideX, NewC);
+  }
+  // (zext (X +nuw NarrowC)) + C --> (zext X) + (zext(NarrowC) + C)
+  if (match(Op0, m_OneUse(m_ZExt(m_NUWAdd(m_Value(X), m_Constant(NarrowC)))))) {
+    Constant *WideC = ConstantExpr::getZExt(NarrowC, Ty);
+    Constant *NewC = ConstantExpr::getAdd(WideC, Op1C);
+    Value *WideX = Builder.CreateZExt(X, Ty);
+    return BinaryOperator::CreateAdd(WideX, NewC);
+  }
+
+  return nullptr;
+}
+
 Instruction *llvm_seahorn::InstCombiner::foldAddWithConstant(BinaryOperator &Add) {
   Value *Op0 = Add.getOperand(0), *Op1 = Add.getOperand(1);
   Constant *Op1C;
@@ -837,7 +872,14 @@ Instruction *llvm_seahorn::InstCombiner::foldAddWithConstant(BinaryOperator &Add
   if (Instruction *NV = foldBinOpIntoSelectOrPhi(Add))
     return NV;
 
-  Value *X, *Y;
+  Value *X;
+  Constant *Op00C;
+
+  // add (sub C1, X), C2 --> sub (add C1, C2), X
+  if (match(Op0, m_Sub(m_Constant(Op00C), m_Value(X))))
+    return BinaryOperator::CreateSub(ConstantExpr::getAdd(Op00C, Op1C), X);
+
+  Value *Y;
 
   // add (sub X, Y), -1 --> add (not Y), X
   if (!AvoidBv && match(Op0, m_OneUse(m_Sub(m_Value(X), m_Value(Y)))) &&
@@ -857,6 +899,11 @@ Instruction *llvm_seahorn::InstCombiner::foldAddWithConstant(BinaryOperator &Add
   if (!match(Op1, m_APInt(C)))
     return nullptr;
 
+  // (X | C2) + C --> (X | C2) ^ C2 iff (C2 == -C)
+  const APInt *C2;
+  if (match(Op0, m_Or(m_Value(), m_APInt(C2))) && *C2 == -*C)
+    return BinaryOperator::CreateXor(Op0, ConstantInt::get(Add.getType(), *C2));
+
   if (!AvoidBv && C->isSignMask()) {
     // If wrapping is not allowed, then the addition must set the sign bit:
     // X + (signmask) --> X | signmask
@@ -871,18 +918,9 @@ Instruction *llvm_seahorn::InstCombiner::foldAddWithConstant(BinaryOperator &Add
   // Is this add the last step in a convoluted sext?
   // add(zext(xor i16 X, -32768), -32768) --> sext X
   Type *Ty = Add.getType();
-  const APInt *C2;
   if (match(Op0, m_ZExt(m_Xor(m_Value(X), m_APInt(C2)))) &&
       C2->isMinSignedValue() && C2->sext(Ty->getScalarSizeInBits()) == *C)
     return CastInst::Create(Instruction::SExt, X, Ty);
-
-  // (add (zext (add nuw X, C2)), C) --> (zext (add nuw X, C2 + C))
-  if (match(Op0, m_OneUse(m_ZExt(m_NUWAdd(m_Value(X), m_APInt(C2))))) &&
-      C->isNegative() && C->sge(-C2->sext(C->getBitWidth()))) {
-    Constant *NewC =
-        ConstantInt::get(X->getType(), *C2 + C->trunc(C2->getBitWidth()));
-    return new ZExtInst(Builder.CreateNUWAdd(X, NewC), Ty);
-  }
 
   if (C->isOneValue() && Op0->hasOneUse()) {
     // add (sext i1 X), 1 --> zext (not X)
@@ -1037,10 +1075,32 @@ static Instruction *canonicalizeLowbitMask(BinaryOperator &I,
   return BinaryOperator::CreateNot(NotMask, I.getName());
 }
 
+static Instruction *foldToUnsignedSaturatedAdd(BinaryOperator &I) {
+  assert(I.getOpcode() == Instruction::Add && "Expecting add instruction");
+  Type *Ty = I.getType();
+  auto getUAddSat = [&]() {
+    return Intrinsic::getDeclaration(I.getModule(), Intrinsic::uadd_sat, Ty);
+  };
+
+  // add (umin X, ~Y), Y --> uaddsat X, Y
+  Value *X, *Y;
+  if (match(&I, m_c_Add(m_c_UMin(m_Value(X), m_Not(m_Value(Y))),
+                        m_Deferred(Y))))
+    return CallInst::Create(getUAddSat(), { X, Y });
+
+  // add (umin X, ~C), C --> uaddsat X, C
+  const APInt *C, *NotC;
+  if (match(&I, m_Add(m_UMin(m_Value(X), m_APInt(NotC)), m_APInt(C))) &&
+      *C == ~*NotC)
+    return CallInst::Create(getUAddSat(), { X, ConstantInt::get(Ty, *C) });
+
+  return nullptr;
+}
+
 Instruction *llvm_seahorn::InstCombiner::visitAdd(BinaryOperator &I) {
-  if (Value *V =
-          SimplifyAddInst(I.getOperand(0), I.getOperand(1), I.hasNoSignedWrap(),
-                          I.hasNoUnsignedWrap(), SQ.getWithInstruction(&I)))
+  if (Value *V = SimplifyAddInst(I.getOperand(0), I.getOperand(1),
+                                 I.hasNoSignedWrap(), I.hasNoUnsignedWrap(),
+                                 SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
   if (SimplifyAssociativeOrCommutative(I))
@@ -1056,13 +1116,15 @@ Instruction *llvm_seahorn::InstCombiner::visitAdd(BinaryOperator &I) {
   if (Instruction *X = foldAddWithConstant(I))
     return X;
 
+  if (Instruction *X = foldNoWrapAdd(I, Builder))
+    return X;
+
   // FIXME: This should be moved into the above helper function to allow these
   // transforms for general constant or constant splat vectors.
   Value *LHS = I.getOperand(0), *RHS = I.getOperand(1);
   Type *Ty = I.getType();
   if (ConstantInt *CI = dyn_cast<ConstantInt>(RHS)) {
-    Value *XorLHS = nullptr;
-    ConstantInt *XorRHS = nullptr;
+    Value *XorLHS = nullptr; ConstantInt *XorRHS = nullptr;
     if (match(LHS, m_Xor(m_Value(XorLHS), m_ConstantInt(XorRHS)))) {
       unsigned TySizeBits = Ty->getScalarSizeInBits();
       const APInt &RHSVal = CI->getValue();
@@ -1125,6 +1187,12 @@ Instruction *llvm_seahorn::InstCombiner::visitAdd(BinaryOperator &I) {
     return BinaryOperator::CreateSub(RHS, A);
   }
 
+  // Canonicalize sext to zext for better value tracking potential.
+  // add A, sext(B) --> sub A, zext(B)
+  if (match(&I, m_c_Add(m_Value(A), m_OneUse(m_SExt(m_Value(B))))) &&
+      B->getType()->isIntOrIntVectorTy(1))
+    return BinaryOperator::CreateSub(A, Builder.CreateZExt(B, Ty));
+
   // A + -B  -->  A - B
   if (match(RHS, m_Neg(m_Value(B))))
     return BinaryOperator::CreateSub(LHS, B);
@@ -1134,12 +1202,14 @@ Instruction *llvm_seahorn::InstCombiner::visitAdd(BinaryOperator &I) {
 
   // (A + 1) + ~B --> A - B
   // ~B + (A + 1) --> A - B
-  if (match(&I, m_c_BinOp(m_Add(m_Value(A), m_One()), m_Not(m_Value(B)))))
+  // (~B + A) + 1 --> A - B
+  // (A + ~B) + 1 --> A - B
+  if (match(&I, m_c_BinOp(m_Add(m_Value(A), m_One()), m_Not(m_Value(B)))) ||
+      match(&I, m_BinOp(m_c_Add(m_Not(m_Value(B)), m_Value(A)), m_One())))
     return BinaryOperator::CreateSub(A, B);
 
   // X % C0 + (( X / C0 ) % C1) * C0 => X % (C0 * C1)
-  if (Value *V = SimplifyAddWithRemainder(I))
-    return replaceInstUsesWith(I, V);
+  if (Value *V = SimplifyAddWithRemainder(I)) return replaceInstUsesWith(I, V);
 
   // A+B --> A|B iff A and B have no bits set in common.
   if (!AvoidBv && haveNoCommonBitsSet(LHS, RHS, DL, &AC, &I, &DT))
@@ -1152,7 +1222,8 @@ Instruction *llvm_seahorn::InstCombiner::visitAdd(BinaryOperator &I) {
     // (X & FF00) + xx00  -> (X+xx00) & FF00
     Value *X;
     ConstantInt *C2;
-    if (LHS->hasOneUse() && match(LHS, m_And(m_Value(X), m_ConstantInt(C2))) &&
+    if (LHS->hasOneUse() &&
+        match(LHS, m_And(m_Value(X), m_ConstantInt(C2))) &&
         CRHS->getValue() == (CRHS->getValue() & C2->getValue())) {
       // See if all bits from the first bit set in the Add RHS up are included
       // in the mask.  First, get the rightmost bit.
@@ -1231,6 +1302,9 @@ Instruction *llvm_seahorn::InstCombiner::visitAdd(BinaryOperator &I) {
   if (Instruction *V = canonicalizeLowbitMask(I, Builder))
     return V;
 
+  if (Instruction *SatAdd = foldToUnsignedSaturatedAdd(I))
+    return SatAdd;
+
   return Changed ? &I : nullptr;
 }
 
@@ -1238,8 +1312,7 @@ Instruction *llvm_seahorn::InstCombiner::visitAdd(BinaryOperator &I) {
 static Instruction *factorizeFAddFSub(BinaryOperator &I,
                                       llvm_seahorn::InstCombiner::BuilderTy &Builder) {
   assert((I.getOpcode() == Instruction::FAdd ||
-          I.getOpcode() == Instruction::FSub) &&
-         "Expecting fadd/fsub");
+          I.getOpcode() == Instruction::FSub) && "Expecting fadd/fsub");
   assert(I.hasAllowReassoc() && I.hasNoSignedZeros() &&
          "FP factorization requires FMF");
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
@@ -1275,9 +1348,9 @@ static Instruction *factorizeFAddFSub(BinaryOperator &I,
 }
 
 Instruction *llvm_seahorn::InstCombiner::visitFAdd(BinaryOperator &I) {
-  if (Value *V =
-          SimplifyFAddInst(I.getOperand(0), I.getOperand(1),
-                           I.getFastMathFlags(), SQ.getWithInstruction(&I)))
+  if (Value *V = SimplifyFAddInst(I.getOperand(0), I.getOperand(1),
+                                  I.getFastMathFlags(),
+                                  SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
   if (SimplifyAssociativeOrCommutative(I))
@@ -1325,7 +1398,8 @@ Instruction *llvm_seahorn::InstCombiner::visitFAdd(BinaryOperator &I) {
     // instcombined.
     if (ConstantFP *CFP = dyn_cast<ConstantFP>(RHS))
       if (IsValidPromotion(FPType, LHSIntVal->getType())) {
-        Constant *CI = ConstantExpr::getFPToSI(CFP, LHSIntVal->getType());
+        Constant *CI =
+          ConstantExpr::getFPToSI(CFP, LHSIntVal->getType());
         if (LHSConv->hasOneUse() &&
             ConstantExpr::getSIToFP(CI, I.getType()) == CFP &&
             willNotOverflowSignedAdd(LHSIntVal, CI, I)) {
@@ -1456,9 +1530,9 @@ Value *llvm_seahorn::InstCombiner::OptimizePointerDifference(Value *LHS, Value *
 }
 
 Instruction *llvm_seahorn::InstCombiner::visitSub(BinaryOperator &I) {
-  if (Value *V =
-          SimplifySubInst(I.getOperand(0), I.getOperand(1), I.hasNoSignedWrap(),
-                          I.hasNoUnsignedWrap(), SQ.getWithInstruction(&I)))
+  if (Value *V = SimplifySubInst(I.getOperand(0), I.getOperand(1),
+                                 I.hasNoSignedWrap(), I.hasNoUnsignedWrap(),
+                                 SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
   if (Instruction *X = foldVectorBinop(I))
@@ -1506,6 +1580,12 @@ Instruction *llvm_seahorn::InstCombiner::visitSub(BinaryOperator &I) {
   if (match(Op1, m_OneUse(m_Add(m_Value(X), m_One()))))
     return BinaryOperator::CreateAdd(Builder.CreateNot(X), Op0);
 
+  // Y - ~X --> (X + 1) + Y
+  if (match(Op1, m_OneUse(m_Not(m_Value(X))))) {
+    return BinaryOperator::CreateAdd(
+        Builder.CreateAdd(Op0, ConstantInt::get(I.getType(), 1)), X);
+  }
+
   if (Constant *C = dyn_cast<Constant>(Op0)) {
     bool IsNegate = match(C, m_ZeroInt());
     Value *X;
@@ -1538,8 +1618,13 @@ Instruction *llvm_seahorn::InstCombiner::visitSub(BinaryOperator &I) {
       if (Instruction *R = foldOpIntoPhi(I, PN))
         return R;
 
-    // C-(X+C2) --> (C-C2)-X
     Constant *C2;
+
+    // C-(C2-X) --> X+(C-C2)
+    if (match(Op1, m_Sub(m_Constant(C2), m_Value(X))))
+      return BinaryOperator::CreateAdd(X, ConstantExpr::getSub(C, C2));
+
+    // C-(X+C2) --> (C-C2)-X
     if (match(Op1, m_Add(m_Value(X), m_Constant(C2))))
       return BinaryOperator::CreateSub(ConstantExpr::getSub(C, C2), X);
   }
@@ -1628,13 +1713,19 @@ Instruction *llvm_seahorn::InstCombiner::visitSub(BinaryOperator &I) {
 
     // (X - (X & Y))   -->   (X & ~Y)
     if (match(Op1, m_c_And(m_Value(Y), m_Specific(Op0))))
-      return BinaryOperator::CreateAnd(
-          Op0, Builder.CreateNot(Y, Y->getName() + ".not"));
+      return BinaryOperator::CreateAnd(Op0,
+                                  Builder.CreateNot(Y, Y->getName() + ".not"));
 
     // 0 - (X sdiv C)  -> (X sdiv -C)  provided the negation doesn't overflow.
-    if (match(Op1, m_SDiv(m_Value(X), m_Constant(C))) && match(Op0, m_Zero()) &&
-        C->isNotMinSignedValue() && !C->isOneValue())
-      return BinaryOperator::CreateSDiv(X, ConstantExpr::getNeg(C));
+    // TODO: This could be extended to match arbitrary vector constants.
+    const APInt *DivC;
+    if (match(Op0, m_Zero()) && match(Op1, m_SDiv(m_Value(X), m_APInt(DivC))) &&
+        !DivC->isMinSignedValue() && *DivC != 1) {
+      Constant *NegDivC = ConstantInt::get(I.getType(), -(*DivC));
+      Instruction *BO = BinaryOperator::CreateSDiv(X, NegDivC);
+      BO->setIsExact(cast<BinaryOperator>(Op1)->isExact());
+      return BO;
+    }
 
     // 0 - (X << Y)  -> (-X << Y)   when X is freely negatable.
     if (match(Op1, m_Shl(m_Value(X), m_Value(Y))) && match(Op0, m_Zero()))
@@ -1722,16 +1813,16 @@ Instruction *llvm_seahorn::InstCombiner::visitSub(BinaryOperator &I) {
   Value *A;
   const APInt *ShAmt;
   Type *Ty = I.getType();
-  if (match(Op1, m_AShr(m_Value(A), m_APInt(ShAmt))) && Op1->hasNUses(2) &&
-      *ShAmt == Ty->getScalarSizeInBits() - 1 &&
+  if (match(Op1, m_AShr(m_Value(A), m_APInt(ShAmt))) &&
+      Op1->hasNUses(2) && *ShAmt == Ty->getScalarSizeInBits() - 1 &&
       match(Op0, m_OneUse(m_c_Xor(m_Specific(A), m_Specific(Op1))))) {
     // B = ashr i32 A, 31 ; smear the sign bit
     // sub (xor A, B), B  ; flip bits if negative and subtract -1 (add 1)
     // --> (A < 0) ? -A : A
     Value *Cmp = Builder.CreateICmpSLT(A, ConstantInt::getNullValue(Ty));
     // Copy the nuw/nsw flags from the sub to the negate.
-    Value *Neg =
-        Builder.CreateNeg(A, "", I.hasNoUnsignedWrap(), I.hasNoSignedWrap());
+    Value *Neg = Builder.CreateNeg(A, "", I.hasNoUnsignedWrap(),
+                                   I.hasNoSignedWrap());
     return SelectInst::Create(Cmp, Neg, A);
   }
 
@@ -1751,10 +1842,53 @@ Instruction *llvm_seahorn::InstCombiner::visitSub(BinaryOperator &I) {
   return Changed ? &I : nullptr;
 }
 
+/// This eliminates floating-point negation in either 'fneg(X)' or
+/// 'fsub(-0.0, X)' form by combining into a constant operand.
+static Instruction *foldFNegIntoConstant(Instruction &I) {
+  Value *X;
+  Constant *C;
+
+  // Fold negation into constant operand. This is limited with one-use because
+  // fneg is assumed better for analysis and cheaper in codegen than fmul/fdiv.
+  // -(X * C) --> X * (-C)
+  // FIXME: It's arguable whether these should be m_OneUse or not. The current
+  // belief is that the FNeg allows for better reassociation opportunities.
+  if (match(&I, m_FNeg(m_OneUse(m_FMul(m_Value(X), m_Constant(C))))))
+    return BinaryOperator::CreateFMulFMF(X, ConstantExpr::getFNeg(C), &I);
+  // -(X / C) --> X / (-C)
+  if (match(&I, m_FNeg(m_OneUse(m_FDiv(m_Value(X), m_Constant(C))))))
+    return BinaryOperator::CreateFDivFMF(X, ConstantExpr::getFNeg(C), &I);
+  // -(C / X) --> (-C) / X
+  if (match(&I, m_FNeg(m_OneUse(m_FDiv(m_Constant(C), m_Value(X))))))
+    return BinaryOperator::CreateFDivFMF(ConstantExpr::getFNeg(C), X, &I);
+
+  return nullptr;
+}
+
+Instruction *InstCombiner::visitFNeg(UnaryOperator &I) {
+  Value *Op = I.getOperand(0);
+
+  if (Value *V = SimplifyFNegInst(Op, I.getFastMathFlags(),
+                                  SQ.getWithInstruction(&I)))
+    return replaceInstUsesWith(I, V);
+
+  if (Instruction *X = foldFNegIntoConstant(I))
+    return X;
+
+  Value *X, *Y;
+
+  // If we can ignore the sign of zeros: -(X - Y) --> (Y - X)
+  if (I.hasNoSignedZeros() &&
+      match(Op, m_OneUse(m_FSub(m_Value(X), m_Value(Y)))))
+    return BinaryOperator::CreateFSubFMF(Y, X, &I);
+
+  return nullptr;
+}
+
 Instruction *llvm_seahorn::InstCombiner::visitFSub(BinaryOperator &I) {
-  if (Value *V =
-          SimplifyFSubInst(I.getOperand(0), I.getOperand(1),
-                           I.getFastMathFlags(), SQ.getWithInstruction(&I)))
+  if (Value *V = SimplifyFSubInst(I.getOperand(0), I.getOperand(1),
+                                  I.getFastMathFlags(),
+                                  SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
   if (Instruction *X = foldVectorBinop(I))
@@ -1766,20 +1900,11 @@ Instruction *llvm_seahorn::InstCombiner::visitFSub(BinaryOperator &I) {
   if (I.hasNoSignedZeros() && match(Op0, m_PosZeroFP()))
     return BinaryOperator::CreateFNegFMF(Op1, &I);
 
+  if (Instruction *X = foldFNegIntoConstant(I))
+    return X;
+
   Value *X, *Y;
   Constant *C;
-
-  // Fold negation into constant operand. This is limited with one-use because
-  // fneg is assumed better for analysis and cheaper in codegen than fmul/fdiv.
-  // -(X * C) --> X * (-C)
-  if (match(&I, m_FNeg(m_OneUse(m_FMul(m_Value(X), m_Constant(C))))))
-    return BinaryOperator::CreateFMulFMF(X, ConstantExpr::getFNeg(C), &I);
-  // -(X / C) --> X / (-C)
-  if (match(&I, m_FNeg(m_OneUse(m_FDiv(m_Value(X), m_Constant(C))))))
-    return BinaryOperator::CreateFDivFMF(X, ConstantExpr::getFNeg(C), &I);
-  // -(C / X) --> (-C) / X
-  if (match(&I, m_FNeg(m_OneUse(m_FDiv(m_Constant(C), m_Value(X))))))
-    return BinaryOperator::CreateFDivFMF(ConstantExpr::getFNeg(C), X, &I);
 
   // If Op0 is not -0.0 or we can ignore -0.0: Z - (X - Y) --> Z + (Y - X)
   // Canonicalize to fadd to make analysis easier.

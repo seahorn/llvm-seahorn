@@ -1,9 +1,8 @@
 //===- InstructionCombining.cpp - Combine multiple instructions -----------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -47,14 +46,17 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/BasicAliasAnalysis.h"
+#include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/InstructionSimplify.h"
+#include "llvm/Analysis/LazyBlockFrequencyInfo.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
+#include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/Analysis/TargetFolder.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
@@ -222,6 +224,11 @@ static bool MaintainNoSignedWrap(BinaryOperator &I, Value *B, Value *C) {
   return !Overflow;
 }
 
+static bool hasNoUnsignedWrap(BinaryOperator &I) {
+  OverflowingBinaryOperator *OBO = dyn_cast<OverflowingBinaryOperator>(&I);
+  return OBO && OBO->hasNoUnsignedWrap();
+}
+
 /// Conservatively clears subclassOptionalData after a reassociation or
 /// commutation. We preserve fast-math flags when applicable as they can be
 /// preserved.
@@ -307,8 +314,8 @@ bool llvm_seahorn::InstCombiner::SimplifyAssociativeOrCommutative(BinaryOperator
     // Order operands such that they are listed from right (least complex) to
     // left (most complex).  This puts constants before unary operators before
     // binary operators.
-    if (I.isCommutative() &&
-        getComplexity(I.getOperand(0)) < getComplexity(I.getOperand(1)))
+    if (I.isCommutative() && getComplexity(I.getOperand(0)) <
+        getComplexity(I.getOperand(1)))
       Changed = !I.swapOperands();
 
     BinaryOperator *Op0 = dyn_cast<BinaryOperator>(I.getOperand(0));
@@ -328,14 +335,19 @@ bool llvm_seahorn::InstCombiner::SimplifyAssociativeOrCommutative(BinaryOperator
           I.setOperand(1, V);
           // Conservatively clear the optional flags, since they may not be
           // preserved by the reassociation.
-          if (MaintainNoSignedWrap(I, B, C) &&
+          bool IsNUW = hasNoUnsignedWrap(I) && hasNoUnsignedWrap(*Op0);
+          bool IsNSW = MaintainNoSignedWrap(I, B, C);
+
+          ClearSubclassDataAfterReassociation(I);
+
+          if (IsNUW)
+            I.setHasNoUnsignedWrap(true);
+
+          if (IsNSW &&
               (!Op0 || (isa<BinaryOperator>(Op0) && Op0->hasNoSignedWrap()))) {
             // Note: this is only valid because SimplifyBinOp doesn't look at
             // the operands to Op0.
-            I.clearSubclassOptionalData();
             I.setHasNoSignedWrap(true);
-          } else {
-            ClearSubclassDataAfterReassociation(I);
           }
 
           Changed = true;
@@ -416,11 +428,17 @@ bool llvm_seahorn::InstCombiner::SimplifyAssociativeOrCommutative(BinaryOperator
       // if C1 and C2 are constants.
       Value *A, *B;
       Constant *C1, *C2;
-      if (Op0 && Op1 && Op0->getOpcode() == Opcode &&
-          Op1->getOpcode() == Opcode &&
+      if (Op0 && Op1 &&
+          Op0->getOpcode() == Opcode && Op1->getOpcode() == Opcode &&
           match(Op0, m_OneUse(m_BinOp(m_Value(A), m_Constant(C1)))) &&
           match(Op1, m_OneUse(m_BinOp(m_Value(B), m_Constant(C2))))) {
-        BinaryOperator *NewBO = BinaryOperator::Create(Opcode, A, B);
+        bool IsNUW = hasNoUnsignedWrap(I) &&
+           hasNoUnsignedWrap(*Op0) &&
+           hasNoUnsignedWrap(*Op1);
+         BinaryOperator *NewBO = (IsNUW && Opcode == Instruction::Add) ?
+           BinaryOperator::CreateNUW(Opcode, A, B) :
+           BinaryOperator::Create(Opcode, A, B);
+
         if (isa<FPMathOperator>(NewBO)) {
           FastMathFlags Flags = I.getFastMathFlags();
           Flags &= Op0->getFastMathFlags();
@@ -434,6 +452,8 @@ bool llvm_seahorn::InstCombiner::SimplifyAssociativeOrCommutative(BinaryOperator
         // Conservatively clear the optional flags, since they may not be
         // preserved by the reassociation.
         ClearSubclassDataAfterReassociation(I);
+        if (IsNUW)
+          I.setHasNoUnsignedWrap(true);
 
         Changed = true;
         continue;
@@ -571,20 +591,29 @@ Value *llvm_seahorn::InstCombiner::tryFactorization(BinaryOperator &I,
     ++NumFactor;
     SimplifiedInst->takeName(&I);
 
-    // Check if we can add NSW flag to SimplifiedInst. If so, set NSW flag.
-    // TODO: Check for NUW.
+    // Check if we can add NSW/NUW flags to SimplifiedInst. If so, set them.
     if (BinaryOperator *BO = dyn_cast<BinaryOperator>(SimplifiedInst)) {
       if (isa<OverflowingBinaryOperator>(SimplifiedInst)) {
         bool HasNSW = false;
-        if (isa<OverflowingBinaryOperator>(&I))
+        bool HasNUW = false;
+        if (isa<OverflowingBinaryOperator>(&I)) {
           HasNSW = I.hasNoSignedWrap();
+          HasNUW = I.hasNoUnsignedWrap();
+        }
 
-        if (auto *LOBO = dyn_cast<OverflowingBinaryOperator>(LHS))
+        if (auto *LOBO = dyn_cast<OverflowingBinaryOperator>(LHS)) {
           HasNSW &= LOBO->hasNoSignedWrap();
+          HasNUW &= LOBO->hasNoUnsignedWrap();
+        }
 
-        if (auto *ROBO = dyn_cast<OverflowingBinaryOperator>(RHS))
+        if (auto *ROBO = dyn_cast<OverflowingBinaryOperator>(RHS)) {
           HasNSW &= ROBO->hasNoSignedWrap();
+          HasNUW &= ROBO->hasNoUnsignedWrap();
+        }
 
+        const APInt *CInt;
+        if (TopLevelOpcode == Instruction::Add &&
+            InnerOpcode == Instruction::Mul) {
         // We can propagate 'nsw' if we know that
         //  %Y = mul nsw i16 %X, C
         //  %Z = add nsw i16 %Y, %X
@@ -592,11 +621,14 @@ Value *llvm_seahorn::InstCombiner::tryFactorization(BinaryOperator &I,
         //  %Z = mul nsw i16 %X, C+1
         //
         // iff C+1 isn't INT_MIN
-        const APInt *CInt;
-        if (TopLevelOpcode == Instruction::Add &&
-            InnerOpcode == Instruction::Mul)
-          if (match(V, m_APInt(CInt)) && !CInt->isMinSignedValue())
+          if (match(V, m_APInt(CInt))) {
+            if (!CInt->isMinSignedValue())
             BO->setHasNoSignedWrap(HasNSW);
+      }
+
+          // nuw can be propagated with any constant or nuw value.
+          BO->setHasNoUnsignedWrap(HasNUW);
+        }
       }
     }
   }
@@ -807,8 +839,8 @@ static Value *foldOperationIntoSelectOperand(Instruction &I, Value *SO,
     std::swap(Op0, Op1);
 
   auto *BO = cast<BinaryOperator>(&I);
-  Value *RI =
-      Builder.CreateBinOp(BO->getOpcode(), Op0, Op1, SO->getName() + ".op");
+  Value *RI = Builder.CreateBinOp(BO->getOpcode(), Op0, Op1,
+                                  SO->getName() + ".op");
   auto *FPInst = dyn_cast<Instruction>(RI);
   if (FPInst && isa<FPMathOperator>(FPInst))
     FPInst->copyFastMathFlags(BO);
@@ -916,17 +948,15 @@ Instruction *llvm_seahorn::InstCombiner::foldOpIntoPhi(Instruction &I, PHINode *
     if (isa<Constant>(InVal) && !isa<ConstantExpr>(InVal))
       continue;
 
-    if (isa<PHINode>(InVal))
-      return nullptr; // Itself a phi.
-    if (NonConstBB)
-      return nullptr; // More than one non-const value.
+    if (isa<PHINode>(InVal)) return nullptr;  // Itself a phi.
+    if (NonConstBB) return nullptr;  // More than one non-const value.
 
     NonConstBB = PN->getIncomingBlock(i);
 
     // If the InVal is an invoke at the end of the pred block, then we can't
     // insert a computation after it without breaking the edge.
-    if (InvokeInst *II = dyn_cast<InvokeInst>(InVal))
-      if (II->getParent() == NonConstBB)
+    if (isa<InvokeInst>(InVal))
+      if (cast<Instruction>(InVal)->getParent() == NonConstBB)
         return nullptr;
 
     // If the incoming non-constant value is in I's block, we will remove one
@@ -942,8 +972,7 @@ Instruction *llvm_seahorn::InstCombiner::foldOpIntoPhi(Instruction &I, PHINode *
   // do this if the pred block is unconditionally branching into the phi block.
   if (NonConstBB != nullptr) {
     BranchInst *BI = dyn_cast<BranchInst>(NonConstBB->getTerminator());
-    if (!BI || !BI->isUnconditional())
-      return nullptr;
+    if (!BI || !BI->isUnconditional()) return nullptr;
   }
 
   // Okay, we can do the transformation: create the new PHI node.
@@ -999,17 +1028,17 @@ Instruction *llvm_seahorn::InstCombiner::foldOpIntoPhi(Instruction &I, PHINode *
       if (Constant *InC = dyn_cast<Constant>(PN->getIncomingValue(i)))
         InV = ConstantExpr::getCompare(CI->getPredicate(), InC, C);
       else if (isa<ICmpInst>(CI))
-        InV = Builder.CreateICmp(CI->getPredicate(), PN->getIncomingValue(i), C,
-                                 "phitmp");
+        InV = Builder.CreateICmp(CI->getPredicate(), PN->getIncomingValue(i),
+                                 C, "phitmp");
       else
-        InV = Builder.CreateFCmp(CI->getPredicate(), PN->getIncomingValue(i), C,
-                                 "phitmp");
+        InV = Builder.CreateFCmp(CI->getPredicate(), PN->getIncomingValue(i),
+                                 C, "phitmp");
       NewPN->addIncoming(InV, PN->getIncomingBlock(i));
     }
   } else if (auto *BO = dyn_cast<BinaryOperator>(&I)) {
     for (unsigned i = 0; i != NumPHIValues; ++i) {
-      Value *InV =
-          foldOperationIntoPhiValue(BO, PN->getIncomingValue(i), Builder);
+      Value *InV = foldOperationIntoPhiValue(BO, PN->getIncomingValue(i),
+                                             Builder);
       NewPN->addIncoming(InV, PN->getIncomingBlock(i));
     }
   } else {
@@ -1028,8 +1057,7 @@ Instruction *llvm_seahorn::InstCombiner::foldOpIntoPhi(Instruction &I, PHINode *
 
   for (auto UI = PN->user_begin(), E = PN->user_end(); UI != E;) {
     Instruction *User = cast<Instruction>(*UI++);
-    if (User == &I)
-      continue;
+    if (User == &I) continue;
     replaceInstUsesWith(*User, NewPN);
     eraseInstFromFunction(*User);
   }
@@ -1092,8 +1120,8 @@ Type *llvm_seahorn::InstCombiner::FindElementAtOffset(PointerType *PtrTy, int64_
              "Offset must stay within the indexed type");
 
       unsigned Elt = SL->getElementContainingOffset(Offset);
-      NewIndices.push_back(
-          ConstantInt::get(Type::getInt32Ty(Ty->getContext()), Elt));
+      NewIndices.push_back(ConstantInt::get(Type::getInt32Ty(Ty->getContext()),
+                                            Elt));
 
       Offset -= SL->getElementOffset(Elt);
       Ty = STy->getElementType(Elt);
@@ -1116,7 +1144,8 @@ static bool shouldMergeGEPs(GEPOperator &GEP, GEPOperator &Src) {
   // If this GEP has only 0 indices, it is the same pointer as
   // Src. If Src is not a trivial GEP too, don't combine
   // the indices.
-  if (GEP.hasAllZeroIndices() && !Src.hasAllZeroIndices() && !Src.hasOneUse())
+  if (GEP.hasAllZeroIndices() && !Src.hasAllZeroIndices() &&
+      !Src.hasOneUse())
     return false;
   return true;
 }
@@ -1126,8 +1155,7 @@ static bool shouldMergeGEPs(GEPOperator &GEP, GEPOperator &Src) {
 Value *llvm_seahorn::InstCombiner::Descale(Value *Val, APInt Scale, bool &NoSignedWrap) {
   assert(isa<IntegerType>(Val->getType()) && "Can only descale integers!");
   assert(cast<IntegerType>(Val->getType())->getBitWidth() ==
-             Scale.getBitWidth() &&
-         "Scale not compatible with value!");
+         Scale.getBitWidth() && "Scale not compatible with value!");
 
   // If Val is zero or Scale is one then Val = Val * Scale.
   if (match(Val, m_Zero()) || Scale == 1) {
@@ -1233,8 +1261,8 @@ Value *llvm_seahorn::InstCombiner::Descale(Value *Val, APInt Scale, bool &NoSign
           return nullptr;
 
         Value *LHS = BO->getOperand(0);
-        int32_t Amt = cast<ConstantInt>(BO->getOperand(1))
-                          ->getLimitedValue(Scale.getBitWidth());
+        int32_t Amt = cast<ConstantInt>(BO->getOperand(1))->
+          getLimitedValue(Scale.getBitWidth());
         // Op = LHS << Amt.
 
         if (Amt == logScale) {
@@ -1365,8 +1393,7 @@ Value *llvm_seahorn::InstCombiner::Descale(Value *Val, APInt Scale, bool &NoSign
 }
 
 Instruction *llvm_seahorn::InstCombiner::foldVectorBinop(BinaryOperator &Inst) {
-  if (!Inst.getType()->isVectorTy())
-    return nullptr;
+  if (!Inst.getType()->isVectorTy()) return nullptr;
 
   BinaryOperator::BinaryOps Opcode = Inst.getOpcode();
   unsigned NumElts = cast<VectorType>(Inst.getType())->getNumElements();
@@ -1422,14 +1449,38 @@ Instruction *llvm_seahorn::InstCombiner::foldVectorBinop(BinaryOperator &Inst) {
     return createBinOpShuffle(V1, V2, Mask);
   }
 
+  // If both arguments of a commutative binop are select-shuffles that use the
+  // same mask with commuted operands, the shuffles are unnecessary.
+  if (Inst.isCommutative() &&
+      match(LHS, m_ShuffleVector(m_Value(V1), m_Value(V2), m_Constant(Mask))) &&
+      match(RHS, m_ShuffleVector(m_Specific(V2), m_Specific(V1),
+                                 m_Specific(Mask)))) {
+    auto *LShuf = cast<ShuffleVectorInst>(LHS);
+    auto *RShuf = cast<ShuffleVectorInst>(RHS);
+    // TODO: Allow shuffles that contain undefs in the mask?
+    //       That is legal, but it reduces undef knowledge.
+    // TODO: Allow arbitrary shuffles by shuffling after binop?
+    //       That might be legal, but we have to deal with poison.
+    if (LShuf->isSelect() && !LShuf->getMask()->containsUndefElement() &&
+        RShuf->isSelect() && !RShuf->getMask()->containsUndefElement()) {
+      // Example:
+      // LHS = shuffle V1, V2, <0, 5, 6, 3>
+      // RHS = shuffle V2, V1, <0, 5, 6, 3>
+      // LHS + RHS --> (V10+V20, V21+V11, V22+V12, V13+V23) --> V1 + V2
+      Instruction *NewBO = BinaryOperator::Create(Opcode, V1, V2);
+      NewBO->copyIRFlags(&Inst);
+      return NewBO;
+    }
+  }
+
   // If one argument is a shuffle within one vector and the other is a constant,
   // try moving the shuffle after the binary operation. This canonicalization
   // intends to move shuffles closer to other shuffles and binops closer to
   // other binops, so they can be folded. It may also enable demanded elements
   // transforms.
   Constant *C;
-  if (match(&Inst, m_c_BinOp(m_OneUse(m_ShuffleVector(m_Value(V1), m_Undef(),
-                                                      m_Constant(Mask))),
+  if (match(&Inst, m_c_BinOp(
+          m_OneUse(m_ShuffleVector(m_Value(V1), m_Undef(), m_Constant(Mask))),
                              m_Constant(C))) &&
       V1->getType()->getVectorNumElements() <= NumElts) {
     assert(Inst.getType()->getScalarType() == V1->getType()->getScalarType() &&
@@ -1563,6 +1614,23 @@ Instruction *llvm_seahorn::InstCombiner::visitGetElementPtrInst(GetElementPtrIns
   Type *GEPEltType = GEP.getSourceElementType();
   if (Value *V = SimplifyGEPInst(GEPEltType, Ops, SQ.getWithInstruction(&GEP)))
     return replaceInstUsesWith(GEP, V);
+
+  // For vector geps, use the generic demanded vector support.
+  if (GEP.getType()->isVectorTy()) {
+    auto VWidth = GEP.getType()->getVectorNumElements();
+    APInt UndefElts(VWidth, 0);
+    APInt AllOnesEltMask(APInt::getAllOnesValue(VWidth));
+    if (Value *V = SimplifyDemandedVectorElts(&GEP, AllOnesEltMask,
+                                              UndefElts)) {
+      if (V != &GEP)
+        return replaceInstUsesWith(GEP, V);
+      return &GEP;
+    }
+
+    // TODO: 1) Scalarize splat operands, 2) scalarize entire instruction if
+    // possible (decide on canonical form for pointer broadcast), 3) exploit
+    // undef elements to decrease demanded bits  
+  }
 
   Value *PtrOp = GEP.getOperand(0);
 
@@ -1762,9 +1830,9 @@ Instruction *llvm_seahorn::InstCombiner::visitGetElementPtrInst(GetElementPtrIns
             // put NewSrc at same location as %src
             Builder.SetInsertPoint(cast<Instruction>(PtrOp));
             auto *NewSrc = cast<GetElementPtrInst>(
-                Builder.CreateGEP(SO0, GO1, Src->getName()));
+                Builder.CreateGEP(GEPEltType, SO0, GO1, Src->getName()));
             NewSrc->setIsInBounds(Src->isInBounds());
-            auto *NewGEP = GetElementPtrInst::Create(nullptr, NewSrc, {SO1});
+            auto *NewGEP = GetElementPtrInst::Create(GEPEltType, NewSrc, {SO1});
             NewGEP->setIsInBounds(GEP.isInBounds());
             return NewGEP;
           }
@@ -1888,6 +1956,8 @@ Instruction *llvm_seahorn::InstCombiner::visitGetElementPtrInst(GetElementPtrIns
 
   if (StrippedPtr != PtrOp) {
     bool HasZeroPointerIndex = false;
+    Type *StrippedPtrEltTy = StrippedPtrTy->getElementType();
+
     if (auto *C = dyn_cast<ConstantInt>(GEP.getOperand(1)))
       HasZeroPointerIndex = C->isZero();
 
@@ -1901,11 +1971,11 @@ Instruction *llvm_seahorn::InstCombiner::visitGetElementPtrInst(GetElementPtrIns
     if (HasZeroPointerIndex) {
       if (auto *CATy = dyn_cast<ArrayType>(GEPEltType)) {
         // GEP (bitcast i8* X to [0 x i8]*), i32 0, ... ?
-        if (CATy->getElementType() == StrippedPtrTy->getElementType()) {
+        if (CATy->getElementType() == StrippedPtrEltTy) {
           // -> GEP i8* X, ...
           SmallVector<Value *, 8> Idx(GEP.idx_begin() + 1, GEP.idx_end());
           GetElementPtrInst *Res = GetElementPtrInst::Create(
-              StrippedPtrTy->getElementType(), StrippedPtr, Idx, GEP.getName());
+              StrippedPtrEltTy, StrippedPtr, Idx, GEP.getName());
           Res->setIsInBounds(GEP.isInBounds());
           if (StrippedPtrTy->getAddressSpace() == GEP.getAddressSpace())
             return Res;
@@ -1918,7 +1988,7 @@ Instruction *llvm_seahorn::InstCombiner::visitGetElementPtrInst(GetElementPtrIns
           return new AddrSpaceCastInst(Builder.Insert(Res), GEPType);
         }
 
-        if (auto *XATy = dyn_cast<ArrayType>(StrippedPtrTy->getElementType())) {
+        if (auto *XATy = dyn_cast<ArrayType>(StrippedPtrEltTy)) {
           // GEP (bitcast [10 x i8]* X to [0 x i8]*), i32 0, ... ?
           if (CATy->getElementType() == XATy->getElementType()) {
             // -> GEP [10 x i8]* X, i32 0, ...
@@ -1941,10 +2011,11 @@ Instruction *llvm_seahorn::InstCombiner::visitGetElementPtrInst(GetElementPtrIns
             // %0 = GEP [10 x i8] addrspace(1)* X, ...
             // addrspacecast i8 addrspace(1)* %0 to i8*
             SmallVector<Value *, 8> Idx(GEP.idx_begin(), GEP.idx_end());
-            Value *NewGEP = GEP.isInBounds()
-                                ? Builder.CreateInBoundsGEP(
-                                      nullptr, StrippedPtr, Idx, GEP.getName())
-                                : Builder.CreateGEP(nullptr, StrippedPtr, Idx,
+            Value *NewGEP =
+                GEP.isInBounds()
+                    ? Builder.CreateInBoundsGEP(StrippedPtrEltTy, StrippedPtr,
+                                                Idx, GEP.getName())
+                    : Builder.CreateGEP(StrippedPtrEltTy, StrippedPtr, Idx,
                                                     GEP.getName());
             return new AddrSpaceCastInst(NewGEP, GEPType);
           }
@@ -1954,17 +2025,17 @@ Instruction *llvm_seahorn::InstCombiner::visitGetElementPtrInst(GetElementPtrIns
       // Transform things like:
       // %t = getelementptr i32* bitcast ([2 x i32]* %str to i32*), i32 %V
       // into:  %t1 = getelementptr [2 x i32]* %str, i32 0, i32 %V; bitcast
-      Type *SrcEltTy = StrippedPtrTy->getElementType();
-      if (SrcEltTy->isArrayTy() &&
-          DL.getTypeAllocSize(SrcEltTy->getArrayElementType()) ==
+      if (StrippedPtrEltTy->isArrayTy() &&
+          DL.getTypeAllocSize(StrippedPtrEltTy->getArrayElementType()) ==
               DL.getTypeAllocSize(GEPEltType)) {
         Type *IdxType = DL.getIndexType(GEPType);
         Value *Idx[2] = {Constant::getNullValue(IdxType), GEP.getOperand(1)};
         Value *NewGEP =
             GEP.isInBounds()
-                ? Builder.CreateInBoundsGEP(nullptr, StrippedPtr, Idx,
+                ? Builder.CreateInBoundsGEP(StrippedPtrEltTy, StrippedPtr, Idx,
                                             GEP.getName())
-                : Builder.CreateGEP(nullptr, StrippedPtr, Idx, GEP.getName());
+                : Builder.CreateGEP(StrippedPtrEltTy, StrippedPtr, Idx,
+                                    GEP.getName());
 
         // V and GEP are both pointer types --> BitCast
         return CastInst::CreatePointerBitCastOrAddrSpaceCast(NewGEP, GEPType);
@@ -1974,11 +2045,11 @@ Instruction *llvm_seahorn::InstCombiner::visitGetElementPtrInst(GetElementPtrIns
       // %V = mul i64 %N, 4
       // %t = getelementptr i8* bitcast (i32* %arr to i8*), i32 %V
       // into:  %t1 = getelementptr i32* %arr, i32 %N; bitcast
-      if (GEPEltType->isSized() && SrcEltTy->isSized()) {
+      if (GEPEltType->isSized() && StrippedPtrEltTy->isSized()) {
         // Check that changing the type amounts to dividing the index by a scale
         // factor.
         uint64_t ResSize = DL.getTypeAllocSize(GEPEltType);
-        uint64_t SrcSize = DL.getTypeAllocSize(SrcEltTy);
+        uint64_t SrcSize = DL.getTypeAllocSize(StrippedPtrEltTy);
         if (ResSize && SrcSize % ResSize == 0) {
           Value *Idx = GEP.getOperand(1);
           unsigned BitWidth = Idx->getType()->getPrimitiveSizeInBits();
@@ -1997,9 +2068,9 @@ Instruction *llvm_seahorn::InstCombiner::visitGetElementPtrInst(GetElementPtrIns
             // GEP may not be "inbounds".
             Value *NewGEP =
                 GEP.isInBounds() && NSW
-                    ? Builder.CreateInBoundsGEP(nullptr, StrippedPtr, NewIdx,
-                                                GEP.getName())
-                    : Builder.CreateGEP(nullptr, StrippedPtr, NewIdx,
+                    ? Builder.CreateInBoundsGEP(StrippedPtrEltTy, StrippedPtr,
+                                                NewIdx, GEP.getName())
+                    : Builder.CreateGEP(StrippedPtrEltTy, StrippedPtr, NewIdx,
                                         GEP.getName());
 
             // The NewGEP must be pointer typed, so must the old one -> BitCast
@@ -2013,13 +2084,13 @@ Instruction *llvm_seahorn::InstCombiner::visitGetElementPtrInst(GetElementPtrIns
       // getelementptr i8* bitcast ([100 x double]* X to i8*), i32 %tmp
       //   (where tmp = 8*tmp2) into:
       // getelementptr [100 x double]* %arr, i32 0, i32 %tmp2; bitcast
-      if (GEPEltType->isSized() && SrcEltTy->isSized() &&
-          SrcEltTy->isArrayTy()) {
+      if (GEPEltType->isSized() && StrippedPtrEltTy->isSized() &&
+          StrippedPtrEltTy->isArrayTy()) {
         // Check that changing to the array element type amounts to dividing the
         // index by a scale factor.
         uint64_t ResSize = DL.getTypeAllocSize(GEPEltType);
         uint64_t ArrayEltSize =
-            DL.getTypeAllocSize(SrcEltTy->getArrayElementType());
+            DL.getTypeAllocSize(StrippedPtrEltTy->getArrayElementType());
         if (ResSize && ArrayEltSize % ResSize == 0) {
           Value *Idx = GEP.getOperand(1);
           unsigned BitWidth = Idx->getType()->getPrimitiveSizeInBits();
@@ -2039,10 +2110,11 @@ Instruction *llvm_seahorn::InstCombiner::visitGetElementPtrInst(GetElementPtrIns
             Type *IndTy = DL.getIndexType(GEPType);
             Value *Off[2] = {Constant::getNullValue(IndTy), NewIdx};
 
-            Value *NewGEP = GEP.isInBounds() && NSW
-                                ? Builder.CreateInBoundsGEP(
-                                      SrcEltTy, StrippedPtr, Off, GEP.getName())
-                                : Builder.CreateGEP(SrcEltTy, StrippedPtr, Off,
+            Value *NewGEP =
+                GEP.isInBounds() && NSW
+                    ? Builder.CreateInBoundsGEP(StrippedPtrEltTy, StrippedPtr,
+                                                Off, GEP.getName())
+                    : Builder.CreateGEP(StrippedPtrEltTy, StrippedPtr, Off,
                                                     GEP.getName());
             // The NewGEP must be pointer typed, so must the old one -> BitCast
             return CastInst::CreatePointerBitCastOrAddrSpaceCast(NewGEP,
@@ -2091,8 +2163,8 @@ Instruction *llvm_seahorn::InstCombiner::visitGetElementPtrInst(GetElementPtrIns
       // constructing an AddrSpaceCastInst
       Value *NGEP =
           GEP.isInBounds()
-              ? Builder.CreateInBoundsGEP(nullptr, SrcOp, {Ops[1], Ops[2]})
-              : Builder.CreateGEP(nullptr, SrcOp, {Ops[1], Ops[2]});
+              ? Builder.CreateInBoundsGEP(SrcEltType, SrcOp, {Ops[1], Ops[2]})
+              : Builder.CreateGEP(SrcEltType, SrcOp, {Ops[1], Ops[2]});
       NGEP->takeName(&GEP);
 
       // Preserve GEP address space to satisfy users
@@ -2139,8 +2211,8 @@ Instruction *llvm_seahorn::InstCombiner::visitGetElementPtrInst(GetElementPtrIns
       if (FindElementAtOffset(SrcType, Offset.getSExtValue(), NewIndices)) {
         Value *NGEP =
             GEP.isInBounds()
-                ? Builder.CreateInBoundsGEP(nullptr, SrcOp, NewIndices)
-                : Builder.CreateGEP(nullptr, SrcOp, NewIndices);
+                ? Builder.CreateInBoundsGEP(SrcEltType, SrcOp, NewIndices)
+                : Builder.CreateGEP(SrcEltType, SrcOp, NewIndices);
 
         if (NGEP->getType() == GEPType)
           return replaceInstUsesWith(GEP, NGEP);
@@ -2158,14 +2230,16 @@ Instruction *llvm_seahorn::InstCombiner::visitGetElementPtrInst(GetElementPtrIns
         DL.getIndexSizeInBits(PtrOp->getType()->getPointerAddressSpace());
     APInt BasePtrOffset(IdxWidth, 0);
     Value *UnderlyingPtrOp =
-        PtrOp->stripAndAccumulateInBoundsConstantOffsets(DL, BasePtrOffset);
+            PtrOp->stripAndAccumulateInBoundsConstantOffsets(DL,
+                                                             BasePtrOffset);
     if (auto *AI = dyn_cast<AllocaInst>(UnderlyingPtrOp)) {
       if (GEP.accumulateConstantOffset(DL, BasePtrOffset) &&
           BasePtrOffset.isNonNegative()) {
         APInt AllocSize(IdxWidth, DL.getTypeAllocSize(AI->getAllocatedType()));
         if (BasePtrOffset.ule(AllocSize)) {
           return GetElementPtrInst::CreateInBounds(
-              PtrOp, makeArrayRef(Ops).slice(1), GEP.getName());
+              GEP.getSourceElementType(), PtrOp, makeArrayRef(Ops).slice(1),
+              GEP.getName());
         }
       }
     }
@@ -2302,8 +2376,8 @@ Instruction *llvm_seahorn::InstCombiner::visitAllocSite(Instruction &MI) {
 
       if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(I)) {
         if (II->getIntrinsicID() == Intrinsic::objectsize) {
-          ConstantInt *Result = lowerObjectSizeCall(II, DL, &TLI,
-                                                    /*MustSucceed=*/true);
+          Value *Result =
+              lowerObjectSizeCall(II, DL, &TLI, /*MustSucceed=*/true);
           replaceInstUsesWith(*I, Result);
           eraseInstFromFunction(*I);
           Users[i] = nullptr; // Skip examining in the next loop.
@@ -2334,8 +2408,8 @@ Instruction *llvm_seahorn::InstCombiner::visitAllocSite(Instruction &MI) {
       // Replace invoke with a NOP intrinsic to maintain the original CFG
       Module *M = II->getModule();
       Function *F = Intrinsic::getDeclaration(M, Intrinsic::donothing);
-      InvokeInst::Create(F, II->getNormalDest(), II->getUnwindDest(), None, "",
-                         II->getParent());
+      InvokeInst::Create(F, II->getNormalDest(), II->getUnwindDest(),
+                         None, "", II->getParent());
     }
 
     for (auto *DII : DIIs)
@@ -2432,9 +2506,8 @@ Instruction *llvm_seahorn::InstCombiner::visitFree(CallInst &FI) {
 
   // free undef -> unreachable.
   if (isa<UndefValue>(Op)) {
-    // Insert a new store to null because we cannot modify the CFG here.
-    Builder.CreateStore(ConstantInt::getTrue(FI.getContext()),
-                        UndefValue::get(Type::getInt1PtrTy(FI.getContext())));
+    // Leave a marker since we can't modify the CFG here.
+    CreateNonTerminatorUnreachable(&FI);
     return eraseInstFromFunction(FI);
   }
 
@@ -2540,8 +2613,7 @@ Instruction *llvm_seahorn::InstCombiner::visitSwitchInst(SwitchInst &SI) {
         LeadingKnownOnes, C.getCaseValue()->getValue().countLeadingOnes());
   }
 
-  unsigned NewWidth =
-      Known.getBitWidth() - std::max(LeadingKnownZeros, LeadingKnownOnes);
+  unsigned NewWidth = Known.getBitWidth() - std::max(LeadingKnownZeros, LeadingKnownOnes);
 
   // Shrink the condition operand if the new type is smaller than the old type.
   // But do not shrink to a non-standard type, because backend can't generate
@@ -2577,9 +2649,10 @@ Instruction *llvm_seahorn::InstCombiner::visitExtractValueInst(ExtractValueInst 
   if (InsertValueInst *IV = dyn_cast<InsertValueInst>(Agg)) {
     // We're extracting from an insertvalue instruction, compare the indices
     const unsigned *exti, *exte, *insi, *inse;
-    for (exti = EV.idx_begin(), insi = IV->idx_begin(), exte = EV.idx_end(),
-        inse = IV->idx_end();
-         exti != exte && insi != inse; ++exti, ++insi) {
+    for (exti = EV.idx_begin(), insi = IV->idx_begin(),
+         exte = EV.idx_end(), inse = IV->idx_end();
+         exti != exte && insi != inse;
+         ++exti, ++insi) {
       if (*insi != *exti)
         // The insert and extract both reference distinctly different elements.
         // This means the extract is not influenced by the insert, and we can
@@ -2624,53 +2697,28 @@ Instruction *llvm_seahorn::InstCombiner::visitExtractValueInst(ExtractValueInst 
       return ExtractValueInst::Create(IV->getInsertedValueOperand(),
                                       makeArrayRef(exti, exte));
   }
-  if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(Agg)) {
-    // We're extracting from an intrinsic, see if we're the only user, which
-    // allows us to simplify multiple result intrinsics to simpler things that
-    // just get one value.
-    if (II->hasOneUse()) {
-      // Check if we're grabbing the overflow bit or the result of a 'with
-      // overflow' intrinsic.  If it's the latter we can remove the intrinsic
+  if (WithOverflowInst *WO = dyn_cast<WithOverflowInst>(Agg)) {
+    // We're extracting from an overflow intrinsic, see if we're the only user,
+    // which allows us to simplify multiple result intrinsics to simpler
+    // things that just get one value.
+    if (WO->hasOneUse()) {
+      // Check if we're grabbing only the result of a 'with overflow' intrinsic
       // and replace it with a traditional binary instruction.
-      switch (II->getIntrinsicID()) {
-      case Intrinsic::uadd_with_overflow:
-      case Intrinsic::sadd_with_overflow:
-        if (*EV.idx_begin() == 0) { // Normal result.
-          Value *LHS = II->getArgOperand(0), *RHS = II->getArgOperand(1);
-          replaceInstUsesWith(*II, UndefValue::get(II->getType()));
-          eraseInstFromFunction(*II);
-          return BinaryOperator::CreateAdd(LHS, RHS);
+      if (*EV.idx_begin() == 0) {
+        Instruction::BinaryOps BinOp = WO->getBinaryOp();
+        Value *LHS = WO->getLHS(), *RHS = WO->getRHS();
+        replaceInstUsesWith(*WO, UndefValue::get(WO->getType()));
+        eraseInstFromFunction(*WO);
+        return BinaryOperator::Create(BinOp, LHS, RHS);
         }
 
         // If the normal result of the add is dead, and the RHS is a constant,
         // we can transform this into a range comparison.
         // overflow = uadd a, -4  -->  overflow = icmp ugt a, 3
-        if (II->getIntrinsicID() == Intrinsic::uadd_with_overflow)
-          if (ConstantInt *CI = dyn_cast<ConstantInt>(II->getArgOperand(1)))
-            return new ICmpInst(ICmpInst::ICMP_UGT, II->getArgOperand(0),
+      if (WO->getIntrinsicID() == Intrinsic::uadd_with_overflow)
+        if (ConstantInt *CI = dyn_cast<ConstantInt>(WO->getRHS()))
+          return new ICmpInst(ICmpInst::ICMP_UGT, WO->getLHS(),
                                 ConstantExpr::getNot(CI));
-        break;
-      case Intrinsic::usub_with_overflow:
-      case Intrinsic::ssub_with_overflow:
-        if (*EV.idx_begin() == 0) { // Normal result.
-          Value *LHS = II->getArgOperand(0), *RHS = II->getArgOperand(1);
-          replaceInstUsesWith(*II, UndefValue::get(II->getType()));
-          eraseInstFromFunction(*II);
-          return BinaryOperator::CreateSub(LHS, RHS);
-        }
-        break;
-      case Intrinsic::umul_with_overflow:
-      case Intrinsic::smul_with_overflow:
-        if (*EV.idx_begin() == 0) { // Normal result.
-          Value *LHS = II->getArgOperand(0), *RHS = II->getArgOperand(1);
-          replaceInstUsesWith(*II, UndefValue::get(II->getType()));
-          eraseInstFromFunction(*II);
-          return BinaryOperator::CreateMul(LHS, RHS);
-        }
-        break;
-      default:
-        break;
-      }
     }
   }
   if (LoadInst *L = dyn_cast<LoadInst>(Agg))
@@ -2693,7 +2741,7 @@ Instruction *llvm_seahorn::InstCombiner::visitExtractValueInst(ExtractValueInst 
       Builder.SetInsertPoint(L);
       Value *GEP = Builder.CreateInBoundsGEP(L->getType(),
                                              L->getPointerOperand(), Indices);
-      Instruction *NL = Builder.CreateLoad(GEP);
+      Instruction *NL = Builder.CreateLoad(EV.getType(), GEP);
       // Whatever aliasing information we had for the orignal load must also
       // hold for the smaller load, so propagate the annotations.
       AAMDNodes Nodes;
@@ -2743,7 +2791,9 @@ static bool isCatchAll(EHPersonality Personality, Constant *TypeInfo) {
 }
 
 static bool shorter_filter(const Value *LHS, const Value *RHS) {
-  return cast<ArrayType>(LHS->getType())->getNumElements() <
+  return
+    cast<ArrayType>(LHS->getType())->getNumElements()
+  <
          cast<ArrayType>(RHS->getType())->getNumElements();
 }
 
@@ -2881,8 +2931,8 @@ Instruction *llvm_seahorn::InstCombiner::visitLandingPadInst(LandingPadInst &LI)
           MakeNewFilter = true;
       }
       if (MakeNewFilter) {
-        FilterType =
-            ArrayType::get(FilterType->getElementType(), NewFilterElts.size());
+        FilterType = ArrayType::get(FilterType->getElementType(),
+                                    NewFilterElts.size());
         FilterClause = ConstantArray::get(FilterType, NewFilterElts);
         MakeNewInstruction = true;
       }
@@ -3032,8 +3082,8 @@ Instruction *llvm_seahorn::InstCombiner::visitLandingPadInst(LandingPadInst &LI)
   // If we changed any of the clauses, replace the old landingpad instruction
   // with a new one.
   if (MakeNewInstruction) {
-    LandingPadInst *NLI =
-        LandingPadInst::Create(LI.getType(), NewClauses.size());
+    LandingPadInst *NLI = LandingPadInst::Create(LI.getType(),
+                                                 NewClauses.size());
     for (unsigned i = 0, e = NewClauses.size(); i != e; ++i)
       NLI->addClause(NewClauses[i]);
     // A landing pad with no clauses must have the cleanup flag set.  It is
@@ -3099,13 +3149,35 @@ static bool TryToSinkInstruction(Instruction *I, BasicBlock *DestBlock) {
   ++NumSunkInst;
 
   // Also sink all related debug uses from the source basic block. Otherwise we
-  // get debug use before the def.
-  SmallVector<DbgVariableIntrinsic *, 1> DbgUsers;
+  // get debug use before the def. Attempt to salvage debug uses first, to
+  // maximise the range variables have location for. If we cannot salvage, then
+  // mark the location undef: we know it was supposed to receive a new location
+  // here, but that computation has been sunk.
+  SmallVector<DbgVariableIntrinsic *, 2> DbgUsers;
   findDbgUsers(DbgUsers, I);
-  for (auto *DII : DbgUsers) {
+  for (auto *DII : reverse(DbgUsers)) {
     if (DII->getParent() == SrcBlock) {
+      // dbg.value is in the same basic block as the sunk inst, see if we can
+      // salvage it. Clone a new copy of the instruction: on success we need
+      // both salvaged and unsalvaged copies.
+      SmallVector<DbgVariableIntrinsic *, 1> TmpUser{
+          cast<DbgVariableIntrinsic>(DII->clone())};
+
+      if (!salvageDebugInfoForDbgValues(*I, TmpUser)) {
+        // We are unable to salvage: sink the cloned dbg.value, and mark the
+        // original as undef, terminating any earlier variable location.
+        LLVM_DEBUG(dbgs() << "SINK: " << *DII << '\n');
+        TmpUser[0]->insertBefore(&*InsertPos);
+        Value *Undef = UndefValue::get(I->getType());
+        DII->setOperand(0, MetadataAsValue::get(DII->getContext(),
+                                                ValueAsMetadata::get(Undef)));
+      } else {
+        // We successfully salvaged: place the salvaged dbg.value in the
+        // original location, and move the unmodified dbg.value to sink with
+        // the sunk inst.
+        TmpUser[0]->insertBefore(DII);
       DII->moveBefore(&*InsertPos);
-      LLVM_DEBUG(dbgs() << "SINK: " << *DII << '\n');
+      }
     }
   }
   return true;
@@ -3114,8 +3186,7 @@ static bool TryToSinkInstruction(Instruction *I, BasicBlock *DestBlock) {
 bool llvm_seahorn::InstCombiner::run() {
   while (!Worklist.isEmpty()) {
     Instruction *I = Worklist.RemoveOne();
-    if (I == nullptr)
-      continue; // skip null values.
+    if (I == nullptr) continue;  // skip null values.
 
     // Check to see if we can DCE the instruction.
     if (isInstructionTriviallyDead(I, &TLI)) {
@@ -3301,7 +3372,8 @@ static bool AddReachableCodeToWorklist(BasicBlock *BB, const DataLayout &DL,
       if (isInstructionTriviallyDead(Inst, TLI)) {
         ++NumDeadInst;
         LLVM_DEBUG(dbgs() << "IC: DCE: " << *Inst << '\n');
-        salvageDebugInfo(*Inst);
+        if (!salvageDebugInfo(*Inst))
+          replaceDbgUsesWithUndef(Inst);
         Inst->eraseFromParent();
         MadeIRChange = true;
         continue;
@@ -3342,9 +3414,8 @@ static bool AddReachableCodeToWorklist(BasicBlock *BB, const DataLayout &DL,
         }
       }
 
-      // Skip processing debug intrinsics in InstCombine. Processing these call
-      // instructions consumes non-trivial amount of time and provides no value
-      // for the optimization.
+      // Skip processing debug intrinsics in InstCombine. Processing these call instructions
+      // consumes non-trivial amount of time and provides no value for the optimization.
       if (!isa<DbgInfoIntrinsic>(Inst))
         InstrsForInstCombineWorklist.push_back(Inst);
     }
@@ -3415,7 +3486,8 @@ static bool prepareICWorklistFromFunction(Function &F, const DataLayout &DL,
 static bool combineInstructionsOverFunction(
     Function &F, InstCombineWorklist &Worklist, AliasAnalysis *AA,
     AssumptionCache &AC, TargetLibraryInfo &TLI, DominatorTree &DT,
-    OptimizationRemarkEmitter &ORE, bool ExpensiveCombines = true,
+    OptimizationRemarkEmitter &ORE, BlockFrequencyInfo *BFI,
+    ProfileSummaryInfo *PSI, bool ExpensiveCombines = true,
     LoopInfo *LI = nullptr) {
   auto &DL = F.getParent()->getDataLayout();
   ExpensiveCombines |= EnableExpensiveCombines;
@@ -3445,8 +3517,8 @@ static bool combineInstructionsOverFunction(
 
     MadeIRChange |= prepareICWorklistFromFunction(F, DL, &TLI, Worklist);
 
-    llvm_seahorn::InstCombiner IC(Worklist, Builder, F.optForMinSize(), ExpensiveCombines, AA,
-                    AC, TLI, DT, ORE, DL, LI);
+    InstCombiner IC(Worklist, Builder, F.hasMinSize(), ExpensiveCombines, AA,
+                    AC, TLI, DT, ORE, BFI, PSI, DL, LI);
     IC.MaxArraySizeForCombine = MaxArraySize;
 
     if (!IC.run())
@@ -3466,8 +3538,15 @@ PreservedAnalyses SeaInstCombinePass::run(Function &F,
   auto *LI = AM.getCachedResult<LoopAnalysis>(F);
 
   auto *AA = &AM.getResult<AAManager>(F);
+  const ModuleAnalysisManager &MAM =
+      AM.getResult<ModuleAnalysisManagerFunctionProxy>(F).getManager();
+  ProfileSummaryInfo *PSI =
+      MAM.getCachedResult<ProfileSummaryAnalysis>(*F.getParent());
+  auto *BFI = (PSI && PSI->hasProfileSummary()) ?
+      &AM.getResult<BlockFrequencyAnalysis>(F) : nullptr;
+
   if (!combineInstructionsOverFunction(F, Worklist, AA, AC, TLI, DT, ORE,
-                                       ExpensiveCombines, LI))
+                                       BFI, PSI, ExpensiveCombines, LI))
     // No changes, all analyses are preserved.
     return PreservedAnalyses::all();
 
@@ -3491,6 +3570,8 @@ void SeaInstructionCombiningPass::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addPreserved<AAResultsWrapperPass>();
   AU.addPreserved<BasicAAWrapperPass>();
   AU.addPreserved<GlobalsAAWrapperPass>();
+  AU.addRequired<ProfileSummaryInfoWrapperPass>();
+  LazyBlockFrequencyInfoPass::getLazyBFIAnalysisUsage(AU);
 }
 
 bool SeaInstructionCombiningPass::runOnFunction(Function &F) {
@@ -3507,9 +3588,15 @@ bool SeaInstructionCombiningPass::runOnFunction(Function &F) {
   // Optional analyses.
   auto *LIWP = getAnalysisIfAvailable<LoopInfoWrapperPass>();
   auto *LI = LIWP ? &LIWP->getLoopInfo() : nullptr;
+  ProfileSummaryInfo *PSI =
+      &getAnalysis<ProfileSummaryInfoWrapperPass>().getPSI();
+  BlockFrequencyInfo *BFI =
+      (PSI && PSI->hasProfileSummary()) ?
+      &getAnalysis<LazyBlockFrequencyInfoPass>().getBFI() :
+      nullptr;
 
   return combineInstructionsOverFunction(F, Worklist, AA, AC, TLI, DT, ORE,
-                                         ExpensiveCombines, LI);
+                                         BFI, PSI, ExpensiveCombines, LI);
 }
 
 char SeaInstructionCombiningPass::ID = 0;
@@ -3522,6 +3609,8 @@ INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(GlobalsAAWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(OptimizationRemarkEmitterWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(LazyBlockFrequencyInfoPass)
+INITIALIZE_PASS_DEPENDENCY(ProfileSummaryInfoWrapperPass)
 INITIALIZE_PASS_END(SeaInstructionCombiningPass, "sea-instcombine",
                     "Combine redundant instructions", false, false)
 
