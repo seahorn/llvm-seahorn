@@ -1,9 +1,8 @@
 // llvm/Transforms/IPO/PassManagerBuilder.h - Build Standard Pass -*- C++ -*-=//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -12,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SEAHORN_LLVM_TRANSFORMS_IPO_PASSMANAGERBUILDER_H
-#define SEAHORN_LLVM_TRANSFORMS_IPO_PASSMANAGERBUILDER_H
+#ifndef LLVM_TRANSFORMS_IPO_PASSMANAGERBUILDER_H
+#define LLVM_TRANSFORMS_IPO_PASSMANAGERBUILDER_H
 
 #include <functional>
 #include <memory>
@@ -31,13 +30,6 @@ namespace legacy {
 class FunctionPassManager;
 class PassManagerBase;
 }
-} //end namespace llvm
-
-namespace llvm_seahorn {
-  
-  using namespace llvm;
-  using llvm::legacy::FunctionPassManager;
-  using llvm::legacy::PassManagerBase;
 
 /// PassManagerBuilder - This class is used to set up a standard optimization
 /// sequence for languages like C and C++, allowing some APIs to customize the
@@ -65,7 +57,7 @@ namespace llvm_seahorn {
 ///   ...
 class PassManagerBuilder {
 public:
-  /// Extensions are passed the builder itself (so they can see how it is
+  /// Extensions are passed to the builder itself (so they can see how it is
   /// configured) as well as the pass manager to add stuff to.
   typedef std::function<void(const PassManagerBuilder &Builder,
                              legacy::PassManagerBase &PM)>
@@ -120,6 +112,16 @@ public:
     /// passes at the end of the main CallGraphSCC passes and before any
     /// function simplification passes run by CGPassManager.
     EP_CGSCCOptimizerLate,
+
+    /// EP_FullLinkTimeOptimizationEarly - This extensions point allow adding
+    /// passes that
+    /// run at Link Time, before Full Link Time Optimization.
+    EP_FullLinkTimeOptimizationEarly,
+
+    /// EP_FullLinkTimeOptimizationLast - This extensions point allow adding
+    /// passes that
+    /// run at Link Time, after Full Link Time Optimization.
+    EP_FullLinkTimeOptimizationLast,
   };
 
   /// The Optimization Level - Specify the basic optimization level.
@@ -150,14 +152,14 @@ public:
   const ModuleSummaryIndex *ImportSummary = nullptr;
 
   bool DisableTailCalls;
-  bool DisableUnitAtATime;
   bool DisableUnrollLoops;
   bool SLPVectorize;
   bool LoopVectorize;
+  bool LoopsInterleaved;
   bool RerollLoops;
-  bool SeaRotateLoops;
   bool NewGVN;
   bool DisableGVNLoadPRE;
+  bool ForgetAllSCEVInLoopUnroll;
   bool VerifyInput;
   bool VerifyOutput;
   bool MergeFunctions;
@@ -165,9 +167,15 @@ public:
   bool PrepareForThinLTO;
   bool PerformThinLTO;
   bool DivergentTarget;
+  unsigned LicmMssaOptCap;
+  unsigned LicmMssaNoAccForPromotionCap;
 
   /// Enable profile instrumentation pass.
   bool EnablePGOInstrGen;
+  /// Enable profile context sensitive instrumentation pass.
+  bool EnablePGOCSInstrGen;
+  /// Enable profile context sensitive profile use pass.
+  bool EnablePGOCSInstrUse;
   /// Profile data file name that the instrumentation will be written to.
   std::string PGOInstrGen;
   /// Path of the profile data file.
@@ -194,7 +202,7 @@ private:
   void addInitialAliasAnalysisPasses(legacy::PassManagerBase &PM) const;
   void addLTOOptimizationPasses(legacy::PassManagerBase &PM);
   void addLateLTOOptimizationPasses(legacy::PassManagerBase &PM);
-  void addPGOInstrPasses(legacy::PassManagerBase &MPM);
+  void addPGOInstrPasses(legacy::PassManagerBase &MPM, bool IsCS);
   void addFunctionSimplificationPasses(legacy::PassManagerBase &MPM);
   void addInstructionCombiningPass(legacy::PassManagerBase &MPM) const;
 
@@ -221,5 +229,5 @@ struct RegisterStandardPasses {
   }
 };
 
-} // end namespace llvm_seahorn
+} // end namespace llvm
 #endif
