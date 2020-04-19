@@ -1,4 +1,10 @@
-cmake_minimum_required(VERSION 3.3)
+cmake_minimum_required(VERSION 3.10.2)
+project(Llvm-SeaHorn)
+if(CMAKE_VERSION VERSION_GREATER "3.13.0")
+  cmake_policy(SET CMP0074 NEW)
+  cmake_policy(SET CMP0077 NEW)
+endif()
+
 
 if (CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR )
   message (FATAL_ERROR
@@ -23,6 +29,22 @@ set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${LLVM_LDFLAGS}")
 include_directories(${LLVM_INCLUDE_DIRS})
 link_directories(${LLVM_LIBRARY_DIRS})
 add_definitions(${LLVM_DEFINITIONS})
+
+if (NOT LLVM_BUILD_TYPE STREQUAL CMAKE_BUILD_TYPE)
+  message(WARNING
+    "LLVM_BUILD_TYPE and CMAKE_BUILD_TYPE differ:\n"
+    "\tLLMV_BUILD_TYPE=${LLVM_BUILD_TYPE}\n"
+    "\tCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}\n"
+    "Runtime errors might occur.")
+  if (LLVM_BUILD_TYPE MATCHES "Release|RelWithDebInfo" AND 
+      CMAKE_BUILD_TYPE MATCHES "Release|RelWithDebInfo")
+    message(STATUS "Assuming that mixing Release and RelWithDebInfo is allowed.")
+  else()
+    message(FATAL_ERROR "Incompatible mix of LLVM_BUILD_TYPE and CMAKE_BUILD_TYPE")
+  endif()
+endif()
+
+
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 add_subdirectory(lib)
