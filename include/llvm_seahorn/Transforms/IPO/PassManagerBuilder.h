@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_TRANSFORMS_IPO_PASSMANAGERBUILDER_H
-#define LLVM_TRANSFORMS_IPO_PASSMANAGERBUILDER_H
+#ifndef SEAHORN_LLVM_TRANSFORMS_IPO_PASSMANAGERBUILDER_H
+#define SEAHORN_LLVM_TRANSFORMS_IPO_PASSMANAGERBUILDER_H
 
 #include <functional>
 #include <memory>
@@ -30,6 +30,13 @@ namespace legacy {
 class FunctionPassManager;
 class PassManagerBase;
 }
+} //end namespace llvm
+
+namespace llvm_seahorn {
+  
+  using namespace llvm;
+  using llvm::legacy::FunctionPassManager;
+  using llvm::legacy::PassManagerBase;
 
 /// PassManagerBuilder - This class is used to set up a standard optimization
 /// sequence for languages like C and C++, allowing some APIs to customize the
@@ -157,6 +164,7 @@ public:
   bool LoopVectorize;
   bool LoopsInterleaved;
   bool RerollLoops;
+  bool SeaRotateLoops;
   bool NewGVN;
   bool DisableGVNLoadPRE;
   bool ForgetAllSCEVInLoopUnroll;
@@ -229,5 +237,5 @@ struct RegisterStandardPasses {
   }
 };
 
-} // end namespace llvm
+} // end namespace llvm_seahorn
 #endif

@@ -11,7 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Transforms/IPO/PassManagerBuilder.h"
+#include "llvm_seahorn/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm_seahorn/Transforms/Scalar.h"
 #include "llvm-c/Transforms/PassManagerBuilder.h"
 #include "llvm/ADT/SmallVector.h"
@@ -49,6 +49,7 @@
 #include "llvm/Transforms/Vectorize/SLPVectorizer.h"
 
 using namespace llvm;
+using namespace llvm_seahorn;
 
 #if 1 /*  SEAHORN ADD */
 static cl::opt<bool>
