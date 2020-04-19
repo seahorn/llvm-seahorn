@@ -38,7 +38,7 @@ add_llvm_executable(seaopt
   intrinsics_gen
   )
 # TODO re-enable when ready
-target_link_libraries(seaopt PRIVATE SeaLlvmIpo SeaLoops)
+target_link_libraries(seaopt PRIVATE SeaLlvmIpo SeaInstCombine SeaLoops)
 #target_link_libraries (seaopt SeaLlvmIpo SeaInstCombine SeaInstNondet SeaLoops)
 
 set_target_properties(seaopt PROPERTIES ENABLE_EXPORTS 1)
