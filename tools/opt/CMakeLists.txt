@@ -1,6 +1,9 @@
 set(LLVM_LINK_COMPONENTS
-  ${LLVM_TARGETS_TO_BUILD}
-  AgressiveInstCombine
+  AllTargetsAsmParsers
+  AllTargetsCodeGens
+  AllTargetsDescs
+  AllTargetsInfos
+  AggressiveInstCombine
   Analysis
   BitWriter
   CodeGen
@@ -12,6 +15,7 @@ set(LLVM_LINK_COMPONENTS
   Instrumentation
   MC
   ObjCARCOpts
+  Remarks
   ScalarOpts
   Support
   Target
@@ -37,14 +41,11 @@ add_llvm_executable(seaopt
   DEPENDS
   intrinsics_gen
   )
-# TODO re-enable when ready
+
 target_link_libraries(seaopt PRIVATE SeaLlvmIpo SeaInstCombine SeaLoops)
-#target_link_libraries (seaopt SeaLlvmIpo SeaInstCombine SeaInstNondet SeaLoops)
 
 set_target_properties(seaopt PROPERTIES ENABLE_EXPORTS 1)
 install(TARGETS seaopt RUNTIME DESTINATION bin)
-
-
 
 if(WITH_POLLY AND LINK_POLLY_INTO_TOOLS)
   target_link_libraries(opt PRIVATE Polly)
