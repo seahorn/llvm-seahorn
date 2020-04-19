@@ -66,7 +66,7 @@ reassociateShiftAmtsOfTwoSameDirectionShifts(BinaryOperator *Sh0,
   return NewShift;
 }
 
-Instruction *llvm_seahorn::InstCombiner::commonShiftTransforms(BinaryOperator &I) {
+Instruction *InstCombiner::commonShiftTransforms(BinaryOperator &I) {
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
   assert(Op0->getType() == Op1->getType());
 
@@ -117,7 +117,7 @@ Instruction *llvm_seahorn::InstCombiner::commonShiftTransforms(BinaryOperator &I
 /// Return true if we can simplify two logical (either left or right) shifts
 /// that have constant shift amounts: OuterShift (InnerShift X, C1), C2.
 static bool canEvaluateShiftedShift(unsigned OuterShAmt, bool IsOuterShl,
-                                    Instruction *InnerShift, llvm_seahorn::InstCombiner &IC,
+                                    Instruction *InnerShift, InstCombiner &IC,
                                     Instruction *CxtI) {
   assert(InnerShift->isLogicalShift() && "Unexpected instruction type");
 
@@ -169,7 +169,7 @@ static bool canEvaluateShiftedShift(unsigned OuterShAmt, bool IsOuterShl,
 /// where the client will ask if E can be computed shifted right by 64-bits. If
 /// this succeeds, getShiftedValue() will be called to produce the value.
 static bool canEvaluateShifted(Value *V, unsigned NumBits, bool IsLeftShift,
-                               llvm_seahorn::InstCombiner &IC, Instruction *CxtI) {
+                               InstCombiner &IC, Instruction *CxtI) {
   // We can always evaluate constants shifted.
   if (isa<Constant>(V))
     return true;
@@ -243,7 +243,7 @@ static bool canEvaluateShifted(Value *V, unsigned NumBits, bool IsLeftShift,
 /// See canEvaluateShiftedShift() for the constraints on these instructions.
 static Value *foldShiftedShift(BinaryOperator *InnerShift, unsigned OuterShAmt,
                                bool IsOuterShl,
-                               llvm_seahorn::InstCombiner::BuilderTy &Builder) {
+                               InstCombiner::BuilderTy &Builder) {
   bool IsInnerShl = InnerShift->getOpcode() == Instruction::Shl;
   Type *ShType = InnerShift->getType();
   unsigned TypeWidth = ShType->getScalarSizeInBits();
@@ -305,7 +305,7 @@ static Value *foldShiftedShift(BinaryOperator *InnerShift, unsigned OuterShAmt,
 /// When canEvaluateShifted() returns true for an expression, this function
 /// inserts the new computation that produces the shifted value.
 static Value *getShiftedValue(Value *V, unsigned NumBits, bool isLeftShift,
-                              llvm_seahorn::InstCombiner &IC, const DataLayout &DL) {
+                              InstCombiner &IC, const DataLayout &DL) {
   // We can always evaluate constants shifted.
   if (Constant *C = dyn_cast<Constant>(V)) {
     if (isLeftShift)
@@ -375,7 +375,7 @@ static bool canShiftBinOpWithConstantRHS(BinaryOperator &Shift,
   }
 }
 
-Instruction *llvm_seahorn::InstCombiner::FoldShiftByConstant(Value *Op0, Constant *Op1,
+Instruction *InstCombiner::FoldShiftByConstant(Value *Op0, Constant *Op1,
                                                BinaryOperator &I) {
   bool isLeftShift = I.getOpcode() == Instruction::Shl;
 
@@ -618,7 +618,7 @@ Instruction *llvm_seahorn::InstCombiner::FoldShiftByConstant(Value *Op0, Constan
   return nullptr;
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitShl(BinaryOperator &I) {
+Instruction *InstCombiner::visitShl(BinaryOperator &I) {
   if (Value *V = SimplifyShlInst(I.getOperand(0), I.getOperand(1),
                                  I.hasNoSignedWrap(), I.hasNoUnsignedWrap(),
                                  SQ.getWithInstruction(&I)))
@@ -731,7 +731,7 @@ Instruction *llvm_seahorn::InstCombiner::visitShl(BinaryOperator &I) {
   return nullptr;
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitLShr(BinaryOperator &I) {
+Instruction *InstCombiner::visitLShr(BinaryOperator &I) {
   if (Value *V = SimplifyLShrInst(I.getOperand(0), I.getOperand(1), I.isExact(),
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
@@ -860,7 +860,7 @@ Instruction *llvm_seahorn::InstCombiner::visitLShr(BinaryOperator &I) {
   return nullptr;
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitAShr(BinaryOperator &I) {
+Instruction *InstCombiner::visitAShr(BinaryOperator &I) {
   if (Value *V = SimplifyAShrInst(I.getOperand(0), I.getOperand(1), I.isExact(),
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);

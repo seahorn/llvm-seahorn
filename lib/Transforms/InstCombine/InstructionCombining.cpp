@@ -144,7 +144,7 @@ static cl::opt<unsigned> MaxArraySize(
 static cl::opt<unsigned> ShouldLowerDbgDeclare("seaopt-instcombine-lower-dbg-declare",
                                                cl::Hidden, cl::init(true));
 
-Value *llvm_seahorn::InstCombiner::EmitGEPOffset(User *GEP) {
+Value *InstCombiner::EmitGEPOffset(User *GEP) {
   return llvm::EmitGEPOffset(&Builder, DL, GEP);
 }
 
@@ -157,7 +157,7 @@ Value *llvm_seahorn::InstCombiner::EmitGEPOffset(User *GEP) {
 /// legal to convert to, in order to open up more combining opportunities.
 /// NOTE: this treats i8, i16 and i32 specially, due to them being so common
 /// from frontend languages.
-bool llvm_seahorn::InstCombiner::shouldChangeType(unsigned FromWidth,
+bool InstCombiner::shouldChangeType(unsigned FromWidth,
                                     unsigned ToWidth) const {
   bool FromLegal = FromWidth == 1 || DL.isLegalInteger(FromWidth);
   bool ToLegal = ToWidth == 1 || DL.isLegalInteger(ToWidth);
@@ -185,7 +185,7 @@ bool llvm_seahorn::InstCombiner::shouldChangeType(unsigned FromWidth,
 /// to a larger illegal type. i1 is always treated as a legal type because it is
 /// a fundamental type in IR, and there are many specialized optimizations for
 /// i1 types.
-bool llvm_seahorn::InstCombiner::shouldChangeType(Type *From, Type *To) const {
+bool InstCombiner::shouldChangeType(Type *From, Type *To) const {
   // TODO: This could be extended to allow vectors. Datalayout changes might be
   // needed to properly support that.
   if (!From->isIntegerTy() || !To->isIntegerTy())
@@ -306,7 +306,7 @@ static bool simplifyAssocCastAssoc(BinaryOperator *BinOp1) {
 ///  5. Transform: "A op (B op C)" ==> "B op (C op A)" if "C op A" simplifies.
 ///  6. Transform: "(A op C1) op (B op C2)" ==> "(A op B) op (C1 op C2)"
 ///     if C1 and C2 are constants.
-bool llvm_seahorn::InstCombiner::SimplifyAssociativeOrCommutative(BinaryOperator &I) {
+bool InstCombiner::SimplifyAssociativeOrCommutative(BinaryOperator &I) {
   Instruction::BinaryOps Opcode = I.getOpcode();
   bool Changed = false;
 
@@ -535,7 +535,7 @@ getBinOpsForFactorization(Instruction::BinaryOps TopOpcode, BinaryOperator *Op,
 
 /// This tries to simplify binary operations by factorizing out common terms
 /// (e. g. "(A*B)+(A*C)" -> "A*(B+C)").
-Value *llvm_seahorn::InstCombiner::tryFactorization(BinaryOperator &I,
+Value *InstCombiner::tryFactorization(BinaryOperator &I,
                                       Instruction::BinaryOps InnerOpcode,
                                       Value *A, Value *B, Value *C, Value *D) {
   assert(A && B && C && D && "All values must be provided");
@@ -640,7 +640,7 @@ Value *llvm_seahorn::InstCombiner::tryFactorization(BinaryOperator &I,
 /// (eg "(A*B)+(A*C)" -> "A*(B+C)") or expanding out if this results in
 /// simplifications (eg: "A & (B | C) -> (A&B) | (A&C)" if this is a win).
 /// Returns the simplified value, or null if it didn't simplify.
-Value *llvm_seahorn::InstCombiner::SimplifyUsingDistributiveLaws(BinaryOperator &I) {
+Value *InstCombiner::SimplifyUsingDistributiveLaws(BinaryOperator &I) {
   Value *LHS = I.getOperand(0), *RHS = I.getOperand(1);
   BinaryOperator *Op0 = dyn_cast<BinaryOperator>(LHS);
   BinaryOperator *Op1 = dyn_cast<BinaryOperator>(RHS);
@@ -754,7 +754,7 @@ Value *llvm_seahorn::InstCombiner::SimplifyUsingDistributiveLaws(BinaryOperator 
   return SimplifySelectsFeedingBinaryOp(I, LHS, RHS);
 }
 
-Value *llvm_seahorn::InstCombiner::SimplifySelectsFeedingBinaryOp(BinaryOperator &I,
+Value *InstCombiner::SimplifySelectsFeedingBinaryOp(BinaryOperator &I,
                                                     Value *LHS, Value *RHS) {
   Instruction::BinaryOps Opcode = I.getOpcode();
   // (op (select (a, b, c)), (select (a, d, e))) -> (select (a, (op b, d), (op
@@ -786,7 +786,7 @@ Value *llvm_seahorn::InstCombiner::SimplifySelectsFeedingBinaryOp(BinaryOperator
 
 /// Given a 'sub' instruction, return the RHS of the instruction if the LHS is a
 /// constant zero (which is the 'negate' form).
-Value *llvm_seahorn::InstCombiner::dyn_castNegVal(Value *V) const {
+Value *InstCombiner::dyn_castNegVal(Value *V) const {
   Value *NegV;
   if (match(V, m_Neg(m_Value(NegV))))
     return NegV;
@@ -818,7 +818,7 @@ Value *llvm_seahorn::InstCombiner::dyn_castNegVal(Value *V) const {
 }
 
 static Value *foldOperationIntoSelectOperand(Instruction &I, Value *SO,
-                                             llvm_seahorn::InstCombiner::BuilderTy &Builder) {
+                                             InstCombiner::BuilderTy &Builder) {
   if (auto *Cast = dyn_cast<CastInst>(&I))
     return Builder.CreateCast(Cast->getOpcode(), SO, I.getType());
 
@@ -847,7 +847,7 @@ static Value *foldOperationIntoSelectOperand(Instruction &I, Value *SO,
   return RI;
 }
 
-Instruction *llvm_seahorn::InstCombiner::FoldOpIntoSelect(Instruction &Op, SelectInst *SI) {
+Instruction *InstCombiner::FoldOpIntoSelect(Instruction &Op, SelectInst *SI) {
   // Don't modify shared select instructions.
   if (!SI->hasOneUse())
     return nullptr;
@@ -898,7 +898,7 @@ Instruction *llvm_seahorn::InstCombiner::FoldOpIntoSelect(Instruction &Op, Selec
 }
 
 static Value *foldOperationIntoPhiValue(BinaryOperator *I, Value *InV,
-                                        llvm_seahorn::InstCombiner::BuilderTy &Builder) {
+                                        InstCombiner::BuilderTy &Builder) {
   bool ConstIsRHS = isa<Constant>(I->getOperand(1));
   Constant *C = cast<Constant>(I->getOperand(ConstIsRHS));
 
@@ -919,7 +919,7 @@ static Value *foldOperationIntoPhiValue(BinaryOperator *I, Value *InV,
   return RI;
 }
 
-Instruction *llvm_seahorn::InstCombiner::foldOpIntoPhi(Instruction &I, PHINode *PN) {
+Instruction *InstCombiner::foldOpIntoPhi(Instruction &I, PHINode *PN) {
   unsigned NumPHIValues = PN->getNumIncomingValues();
   if (NumPHIValues == 0)
     return nullptr;
@@ -1064,7 +1064,7 @@ Instruction *llvm_seahorn::InstCombiner::foldOpIntoPhi(Instruction &I, PHINode *
   return replaceInstUsesWith(I, NewPN);
 }
 
-Instruction *llvm_seahorn::InstCombiner::foldBinOpIntoSelectOrPhi(BinaryOperator &I) {
+Instruction *InstCombiner::foldBinOpIntoSelectOrPhi(BinaryOperator &I) {
   if (!isa<Constant>(I.getOperand(1)))
     return nullptr;
 
@@ -1082,7 +1082,7 @@ Instruction *llvm_seahorn::InstCombiner::foldBinOpIntoSelectOrPhi(BinaryOperator
 /// is a sequence of GEP indices into the pointed type that will land us at the
 /// specified offset. If so, fill them into NewIndices and return the resultant
 /// element type, otherwise return null.
-Type *llvm_seahorn::InstCombiner::FindElementAtOffset(PointerType *PtrTy, int64_t Offset,
+Type *InstCombiner::FindElementAtOffset(PointerType *PtrTy, int64_t Offset,
                                         SmallVectorImpl<Value *> &NewIndices) {
   Type *Ty = PtrTy->getElementType();
   if (!Ty->isSized())
@@ -1152,7 +1152,7 @@ static bool shouldMergeGEPs(GEPOperator &GEP, GEPOperator &Src) {
 
 /// Return a value X such that Val = X * Scale, or null if none.
 /// If the multiplication is known not to overflow, then NoSignedWrap is set.
-Value *llvm_seahorn::InstCombiner::Descale(Value *Val, APInt Scale, bool &NoSignedWrap) {
+Value *InstCombiner::Descale(Value *Val, APInt Scale, bool &NoSignedWrap) {
   assert(isa<IntegerType>(Val->getType()) && "Can only descale integers!");
   assert(cast<IntegerType>(Val->getType())->getBitWidth() ==
          Scale.getBitWidth() && "Scale not compatible with value!");
@@ -1392,7 +1392,7 @@ Value *llvm_seahorn::InstCombiner::Descale(Value *Val, APInt Scale, bool &NoSign
   } while (true);
 }
 
-Instruction *llvm_seahorn::InstCombiner::foldVectorBinop(BinaryOperator &Inst) {
+Instruction *InstCombiner::foldVectorBinop(BinaryOperator &Inst) {
   if (!Inst.getType()->isVectorTy()) return nullptr;
 
   BinaryOperator::BinaryOps Opcode = Inst.getOpcode();
@@ -1555,7 +1555,7 @@ Instruction *llvm_seahorn::InstCombiner::foldVectorBinop(BinaryOperator &Inst) {
 /// Try to narrow the width of a binop if at least 1 operand is an extend of
 /// of a value. This requires a potentially expensive known bits check to make
 /// sure the narrow op does not overflow.
-Instruction *llvm_seahorn::InstCombiner::narrowMathIfNoOverflow(BinaryOperator &BO) {
+Instruction *InstCombiner::narrowMathIfNoOverflow(BinaryOperator &BO) {
   // We need at least one extended operand.
   Value *Op0 = BO.getOperand(0), *Op1 = BO.getOperand(1);
 
@@ -1608,7 +1608,7 @@ Instruction *llvm_seahorn::InstCombiner::narrowMathIfNoOverflow(BinaryOperator &
   return CastInst::Create(CastOpc, NarrowBO, BO.getType());
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
+Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
   SmallVector<Value *, 8> Ops(GEP.op_begin(), GEP.op_end());
   Type *GEPType = GEP.getType();
   Type *GEPEltType = GEP.getSourceElementType();
@@ -2343,7 +2343,7 @@ static bool isAllocSiteRemovable(Instruction *AI,
   return true;
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitAllocSite(Instruction &MI) {
+Instruction *InstCombiner::visitAllocSite(Instruction &MI) {
   // If we have a malloc call which is only used in any amount of comparisons to
   // null and free calls, delete the calls and replace the comparisons with true
   // or false as appropriate.
@@ -2501,7 +2501,7 @@ static Instruction *tryToMoveFreeBeforeNullTest(CallInst &FI,
   return &FI;
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitFree(CallInst &FI) {
+Instruction *InstCombiner::visitFree(CallInst &FI) {
   Value *Op = FI.getArgOperand(0);
 
   // free undef -> unreachable.
@@ -2529,7 +2529,7 @@ Instruction *llvm_seahorn::InstCombiner::visitFree(CallInst &FI) {
   return nullptr;
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitReturnInst(ReturnInst &RI) {
+Instruction *InstCombiner::visitReturnInst(ReturnInst &RI) {
   if (RI.getNumOperands() == 0) // ret void
     return nullptr;
 
@@ -2547,7 +2547,7 @@ Instruction *llvm_seahorn::InstCombiner::visitReturnInst(ReturnInst &RI) {
   return nullptr;
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitBranchInst(BranchInst &BI) {
+Instruction *InstCombiner::visitBranchInst(BranchInst &BI) {
   // Change br (not X), label True, label False to: br X, label False, True
   Value *X = nullptr;
   BasicBlock *TrueDest;
@@ -2584,7 +2584,7 @@ Instruction *llvm_seahorn::InstCombiner::visitBranchInst(BranchInst &BI) {
   return nullptr;
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitSwitchInst(SwitchInst &SI) {
+Instruction *InstCombiner::visitSwitchInst(SwitchInst &SI) {
   Value *Cond = SI.getCondition();
   Value *Op0;
   ConstantInt *AddRHS;
@@ -2636,7 +2636,7 @@ Instruction *llvm_seahorn::InstCombiner::visitSwitchInst(SwitchInst &SI) {
   return nullptr;
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitExtractValueInst(ExtractValueInst &EV) {
+Instruction *InstCombiner::visitExtractValueInst(ExtractValueInst &EV) {
   Value *Agg = EV.getAggregateOperand();
 
   if (!EV.hasIndices())
@@ -2797,7 +2797,7 @@ static bool shorter_filter(const Value *LHS, const Value *RHS) {
          cast<ArrayType>(RHS->getType())->getNumElements();
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitLandingPadInst(LandingPadInst &LI) {
+Instruction *InstCombiner::visitLandingPadInst(LandingPadInst &LI) {
   // The logic here should be correct for any real-world personality function.
   // However if that turns out not to be true, the offending logic can always
   // be conditioned on the personality function, like the catch-all logic is.
@@ -3183,7 +3183,7 @@ static bool TryToSinkInstruction(Instruction *I, BasicBlock *DestBlock) {
   return true;
 }
 
-bool llvm_seahorn::InstCombiner::run() {
+bool InstCombiner::run() {
   while (!Worklist.isEmpty()) {
     Instruction *I = Worklist.RemoveOne();
     if (I == nullptr) continue;  // skip null values.

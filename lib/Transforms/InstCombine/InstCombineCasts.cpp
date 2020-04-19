@@ -81,7 +81,7 @@ static Value *decomposeSimpleLinearExpr(Value *Val, unsigned &Scale,
 
 /// If we find a cast of an allocation instruction, try to eliminate the cast by
 /// moving the type information into the alloc.
-Instruction *llvm_seahorn::InstCombiner::PromoteCastOfAllocation(BitCastInst &CI,
+Instruction *InstCombiner::PromoteCastOfAllocation(BitCastInst &CI,
                                                    AllocaInst &AI) {
   PointerType *PTy = cast<PointerType>(CI.getType());
 
@@ -159,7 +159,7 @@ Instruction *llvm_seahorn::InstCombiner::PromoteCastOfAllocation(BitCastInst &CI
 
 /// Given an expression that CanEvaluateTruncated or CanEvaluateSExtd returns
 /// true for, actually insert the code to evaluate the expression.
-Value *llvm_seahorn::InstCombiner::EvaluateInDifferentType(Value *V, Type *Ty,
+Value *InstCombiner::EvaluateInDifferentType(Value *V, Type *Ty,
                                              bool isSigned) {
   if (Constant *C = dyn_cast<Constant>(V)) {
     C = ConstantExpr::getIntegerCast(C, Ty, isSigned /*Sext or ZExt*/);
@@ -230,7 +230,7 @@ Value *llvm_seahorn::InstCombiner::EvaluateInDifferentType(Value *V, Type *Ty,
   return InsertNewInstWith(Res, *I);
 }
 
-Instruction::CastOps llvm_seahorn::InstCombiner::isEliminableCastPair(const CastInst *CI1,
+Instruction::CastOps InstCombiner::isEliminableCastPair(const CastInst *CI1,
                                                         const CastInst *CI2) {
   Type *SrcTy = CI1->getSrcTy();
   Type *MidTy = CI1->getDestTy();
@@ -258,7 +258,7 @@ Instruction::CastOps llvm_seahorn::InstCombiner::isEliminableCastPair(const Cast
 }
 
 /// Implement the transforms common to all CastInst visitors.
-Instruction *llvm_seahorn::InstCombiner::commonCastTransforms(CastInst &CI) {
+Instruction *InstCombiner::commonCastTransforms(CastInst &CI) {
   Value *Src = CI.getOperand(0);
 
   // Try to eliminate a cast of a cast.
@@ -339,7 +339,7 @@ static bool canNotEvaluateInType(Value *V, Type *Ty) {
 ///
 /// This function works on both vectors and scalars.
 ///
-static bool canEvaluateTruncated(Value *V, Type *Ty, llvm_seahorn::InstCombiner &IC,
+static bool canEvaluateTruncated(Value *V, Type *Ty, InstCombiner &IC,
                                  Instruction *CxtI) {
   if (canAlwaysEvaluateInType(V, Ty))
     return true;
@@ -454,7 +454,7 @@ static bool canEvaluateTruncated(Value *V, Type *Ty, llvm_seahorn::InstCombiner 
 ///   trunc (lshr (bitcast <4 x i32> %X to i128), 32) to i32
 ///   --->
 ///   extractelement <4 x i32> %X, 1
-static Instruction *foldVecTruncToExtElt(TruncInst &Trunc, llvm_seahorn::InstCombiner &IC) {
+static Instruction *foldVecTruncToExtElt(TruncInst &Trunc, InstCombiner &IC) {
   Value *TruncOp = Trunc.getOperand(0);
   Type *DestType = Trunc.getType();
   if (!TruncOp->hasOneUse() || !isa<IntegerType>(DestType))
@@ -493,7 +493,7 @@ static Instruction *foldVecTruncToExtElt(TruncInst &Trunc, llvm_seahorn::InstCom
 
 /// Rotate left/right may occur in a wider type than necessary because of type
 /// promotion rules. Try to narrow the inputs and convert to funnel shift.
-Instruction *llvm_seahorn::InstCombiner::narrowRotate(TruncInst &Trunc) {
+Instruction *InstCombiner::narrowRotate(TruncInst &Trunc) {
   assert((isa<VectorType>(Trunc.getSrcTy()) ||
           shouldChangeType(Trunc.getSrcTy(), Trunc.getType())) &&
          "Don't narrow to an illegal scalar type");
@@ -577,7 +577,7 @@ Instruction *llvm_seahorn::InstCombiner::narrowRotate(TruncInst &Trunc) {
 /// Try to narrow the width of math or bitwise logic instructions by pulling a
 /// truncate ahead of binary operators.
 /// TODO: Transforms for truncated shifts should be moved into here.
-Instruction *llvm_seahorn::InstCombiner::narrowBinOp(TruncInst &Trunc) {
+Instruction *InstCombiner::narrowBinOp(TruncInst &Trunc) {
   Type *SrcTy = Trunc.getSrcTy();
   Type *DestTy = Trunc.getType();
   if (!isa<VectorType>(SrcTy) && !shouldChangeType(SrcTy, DestTy))
@@ -636,7 +636,7 @@ Instruction *llvm_seahorn::InstCombiner::narrowBinOp(TruncInst &Trunc) {
 /// shuffle with a constant operand, but we limit the transform to avoid
 /// creating a shuffle type that targets may not be able to lower effectively.
 static Instruction *shrinkSplatShuffle(TruncInst &Trunc,
-                                       llvm_seahorn::InstCombiner::BuilderTy &Builder) {
+                                       InstCombiner::BuilderTy &Builder) {
   auto *Shuf = dyn_cast<ShuffleVectorInst>(Trunc.getOperand(0));
   if (Shuf && Shuf->hasOneUse() && isa<UndefValue>(Shuf->getOperand(1)) &&
       Shuf->getMask()->getSplatValue() &&
@@ -656,7 +656,7 @@ static Instruction *shrinkSplatShuffle(TruncInst &Trunc,
 /// could also be extended to handle the case of inserting a scalar constant
 /// into a vector variable.
 static Instruction *shrinkInsertElt(CastInst &Trunc,
-                                    llvm_seahorn::InstCombiner::BuilderTy &Builder) {
+                                    InstCombiner::BuilderTy &Builder) {
   Instruction::CastOps Opcode = Trunc.getOpcode();
   assert((Opcode == Instruction::Trunc || Opcode == Instruction::FPTrunc) &&
          "Unexpected instruction for shrinking");
@@ -682,7 +682,7 @@ static Instruction *shrinkInsertElt(CastInst &Trunc,
   return nullptr;
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitTrunc(TruncInst &CI) {
+Instruction *InstCombiner::visitTrunc(TruncInst &CI) {
   if (Instruction *Result = commonCastTransforms(CI))
     return Result;
 
@@ -845,7 +845,7 @@ Instruction *llvm_seahorn::InstCombiner::visitTrunc(TruncInst &CI) {
   return nullptr;
 }
 
-Instruction *llvm_seahorn::InstCombiner::transformZExtICmp(ICmpInst *ICI, ZExtInst &CI,
+Instruction *InstCombiner::transformZExtICmp(ICmpInst *ICI, ZExtInst &CI,
                                              bool DoTransform) {
 
   if (AvoidBv)
@@ -989,7 +989,7 @@ Instruction *llvm_seahorn::InstCombiner::transformZExtICmp(ICmpInst *ICI, ZExtIn
 ///
 /// This function works on both vectors and scalars.
 static bool canEvaluateZExtd(Value *V, Type *Ty, unsigned &BitsToClear,
-                             llvm_seahorn::InstCombiner &IC, Instruction *CxtI) {
+                             InstCombiner &IC, Instruction *CxtI) {
   BitsToClear = 0;
   if (canAlwaysEvaluateInType(V, Ty))
     return true;
@@ -1094,7 +1094,7 @@ static bool canEvaluateZExtd(Value *V, Type *Ty, unsigned &BitsToClear,
   }
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitZExt(ZExtInst &CI) {
+Instruction *InstCombiner::visitZExt(ZExtInst &CI) {
   // If this zero extend is only used by a truncate, let the truncate be
   // eliminated before we try to optimize this zext.
   if (CI.hasOneUse() && isa<TruncInst>(CI.user_back()))
@@ -1236,7 +1236,7 @@ Instruction *llvm_seahorn::InstCombiner::visitZExt(ZExtInst &CI) {
 }
 
 /// Transform (sext icmp) to bitwise / integer operations to eliminate the icmp.
-Instruction *llvm_seahorn::InstCombiner::transformSExtICmp(ICmpInst *ICI, Instruction &CI) {
+Instruction *InstCombiner::transformSExtICmp(ICmpInst *ICI, Instruction &CI) {
 
   if (AvoidBv)
     return nullptr;
@@ -1376,7 +1376,7 @@ static bool canEvaluateSExtd(Value *V, Type *Ty) {
   return false;
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitSExt(SExtInst &CI) {
+Instruction *InstCombiner::visitSExt(SExtInst &CI) {
   // If this sign extend is only used by a truncate, let the truncate be
   // eliminated before we try to optimize this sext.
   if (CI.hasOneUse() && isa<TruncInst>(CI.user_back()))
@@ -1538,7 +1538,7 @@ static Type *getMinimumFPType(Value *V) {
   return V->getType();
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitFPTrunc(FPTruncInst &FPT) {
+Instruction *InstCombiner::visitFPTrunc(FPTruncInst &FPT) {
   if (Instruction *I = commonCastTransforms(FPT))
     return I;
 
@@ -1695,7 +1695,7 @@ Instruction *llvm_seahorn::InstCombiner::visitFPTrunc(FPTruncInst &FPT) {
   return nullptr;
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitFPExt(CastInst &CI) {
+Instruction *InstCombiner::visitFPExt(CastInst &CI) {
   return commonCastTransforms(CI);
 }
 
@@ -1703,7 +1703,7 @@ Instruction *llvm_seahorn::InstCombiner::visitFPExt(CastInst &CI) {
 // This is safe if the intermediate type has enough bits in its mantissa to
 // accurately represent all values of X.  For example, this won't work with
 // i64 -> float -> i64.
-Instruction *llvm_seahorn::InstCombiner::FoldItoFPtoI(Instruction &FI) {
+Instruction *InstCombiner::FoldItoFPtoI(Instruction &FI) {
   if (!isa<UIToFPInst>(FI.getOperand(0)) && !isa<SIToFPInst>(FI.getOperand(0)))
     return nullptr;
   Instruction *OpI = cast<Instruction>(FI.getOperand(0));
@@ -1743,7 +1743,7 @@ Instruction *llvm_seahorn::InstCombiner::FoldItoFPtoI(Instruction &FI) {
   return nullptr;
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitFPToUI(FPToUIInst &FI) {
+Instruction *InstCombiner::visitFPToUI(FPToUIInst &FI) {
   Instruction *OpI = dyn_cast<Instruction>(FI.getOperand(0));
   if (!OpI)
     return commonCastTransforms(FI);
@@ -1754,7 +1754,7 @@ Instruction *llvm_seahorn::InstCombiner::visitFPToUI(FPToUIInst &FI) {
   return commonCastTransforms(FI);
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitFPToSI(FPToSIInst &FI) {
+Instruction *InstCombiner::visitFPToSI(FPToSIInst &FI) {
   Instruction *OpI = dyn_cast<Instruction>(FI.getOperand(0));
   if (!OpI)
     return commonCastTransforms(FI);
@@ -1765,15 +1765,15 @@ Instruction *llvm_seahorn::InstCombiner::visitFPToSI(FPToSIInst &FI) {
   return commonCastTransforms(FI);
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitUIToFP(CastInst &CI) {
+Instruction *InstCombiner::visitUIToFP(CastInst &CI) {
   return commonCastTransforms(CI);
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitSIToFP(CastInst &CI) {
+Instruction *InstCombiner::visitSIToFP(CastInst &CI) {
   return commonCastTransforms(CI);
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitIntToPtr(IntToPtrInst &CI) {
+Instruction *InstCombiner::visitIntToPtr(IntToPtrInst &CI) {
   // If the source integer type is not the intptr_t type for this target, do a
   // trunc or zext to the intptr_t type, then inttoptr of it.  This allows the
   // cast to be exposed to other transforms.
@@ -1795,7 +1795,7 @@ Instruction *llvm_seahorn::InstCombiner::visitIntToPtr(IntToPtrInst &CI) {
 }
 
 /// Implement the transforms for cast of pointer (bitcast/ptrtoint)
-Instruction *llvm_seahorn::InstCombiner::commonPointerCastTransforms(CastInst &CI) {
+Instruction *InstCombiner::commonPointerCastTransforms(CastInst &CI) {
   Value *Src = CI.getOperand(0);
 
   if (GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(Src)) {
@@ -1819,7 +1819,7 @@ Instruction *llvm_seahorn::InstCombiner::commonPointerCastTransforms(CastInst &C
   return commonCastTransforms(CI);
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitPtrToInt(PtrToIntInst &CI) {
+Instruction *InstCombiner::visitPtrToInt(PtrToIntInst &CI) {
   // If the destination integer type is not the intptr_t type for this target,
   // do a ptrtoint to intptr_t then do a trunc or zext.  This allows the cast
   // to be exposed to other transforms.
@@ -1844,7 +1844,7 @@ Instruction *llvm_seahorn::InstCombiner::visitPtrToInt(PtrToIntInst &CI) {
 ///
 /// The source and destination vector types may have different element types.
 static Instruction *optimizeVectorResize(Value *InVal, VectorType *DestTy,
-                                         llvm_seahorn::InstCombiner &IC) {
+                                         InstCombiner &IC) {
   // We can only do this optimization if the output is a multiple of the input
   // element size, or the input is a multiple of the output element size.
   // Convert the input type to have the same element type as the output.
@@ -2023,7 +2023,7 @@ static bool collectInsertionElements(Value *V, unsigned Shift,
 ///
 /// Into two insertelements that do "buildvector{%inc, %inc5}".
 static Value *optimizeIntegerToVectorInsertions(BitCastInst &CI,
-                                                llvm_seahorn::InstCombiner &IC) {
+                                                InstCombiner &IC) {
   VectorType *DestVecTy = cast<VectorType>(CI.getType());
   Value *IntInput = CI.getOperand(0);
 
@@ -2052,7 +2052,7 @@ static Value *optimizeIntegerToVectorInsertions(BitCastInst &CI,
 /// vectors better than bitcasts of scalars because vector registers are
 /// usually not type-specific like scalar integer or scalar floating-point.
 static Instruction *canonicalizeBitCastExtElt(BitCastInst &BitCast,
-                                              llvm_seahorn::InstCombiner &IC) {
+                                              InstCombiner &IC) {
   // TODO: Create and use a pattern matcher for ExtractElementInst.
   auto *ExtElt = dyn_cast<ExtractElementInst>(BitCast.getOperand(0));
   if (!ExtElt || !ExtElt->hasOneUse())
@@ -2073,7 +2073,7 @@ static Instruction *canonicalizeBitCastExtElt(BitCastInst &BitCast,
 
 /// Change the type of a bitwise logic operation if we can eliminate a bitcast.
 static Instruction *foldBitCastBitwiseLogic(BitCastInst &BitCast,
-                                            llvm_seahorn::InstCombiner::BuilderTy &Builder) {
+                                            InstCombiner::BuilderTy &Builder) {
   Type *DestTy = BitCast.getType();
   BinaryOperator *BO;
   if (!DestTy->isIntOrIntVectorTy() ||
@@ -2119,7 +2119,7 @@ static Instruction *foldBitCastBitwiseLogic(BitCastInst &BitCast,
 
 /// Change the type of a select if we can eliminate a bitcast.
 static Instruction *foldBitCastSelect(BitCastInst &BitCast,
-                                      llvm_seahorn::InstCombiner::BuilderTy &Builder) {
+                                      InstCombiner::BuilderTy &Builder) {
   Value *Cond, *TVal, *FVal;
   if (!match(BitCast.getOperand(0),
              m_OneUse(m_Select(m_Value(Cond), m_Value(TVal), m_Value(FVal)))))
@@ -2178,7 +2178,7 @@ static bool hasStoreUsersOnly(CastInst &CI) {
 ///
 /// All the related PHI nodes can be replaced by new PHI nodes with type A.
 /// The uses of \p CI can be changed to the new PHI node corresponding to \p PN.
-Instruction *llvm_seahorn::InstCombiner::optimizeBitCastFromPhi(CastInst &CI, PHINode *PN) {
+Instruction *InstCombiner::optimizeBitCastFromPhi(CastInst &CI, PHINode *PN) {
   // BitCast used by Store can be handled in InstCombineLoadStoreAlloca.cpp.
   if (hasStoreUsersOnly(CI))
     return nullptr;
@@ -2305,7 +2305,7 @@ Instruction *llvm_seahorn::InstCombiner::optimizeBitCastFromPhi(CastInst &CI, PH
   return RetVal;
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitBitCast(BitCastInst &CI) {
+Instruction *InstCombiner::visitBitCast(BitCastInst &CI) {
   // If the operands are integer typed then apply the integer transforms,
   // otherwise just apply the common ones.
   Value *Src = CI.getOperand(0);
@@ -2453,7 +2453,7 @@ Instruction *llvm_seahorn::InstCombiner::visitBitCast(BitCastInst &CI) {
   return commonCastTransforms(CI);
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitAddrSpaceCast(AddrSpaceCastInst &CI) {
+Instruction *InstCombiner::visitAddrSpaceCast(AddrSpaceCastInst &CI) {
   // If the destination pointer element type is not the same as the source's
   // first do a bitcast to the destination type, and then the addrspacecast.
   // This allows the cast to be exposed to other transforms.

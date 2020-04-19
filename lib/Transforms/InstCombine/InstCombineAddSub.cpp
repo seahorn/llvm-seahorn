@@ -177,7 +177,7 @@ private:
 ///
 class FAddCombine {
 public:
-  FAddCombine(llvm_seahorn::InstCombiner::BuilderTy &B) : Builder(B) {}
+  FAddCombine(InstCombiner::BuilderTy &B) : Builder(B) {}
 
   Value *simplify(Instruction *FAdd);
 
@@ -209,7 +209,7 @@ private:
   void incCreateInstNum() {}
 #endif
 
-  llvm_seahorn::InstCombiner::BuilderTy &Builder;
+  InstCombiner::BuilderTy &Builder;
   Instruction *Instr = nullptr;
 };
 
@@ -768,7 +768,7 @@ Value *FAddCombine::createAddendVal(const FAddend &Opnd, bool &NeedNeg) {
 //   ADD(XOR(AND(Z, C), C), 1) == NEG(OR(Z, ~C))
 //   XOR(AND(Z, C), (C + 1)) == NEG(OR(Z, ~C)) if C is even
 static Value *checkForNegativeOperand(BinaryOperator &I,
-                                      llvm_seahorn::InstCombiner::BuilderTy &Builder) {
+                                      InstCombiner::BuilderTy &Builder) {
   Value *LHS = I.getOperand(0), *RHS = I.getOperand(1);
 
   // This function creates 2 instructions to replace ADD, we need at least one
@@ -864,7 +864,7 @@ static Instruction *foldNoWrapAdd(BinaryOperator &Add,
   return nullptr;
 }
 
-Instruction *llvm_seahorn::InstCombiner::foldAddWithConstant(BinaryOperator &Add) {
+Instruction *InstCombiner::foldAddWithConstant(BinaryOperator &Add) {
   Value *Op0 = Add.getOperand(0), *Op1 = Add.getOperand(1);
   Constant *Op1C;
   if (!match(Op1, m_Constant(Op1C)))
@@ -1021,7 +1021,7 @@ static bool MulWillOverflow(APInt &C0, APInt &C1, bool IsSigned) {
 
 // Simplifies X % C0 + (( X / C0 ) % C1) * C0 to X % (C0 * C1), where (C0 * C1)
 // does not overflow.
-Value *llvm_seahorn::InstCombiner::SimplifyAddWithRemainder(BinaryOperator &I) {
+Value *InstCombiner::SimplifyAddWithRemainder(BinaryOperator &I) {
   Value *LHS = I.getOperand(0), *RHS = I.getOperand(1);
   Value *X, *MulOpV;
   APInt C0, MulOpC;
@@ -1059,7 +1059,7 @@ Value *llvm_seahorn::InstCombiner::SimplifyAddWithRemainder(BinaryOperator &I) {
 /// Because a 'not' is better for bit-tracking analysis and other transforms
 /// than an 'add'. The new shl is always nsw, and is nuw if old `and` was.
 static Instruction *canonicalizeLowbitMask(BinaryOperator &I,
-                                           llvm_seahorn::InstCombiner::BuilderTy &Builder) {
+                                           InstCombiner::BuilderTy &Builder) {
   Value *NBits;
   if (!match(&I, m_Add(m_OneUse(m_Shl(m_One(), m_Value(NBits))), m_AllOnes())))
     return nullptr;
@@ -1098,7 +1098,7 @@ static Instruction *foldToUnsignedSaturatedAdd(BinaryOperator &I) {
   return nullptr;
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitAdd(BinaryOperator &I) {
+Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
   if (Value *V = SimplifyAddInst(I.getOperand(0), I.getOperand(1),
                                  I.hasNoSignedWrap(), I.hasNoUnsignedWrap(),
                                  SQ.getWithInstruction(&I)))
@@ -1311,7 +1311,7 @@ Instruction *llvm_seahorn::InstCombiner::visitAdd(BinaryOperator &I) {
 
 /// Factor a common operand out of fadd/fsub of fmul/fdiv.
 static Instruction *factorizeFAddFSub(BinaryOperator &I,
-                                      llvm_seahorn::InstCombiner::BuilderTy &Builder) {
+                                      InstCombiner::BuilderTy &Builder) {
   assert((I.getOpcode() == Instruction::FAdd ||
           I.getOpcode() == Instruction::FSub) && "Expecting fadd/fsub");
   assert(I.hasAllowReassoc() && I.hasNoSignedZeros() &&
@@ -1348,7 +1348,7 @@ static Instruction *factorizeFAddFSub(BinaryOperator &I,
                 : BinaryOperator::CreateFDivFMF(XY, Z, &I);
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitFAdd(BinaryOperator &I) {
+Instruction *InstCombiner::visitFAdd(BinaryOperator &I) {
   if (Value *V = SimplifyFAddInst(I.getOperand(0), I.getOperand(1),
                                   I.getFastMathFlags(),
                                   SQ.getWithInstruction(&I)))
@@ -1447,7 +1447,7 @@ Instruction *llvm_seahorn::InstCombiner::visitFAdd(BinaryOperator &I) {
 /// Optimize pointer differences into the same array into a size.  Consider:
 ///  &A[10] - &A[0]: we should compile this to "10".  LHS/RHS are the pointer
 /// operands to the ptrtoint instructions for the LHS/RHS of the subtract.
-Value *llvm_seahorn::InstCombiner::OptimizePointerDifference(Value *LHS, Value *RHS,
+Value *InstCombiner::OptimizePointerDifference(Value *LHS, Value *RHS,
                                                Type *Ty) {
   // If LHS is a gep based on RHS or RHS is a gep based on LHS, we can optimize
   // this.
@@ -1530,7 +1530,7 @@ Value *llvm_seahorn::InstCombiner::OptimizePointerDifference(Value *LHS, Value *
   return Builder.CreateIntCast(Result, Ty, true);
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitSub(BinaryOperator &I) {
+Instruction *InstCombiner::visitSub(BinaryOperator &I) {
   if (Value *V = SimplifySubInst(I.getOperand(0), I.getOperand(1),
                                  I.hasNoSignedWrap(), I.hasNoUnsignedWrap(),
                                  SQ.getWithInstruction(&I)))
@@ -1886,7 +1886,7 @@ Instruction *InstCombiner::visitFNeg(UnaryOperator &I) {
   return nullptr;
 }
 
-Instruction *llvm_seahorn::InstCombiner::visitFSub(BinaryOperator &I) {
+Instruction *InstCombiner::visitFSub(BinaryOperator &I) {
   if (Value *V = SimplifyFSubInst(I.getOperand(0), I.getOperand(1),
                                   I.getFastMathFlags(),
                                   SQ.getWithInstruction(&I)))

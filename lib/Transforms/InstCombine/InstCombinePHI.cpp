@@ -30,7 +30,7 @@ static cl::opt<unsigned> MaxNumPhis(
 /// The PHI arguments will be folded into a single operation with a PHI node
 /// as input. The debug location of the single operation will be the merged
 /// locations of the original PHI node arguments.
-void llvm_seahorn::InstCombiner::PHIArgMergedDebugLoc(Instruction *Inst, PHINode &PN) {
+void InstCombiner::PHIArgMergedDebugLoc(Instruction *Inst, PHINode &PN) {
   auto *FirstInst = cast<Instruction>(PN.getIncomingValue(0));
   Inst->setDebugLoc(FirstInst->getDebugLoc());
   // We do not expect a CallInst here, otherwise, N-way merging of DebugLoc
@@ -93,7 +93,7 @@ void llvm_seahorn::InstCombiner::PHIArgMergedDebugLoc(Instruction *Inst, PHINode
 //    ptr_val_inc = ...
 //    ...
 //
-Instruction *llvm_seahorn::InstCombiner::FoldIntegerTypedPHI(PHINode &PN) {
+Instruction *InstCombiner::FoldIntegerTypedPHI(PHINode &PN) {
   if (!PN.getType()->isIntegerTy())
     return nullptr;
   if (!PN.hasOneUse())
@@ -281,7 +281,7 @@ Instruction *llvm_seahorn::InstCombiner::FoldIntegerTypedPHI(PHINode &PN) {
 
 /// If we have something like phi [add (a,b), add(a,c)] and if a/b/c and the
 /// adds all have a single use, turn this into a phi and a single binop.
-Instruction *llvm_seahorn::InstCombiner::FoldPHIArgBinOpIntoPHI(PHINode &PN) {
+Instruction *InstCombiner::FoldPHIArgBinOpIntoPHI(PHINode &PN) {
   Instruction *FirstInst = cast<Instruction>(PN.getIncomingValue(0));
   assert(isa<BinaryOperator>(FirstInst) || isa<CmpInst>(FirstInst));
   unsigned Opc = FirstInst->getOpcode();
@@ -374,7 +374,7 @@ Instruction *llvm_seahorn::InstCombiner::FoldPHIArgBinOpIntoPHI(PHINode &PN) {
   return NewBinOp;
 }
 
-Instruction *llvm_seahorn::InstCombiner::FoldPHIArgGEPIntoPHI(PHINode &PN) {
+Instruction *InstCombiner::FoldPHIArgGEPIntoPHI(PHINode &PN) {
   GetElementPtrInst *FirstInst =cast<GetElementPtrInst>(PN.getIncomingValue(0));
 
   SmallVector<Value *, 16> FixedOperands(FirstInst->op_begin(),
@@ -529,7 +529,7 @@ static bool isSafeAndProfitableToSinkLoad(LoadInst *L) {
   return true;
 }
 
-Instruction *llvm_seahorn::InstCombiner::FoldPHIArgLoadIntoPHI(PHINode &PN) {
+Instruction *InstCombiner::FoldPHIArgLoadIntoPHI(PHINode &PN) {
   LoadInst *FirstLI = cast<LoadInst>(PN.getIncomingValue(0));
 
   // FIXME: This is overconservative; this transform is allowed in some cases
@@ -648,7 +648,7 @@ Instruction *llvm_seahorn::InstCombiner::FoldPHIArgLoadIntoPHI(PHINode &PN) {
 /// TODO: This function could handle other cast types, but then it might
 /// require special-casing a cast from the 'i1' type. See the comment in
 /// FoldPHIArgOpIntoPHI() about pessimizing illegal integer types.
-Instruction *llvm_seahorn::InstCombiner::FoldPHIArgZextsIntoPHI(PHINode &Phi) {
+Instruction *InstCombiner::FoldPHIArgZextsIntoPHI(PHINode &Phi) {
   // We cannot create a new instruction after the PHI if the terminator is an
   // EHPad because there is no valid insertion point.
   if (Instruction *TI = Phi.getParent()->getTerminator())
@@ -722,7 +722,7 @@ Instruction *llvm_seahorn::InstCombiner::FoldPHIArgZextsIntoPHI(PHINode &Phi) {
 /// If all operands to a PHI node are the same "unary" operator and they all are
 /// only used by the PHI, PHI together their inputs, and do the operation once,
 /// to the result of the PHI.
-Instruction *llvm_seahorn::InstCombiner::FoldPHIArgOpIntoPHI(PHINode &PN) {
+Instruction *InstCombiner::FoldPHIArgOpIntoPHI(PHINode &PN) {
   // We cannot create a new instruction after the PHI if the terminator is an
   // EHPad because there is no valid insertion point.
   if (Instruction *TI = PN.getParent()->getTerminator())
@@ -949,7 +949,7 @@ namespace llvm {
 /// TODO: The user of the trunc may be an bitcast to float/double/vector or an
 /// inttoptr.  We should produce new PHIs in the right type.
 ///
-Instruction *llvm_seahorn::InstCombiner::SliceUpIllegalIntegerPHI(PHINode &FirstPhi) {
+Instruction *InstCombiner::SliceUpIllegalIntegerPHI(PHINode &FirstPhi) {
   // PHIUsers - Keep track of all of the truncated values extracted from a set
   // of PHIs, along with their offset.  These are the things we want to rewrite.
   SmallVector<PHIUsageRecord, 16> PHIUsers;
@@ -1125,7 +1125,7 @@ Instruction *llvm_seahorn::InstCombiner::SliceUpIllegalIntegerPHI(PHINode &First
 
 // PHINode simplification
 //
-Instruction *llvm_seahorn::InstCombiner::visitPHINode(PHINode &PN) {
+Instruction *InstCombiner::visitPHINode(PHINode &PN) {
   if (Value *V = SimplifyInstruction(&PN, SQ.getWithInstruction(&PN)))
     return replaceInstUsesWith(PN, V);
 

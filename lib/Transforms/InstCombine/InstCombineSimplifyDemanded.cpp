@@ -64,7 +64,7 @@ static bool ShrinkDemandedConstant(Instruction *I, unsigned OpNo,
 
 /// Inst is an integer instruction that SimplifyDemandedBits knows about. See if
 /// the instruction has any properties that allow us to simplify its operands.
-bool llvm_seahorn::InstCombiner::SimplifyDemandedInstructionBits(Instruction &Inst) {
+bool InstCombiner::SimplifyDemandedInstructionBits(Instruction &Inst) {
   unsigned BitWidth = Inst.getType()->getScalarSizeInBits();
   KnownBits Known(BitWidth);
   APInt DemandedMask(APInt::getAllOnesValue(BitWidth));
@@ -80,7 +80,7 @@ bool llvm_seahorn::InstCombiner::SimplifyDemandedInstructionBits(Instruction &In
 /// This form of SimplifyDemandedBits simplifies the specified instruction
 /// operand if possible, updating it in place. It returns true if it made any
 /// change and false otherwise.
-bool llvm_seahorn::InstCombiner::SimplifyDemandedBits(Instruction *I, unsigned OpNo,
+bool InstCombiner::SimplifyDemandedBits(Instruction *I, unsigned OpNo,
                                         const APInt &DemandedMask,
                                         KnownBits &Known,
                                         unsigned Depth) {
@@ -116,7 +116,7 @@ bool llvm_seahorn::InstCombiner::SimplifyDemandedBits(Instruction *I, unsigned O
 /// operands based on the information about what bits are demanded. This returns
 /// some other non-null value if it found out that V is equal to another value
 /// in the context where the specified bits are demanded, but not for all users.
-Value *llvm_seahorn::InstCombiner::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
+Value *InstCombiner::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
                                              KnownBits &Known, unsigned Depth,
                                              Instruction *CxtI) {
   assert(V != nullptr && "Null pointer of Value???");
@@ -762,7 +762,7 @@ Value *llvm_seahorn::InstCombiner::SimplifyDemandedUseBits(Value *V, APInt Deman
 /// Helper routine of SimplifyDemandedUseBits. It computes Known
 /// bits. It also tries to handle simplifications that can be done based on
 /// DemandedMask, but without modifying the Instruction.
-Value *llvm_seahorn::InstCombiner::SimplifyMultipleUseDemandedBits(Instruction *I,
+Value *InstCombiner::SimplifyMultipleUseDemandedBits(Instruction *I,
                                                      const APInt &DemandedMask,
                                                      KnownBits &Known,
                                                      unsigned Depth,
@@ -971,7 +971,7 @@ InstCombiner::simplifyShrShlDemandedBits(Instruction *Shr, const APInt &ShrOp1,
 ///
 /// Note: This only supports non-TFE/LWE image intrinsic calls; those have
 ///       struct returns.
-Value *llvm_seahorn::InstCombiner::simplifyAMDGCNMemoryIntrinsicDemanded(IntrinsicInst *II,
+Value *InstCombiner::simplifyAMDGCNMemoryIntrinsicDemanded(IntrinsicInst *II,
                                                            APInt DemandedElts,
                                                            int DMaskIdx) {
   unsigned VWidth = II->getType()->getVectorNumElements();
@@ -1077,7 +1077,7 @@ Value *llvm_seahorn::InstCombiner::simplifyAMDGCNMemoryIntrinsicDemanded(Intrins
 /// If the information about demanded elements can be used to simplify the
 /// operation, the operation is simplified, then the resultant value is
 /// returned.  This returns null if no change was made.
-Value *llvm_seahorn::InstCombiner::SimplifyDemandedVectorElts(Value *V, APInt DemandedElts,
+Value *InstCombiner::SimplifyDemandedVectorElts(Value *V, APInt DemandedElts,
                                                 APInt &UndefElts,
                                                 unsigned Depth) {
   unsigned VWidth = V->getType()->getVectorNumElements();
