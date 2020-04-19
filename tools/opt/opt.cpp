@@ -12,6 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm_seahorn/InitializePasses.h"
+
 #include "BreakpointPrinter.h"
 #include "Debugify.h"
 #include "NewPMDriver.h"
@@ -477,6 +479,9 @@ int main(int argc, char **argv) {
   initializeExpandReductionsPass(Registry);
   initializeWasmEHPreparePass(Registry);
   initializeWriteBitcodePassPass(Registry);
+
+  initializeSeaIndVarSimplifyLegacyPassPass(Registry);
+  initializeSeaInstructionCombiningPassPass(Registry);
 
 #if 0 /*  SEAHORN REMOVE */
 #ifdef LINK_POLLY_INTO_TOOLS
