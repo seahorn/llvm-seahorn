@@ -69,6 +69,7 @@ public:
 // into:
 //    %Z = add int 2, %X
 //
+void initializeInstCombine(llvm::PassRegistry &Registry);
 }
 
 llvm::FunctionPass *createSeaInstructionCombiningPass(bool ExpensiveCombines = true);

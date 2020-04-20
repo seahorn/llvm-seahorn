@@ -3615,18 +3615,11 @@ INITIALIZE_PASS_END(SeaInstructionCombiningPass, "sea-instcombine",
                     "Combine redundant instructions", false, false)
 
 // Initialization Routines
-void llvm::initializeInstCombine(PassRegistry &Registry) {
+void llvm_seahorn::initializeInstCombine(PassRegistry &Registry) {
   initializeSeaInstructionCombiningPassPass(Registry);
-}
-
-void LLVMInitializeSeaInstCombine(LLVMPassRegistryRef R) {
-  initializeSeaInstructionCombiningPassPass(*unwrap(R));
 }
 
 FunctionPass *createSeaInstructionCombiningPass(bool ExpensiveCombines) {
   return new SeaInstructionCombiningPass(ExpensiveCombines);
 }
 
-void LLVMAddSeaInstructionCombiningPass(LLVMPassManagerRef PM) {
-  unwrap(PM)->add(createSeaInstructionCombiningPass());
-}
