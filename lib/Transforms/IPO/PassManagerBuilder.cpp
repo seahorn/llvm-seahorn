@@ -159,7 +159,7 @@ extern cl::opt<bool> FlattenedProfileUsed;
 extern cl::opt<bool> EnableOrderFileInstrumentation;
 
 static cl::opt<bool>
-    EnableMatrix("enable-matrix", cl::init(false), cl::Hidden,
+    EnableMatrix("seaopt-enable-matrix", cl::init(false), cl::Hidden,
                  cl::desc("Enable lowering of the matrix intrinsics"));
 
 PassManagerBuilder::PassManagerBuilder() {
