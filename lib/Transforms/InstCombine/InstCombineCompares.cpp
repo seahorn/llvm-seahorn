@@ -5187,7 +5187,7 @@ Instruction *InstCombiner::foldICmpUsingKnownBits(ICmpInst &I) {
 }
 
 llvm::Optional<std::pair<CmpInst::Predicate, Constant *>>
-llvm::getFlippedStrictnessPredicateAndConstant(CmpInst::Predicate Pred,
+llvm_seahorn::getFlippedStrictnessPredicateAndConstant(CmpInst::Predicate Pred,
                                                Constant *C) {
   assert(ICmpInst::isRelational(Pred) && ICmpInst::isIntPredicate(Pred) &&
          "Only for relational integer predicates.");

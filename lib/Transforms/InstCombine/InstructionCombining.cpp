@@ -3625,10 +3625,10 @@ static bool combineInstructionsOverFunction(
   return MadeIRChange;
 }
 
-InstCombinePass::InstCombinePass(bool ExpensiveCombines)
+SeaInstCombinePass::SeaInstCombinePass(bool ExpensiveCombines)
     : ExpensiveCombines(ExpensiveCombines), MaxIterations(LimitMaxIterations) {}
 
-InstCombinePass::InstCombinePass(bool ExpensiveCombines, unsigned MaxIterations)
+SeaInstCombinePass::SeaInstCombinePass(bool ExpensiveCombines, unsigned MaxIterations)
     : ExpensiveCombines(ExpensiveCombines), MaxIterations(MaxIterations) {}
 
 PreservedAnalyses SeaInstCombinePass::run(Function &F,
@@ -3735,10 +3735,6 @@ INITIALIZE_PASS_END(SeaInstructionCombiningPass, "sea-instcombine",
 // Initialization Routines
 void llvm_seahorn::initializeInstCombine(PassRegistry &Registry) {
   initializeSeaInstructionCombiningPassPass(Registry);
-}
-
-FunctionPass *createSeaInstructionCombiningPass(bool ExpensiveCombines) {
-  return new SeaInstructionCombiningPass(ExpensiveCombines);
 }
 
 FunctionPass *createSeaInstructionCombiningPass(bool ExpensiveCombines) {
