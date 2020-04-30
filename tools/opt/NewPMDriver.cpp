@@ -202,9 +202,11 @@ static void registerEPCallbacks(PassBuilder &PB, bool VerifyEachPass,
         });
 }
 
+#if 0 /*  SEAHORN REMOVE */
 #define HANDLE_EXTENSION(Ext)                                                  \
   llvm::PassPluginLibraryInfo get##Ext##PluginInfo();
 #include "llvm/Support/Extension.def"
+#endif
 
 bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
                            ToolOutputFile *Out, ToolOutputFile *ThinLTOLinkOut,
@@ -288,9 +290,11 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
         return false;
       });
 
+#if 0 /*  SEAHORN REMOVED */
 #define HANDLE_EXTENSION(Ext)                                                  \
   get##Ext##PluginInfo().RegisterPassBuilderCallbacks(PB);
 #include "llvm/Support/Extension.def"
+#endif
 
   // Specially handle the alias analysis manager so that we can register
   // a custom pipeline of AA passes with it.
