@@ -13,7 +13,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "NewPMDriver.h"
-#include "Debugify.h"
 #include "PassPrinters.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/AliasAnalysis.h"
@@ -35,6 +34,7 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/IPO/ThinLTOBitcodeWriter.h"
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
+#include "llvm/Transforms/Utils/Debugify.h"
 
 using namespace llvm;
 using namespace opt_tool;
@@ -201,13 +201,10 @@ static void registerEPCallbacks(PassBuilder &PB, bool VerifyEachPass,
                                    DebugLogging));
         });
 }
-#if 0 /*  SEAHORN REMOVE */
-#ifdef LINK_POLLY_INTO_TOOLS
-namespace polly {
-void RegisterPollyPasses(PassBuilder &);
-}
-#endif
-#endif
+
+#define HANDLE_EXTENSION(Ext)                                                  \
+  llvm::PassPluginLibraryInfo get##Ext##PluginInfo();
+#include "llvm/Support/Extension.def"
 
 bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
                            ToolOutputFile *Out, ToolOutputFile *ThinLTOLinkOut,
@@ -291,11 +288,9 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
         return false;
       });
 
-#if 0 /*  SEAHORN REMOVE */
-#ifdef LINK_POLLY_INTO_TOOLS
-  polly::RegisterPollyPasses(PB);
-#endif
-#endif
+#define HANDLE_EXTENSION(Ext)                                                  \
+  get##Ext##PluginInfo().RegisterPassBuilderCallbacks(PB);
+#include "llvm/Support/Extension.def"
 
   // Specially handle the alias analysis manager so that we can register
   // a custom pipeline of AA passes with it.
