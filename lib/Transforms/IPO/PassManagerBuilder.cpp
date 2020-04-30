@@ -14,6 +14,7 @@
 #include "llvm_seahorn/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm_seahorn/Transforms/Scalar.h"
 #include "llvm-c/Transforms/PassManagerBuilder.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/BasicAliasAnalysis.h"
 #include "llvm/Analysis/CFLAndersAliasAnalysis.h"
@@ -157,6 +158,10 @@ extern cl::opt<bool> FlattenedProfileUsed;
 
 extern cl::opt<bool> EnableOrderFileInstrumentation;
 
+static cl::opt<bool>
+    EnableMatrix("enable-matrix", cl::init(false), cl::Hidden,
+                 cl::desc("Enable lowering of the matrix intrinsics"));
+
 PassManagerBuilder::PassManagerBuilder() {
     OptLevel = 2;
     SizeLevel = 0;
@@ -193,8 +198,13 @@ PassManagerBuilder::~PassManagerBuilder() {
 }
 
 /// Set of global extensions, automatically added as part of the standard set.
-static ManagedStatic<SmallVector<std::pair<PassManagerBuilder::ExtensionPointTy,
-   PassManagerBuilder::ExtensionFn>, 8> > GlobalExtensions;
+static ManagedStatic<
+    SmallVector<std::tuple<PassManagerBuilder::ExtensionPointTy,
+                           PassManagerBuilder::ExtensionFn,
+                           PassManagerBuilder::GlobalExtensionID>,
+                8>>
+    GlobalExtensions;
+static PassManagerBuilder::GlobalExtensionID GlobalExtensionsCounter;
 
 /// Check if GlobalExtensions is constructed and not empty.
 /// Since GlobalExtensions is a managed static, calling 'empty()' will trigger
@@ -203,10 +213,29 @@ static bool GlobalExtensionsNotEmpty() {
   return GlobalExtensions.isConstructed() && !GlobalExtensions->empty();
 }
 
-void PassManagerBuilder::addGlobalExtension(
-    PassManagerBuilder::ExtensionPointTy Ty,
+PassManagerBuilder::GlobalExtensionID
+PassManagerBuilder::addGlobalExtension(PassManagerBuilder::ExtensionPointTy Ty,
     PassManagerBuilder::ExtensionFn Fn) {
-  GlobalExtensions->push_back(std::make_pair(Ty, std::move(Fn)));
+  auto ExtensionID = GlobalExtensionsCounter++;
+  GlobalExtensions->push_back(std::make_tuple(Ty, std::move(Fn), ExtensionID));
+  return ExtensionID;
+}
+
+void PassManagerBuilder::removeGlobalExtension(
+    PassManagerBuilder::GlobalExtensionID ExtensionID) {
+  // RegisterStandardPasses may try to call this function after GlobalExtensions
+  // has already been destroyed; doing so should not generate an error.
+  if (!GlobalExtensions.isConstructed())
+    return;
+
+  auto GlobalExtension =
+      llvm::find_if(*GlobalExtensions, [ExtensionID](const auto &elem) {
+        return std::get<2>(elem) == ExtensionID;
+      });
+  assert(GlobalExtension != GlobalExtensions->end() &&
+         "The extension ID to be removed should always be valid.");
+
+  GlobalExtensions->erase(GlobalExtension);
 }
 
 void PassManagerBuilder::addExtension(ExtensionPointTy Ty, ExtensionFn Fn) {
@@ -217,8 +246,8 @@ void PassManagerBuilder::addExtensionsToPM(ExtensionPointTy ETy,
                                            legacy::PassManagerBase &PM) const {
   if (GlobalExtensionsNotEmpty()) {
     for (auto &Ext : *GlobalExtensions) {
-      if (Ext.first == ETy)
-        Ext.second(*this, PM);
+      if (std::get<0>(Ext) == ETy)
+        std::get<1>(Ext)(*this, PM);
     }
   }
   for (unsigned i = 0, e = Extensions.size(); i != e; ++i)
@@ -330,19 +359,26 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
     legacy::PassManagerBase &MPM) {
   // Start of function pass.
   // Break up aggregate allocas, using SSAUpdater.
+  assert(OptLevel >= 1 && "Calling function optimizer with no optimization level!");
   MPM.add(createSROAPass());
   MPM.add(createEarlyCSEPass(true /* Enable mem-ssa. */)); // Catch trivial redundancies
+
+  if (OptLevel > 1) {
   if (EnableGVNHoist)
     MPM.add(createGVNHoistPass());
   if (EnableGVNSink) {
     MPM.add(createGVNSinkPass());
     MPM.add(createCFGSimplificationPass());
   }
+  }
 
+  if (OptLevel > 1) {
   // Speculative execution if the target has divergent branches; otherwise nop.
   MPM.add(createSpeculativeExecutionIfHasBranchDivergencePass());
+
   MPM.add(createJumpThreadingPass());         // Thread jumps.
   MPM.add(createCorrelatedValuePropagationPass()); // Propagate conditionals
+  }
   MPM.add(createCFGSimplificationPass());     // Merge & remove BBs
   // Combine silly seq's
   if (OptLevel > 2)
@@ -356,6 +392,8 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   if (SizeLevel == 0)
     MPM.add(createPGOMemOPSizeOptLegacyPass());
 
+  // TODO: Investigate the cost/benefit of tail call elimination on debugging.
+  if (OptLevel > 1)
   MPM.add(createTailCallEliminationPass()); // Eliminate tail calls
   MPM.add(createCFGSimplificationPass());     // Merge & remove BBs
   MPM.add(createReassociatePass());           // Reassociate expressions
@@ -370,6 +408,7 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   }
   // Rotate Loop - disable header duplication at -Oz
   MPM.add(createLoopRotatePass(SizeLevel == 2 ? 0 : -1));
+  // TODO: Investigate promotion cap for O1.
   MPM.add(createLICMPass(LicmMssaOptCap, LicmMssaNoAccForPromotionCap));
   if (EnableSimpleLoopUnswitch)
     MPM.add(createSimpleLoopUnswitchLegacyPass());
@@ -415,16 +454,19 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   // opened up by them.
   addInstructionCombiningPass(MPM);
   addExtensionsToPM(EP_Peephole, MPM);
+  if (OptLevel > 1) {
   MPM.add(createJumpThreadingPass());         // Thread jumps
   MPM.add(createCorrelatedValuePropagationPass());
   MPM.add(createDeadStoreEliminationPass());  // Delete dead stores
   MPM.add(createLICMPass(LicmMssaOptCap, LicmMssaNoAccForPromotionCap));
+  }
 
   addExtensionsToPM(EP_ScalarOptimizerLate, MPM);
 
   if (RerollLoops)
     MPM.add(createLoopRerollPass());
 
+  // TODO: Investigate if this is too expensive at O1.
   MPM.add(createAggressiveDCEPass());         // Delete dead instructions
   MPM.add(createCFGSimplificationPass()); // Merge & remove BBs
   // Clean up after everything.
@@ -672,6 +714,15 @@ void PassManagerBuilder::populateModulePassManager(
   MPM.add(createGlobalsAAWrapperPass());
 
   MPM.add(createFloat2IntPass());
+  MPM.add(createLowerConstantIntrinsicsPass());
+
+  if (EnableMatrix) {
+    MPM.add(createLowerMatrixIntrinsicsPass());
+    // CSE the pointer arithmetic of the column vectors.  This allows alias
+    // analysis to establish no-aliasing between loads and stores of different
+    // columns of the same matrix.
+    MPM.add(createEarlyCSEPass(false));
+  }
 
   addExtensionsToPM(EP_VectorizerStart, MPM);
 
@@ -916,6 +967,7 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
 
   // LTO provides additional opportunities for tailcall elimination due to
   // link-time inlining, and visibility of nocapture attribute.
+  if (OptLevel > 1)
   PM.add(createTailCallEliminationPass());
 
   // Infer attributes on declarations, call sites, arguments, etc.
