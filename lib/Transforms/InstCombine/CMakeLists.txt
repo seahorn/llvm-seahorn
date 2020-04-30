@@ -1,4 +1,4 @@
-add_llvm_library(SeaInstCombine
+add_llvm_component_library(SeaInstCombine
   InstructionCombining.cpp
   InstCombineAddSub.cpp
   InstCombineAtomicRMW.cpp

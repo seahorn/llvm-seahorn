@@ -26,13 +26,14 @@ using namespace llvm;
 
 class SeaInstCombinePass : public PassInfoMixin<SeaInstCombinePass> {
   InstCombineWorklist Worklist;
-  bool ExpensiveCombines;
+  const bool ExpensiveCombines;
+  const unsigned MaxIterations;
 
 public:
   static StringRef name() { return "SeaInstCombinePass"; }
 
-  explicit SeaInstCombinePass(bool ExpensiveCombines = true)
-      : ExpensiveCombines(ExpensiveCombines) {}
+  explicit SeaInstCombinePass(bool ExpensiveCombines = true);
+  explicit SeaInstCombinePass(bool ExpensiveCombines, unsigned MaxIterations);
 
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
 };
@@ -44,14 +45,14 @@ public:
 class SeaInstructionCombiningPass : public FunctionPass {
   InstCombineWorklist Worklist;
   const bool ExpensiveCombines;
+  const unsigned MaxIterations;
 
 public:
   static char ID; // Pass identification, replacement for typeid
 
-  SeaInstructionCombiningPass(bool ExpensiveCombines = true)
-      : FunctionPass(ID), ExpensiveCombines(ExpensiveCombines) {
-    initializeSeaInstructionCombiningPassPass(*PassRegistry::getPassRegistry());
-  }
+  explicit SeaInstructionCombiningPass(bool ExpensiveCombines = true);
+  explicit SeaInstructionCombiningPass(bool ExpensiveCombines,
+                                    unsigned MaxIterations);
 
   void getAnalysisUsage(AnalysisUsage &AU) const override;
   bool runOnFunction(Function &F) override;
@@ -73,5 +74,6 @@ void initializeInstCombine(llvm::PassRegistry &Registry);
 }
 
 llvm::FunctionPass *createSeaInstructionCombiningPass(bool ExpensiveCombines = true);
-
+llvm::FunctionPass *createSeaInstructionCombiningPass(bool ExpensiveCombines,
+                                             unsigned MaxIterations);
 #endif
