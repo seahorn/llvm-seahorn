@@ -88,13 +88,13 @@ public:
 } // namespace
 
 char SeaLoopRotateLegacyPass::ID = 0;
-INITIALIZE_PASS_BEGIN(SeaLoopRotateLegacyPass, "loop-rotate", "Rotate Loops",
+INITIALIZE_PASS_BEGIN(SeaLoopRotateLegacyPass, "sea-loop-rotate", "Rotate Loops",
                       false, false)
 INITIALIZE_PASS_DEPENDENCY(AssumptionCacheTracker)
 INITIALIZE_PASS_DEPENDENCY(LoopPass)
 INITIALIZE_PASS_DEPENDENCY(TargetTransformInfoWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(MemorySSAWrapperPass)
-INITIALIZE_PASS_END(SeaLoopRotateLegacyPass, "loop-rotate", "Rotate Loops",
+INITIALIZE_PASS_END(SeaLoopRotateLegacyPass, "sea-loop-rotate", "Rotate Loops",
                     false, false)
 
 Pass *llvm_seahorn::createLoopRotatePass(int MaxHeaderSize) {
