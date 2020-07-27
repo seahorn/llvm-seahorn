@@ -147,6 +147,9 @@ Instruction *InstCombiner::foldCmpLoadFromIndexedGlobal(GetElementPtrInst *GEP,
                                                         GlobalVariable *GV,
                                                         CmpInst &ICI,
                                                         ConstantInt *AndCst) {
+  if(AvoidBv)
+    return nullptr;
+
   Constant *Init = GV->getInitializer();
   if (!isa<ConstantArray>(Init) && !isa<ConstantDataArray>(Init))
     return nullptr;
