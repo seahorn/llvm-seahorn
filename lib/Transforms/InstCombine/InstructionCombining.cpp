@@ -134,6 +134,7 @@ static cl::opt<bool>
 EnableExpensiveCombines("seaopt-expensive-combines",
                         cl::desc("Enable expensive instruction combines"));
 
+
 static cl::opt<unsigned> LimitMaxIterations(
     "seaopt-instcombine-max-iterations",
     cl::desc("Limit the maximum number of instruction combining iterations"),
@@ -3567,6 +3568,7 @@ static bool combineInstructionsOverFunction(
     AssumptionCache &AC, TargetLibraryInfo &TLI, DominatorTree &DT,
     OptimizationRemarkEmitter &ORE, BlockFrequencyInfo *BFI,
     ProfileSummaryInfo *PSI, bool ExpensiveCombines, unsigned MaxIterations,
+    bool AvoidBv, bool AvoidUnsignedICmp, bool AvoidIntToPtr,
     LoopInfo *LI) {
   auto &DL = F.getParent()->getDataLayout();
   if (EnableExpensiveCombines.getNumOccurrences())
@@ -3612,8 +3614,10 @@ static bool combineInstructionsOverFunction(
 
     MadeIRChange |= prepareICWorklistFromFunction(F, DL, &TLI, Worklist);
 
-    InstCombiner IC(Worklist, Builder, F.hasMinSize(), ExpensiveCombines, AA,
-                    AC, TLI, DT, ORE, BFI, PSI, DL, LI);
+    InstCombiner IC(Worklist, Builder, F.hasMinSize(), ExpensiveCombines,
+		    AvoidBv, AvoidUnsignedICmp, AvoidIntToPtr,
+		    AA, AC, TLI, DT, ORE, BFI, PSI, DL, LI);
+                    
     IC.MaxArraySizeForCombine = MaxArraySize;
 
     if (!IC.run())
@@ -3625,11 +3629,21 @@ static bool combineInstructionsOverFunction(
   return MadeIRChange;
 }
 
-SeaInstCombinePass::SeaInstCombinePass(bool ExpensiveCombines)
-    : ExpensiveCombines(ExpensiveCombines), MaxIterations(LimitMaxIterations) {}
+SeaInstCombinePass::SeaInstCombinePass(bool ExpensiveCombines,
+				       bool AvoidBv,
+				       bool AvoidUnsignedICmp,
+				       bool AvoidIntToPtr)
+  : ExpensiveCombines(ExpensiveCombines), MaxIterations(LimitMaxIterations),
+    AvoidBv(AvoidBv), AvoidUnsignedICmp(AvoidUnsignedICmp),
+    AvoidIntToPtr(AvoidIntToPtr) {}
 
-SeaInstCombinePass::SeaInstCombinePass(bool ExpensiveCombines, unsigned MaxIterations)
-    : ExpensiveCombines(ExpensiveCombines), MaxIterations(MaxIterations) {}
+SeaInstCombinePass::SeaInstCombinePass(bool ExpensiveCombines, unsigned MaxIterations,
+				       bool AvoidBv,
+				       bool AvoidUnsignedICmp,
+				       bool AvoidIntToPtr)
+  : ExpensiveCombines(ExpensiveCombines), MaxIterations(MaxIterations),
+    AvoidBv(AvoidBv), AvoidUnsignedICmp(AvoidUnsignedICmp),
+    AvoidIntToPtr(AvoidIntToPtr){}
 
 PreservedAnalyses SeaInstCombinePass::run(Function &F,
                                        FunctionAnalysisManager &AM) {
@@ -3650,6 +3664,7 @@ PreservedAnalyses SeaInstCombinePass::run(Function &F,
 
   if (!combineInstructionsOverFunction(F, Worklist, AA, AC, TLI, DT, ORE, BFI,
                                        PSI, ExpensiveCombines, MaxIterations,
+				       AvoidBv, AvoidUnsignedICmp, AvoidIntToPtr,
                                        LI))
     // No changes, all analyses are preserved.
     return PreservedAnalyses::all();
@@ -3701,21 +3716,32 @@ bool SeaInstructionCombiningPass::runOnFunction(Function &F) {
 
   return combineInstructionsOverFunction(F, Worklist, AA, AC, TLI, DT, ORE, BFI,
                                          PSI, ExpensiveCombines, MaxIterations,
+					 AvoidBv, AvoidUnsignedICmp, AvoidIntToPtr,
                                          LI);
 }
 
 char SeaInstructionCombiningPass::ID = 0;
 
-SeaInstructionCombiningPass::SeaInstructionCombiningPass(bool ExpensiveCombines)
-    : FunctionPass(ID), ExpensiveCombines(ExpensiveCombines),
-      MaxIterations(InstCombineDefaultMaxIterations) {
+SeaInstructionCombiningPass::SeaInstructionCombiningPass(bool ExpensiveCombines,
+							 bool AvoidBv,
+							 bool AvoidUnsignedICmp,
+							 bool AvoidIntToPtr)
+  : FunctionPass(ID), ExpensiveCombines(ExpensiveCombines),    
+    MaxIterations(InstCombineDefaultMaxIterations),
+    AvoidBv(AvoidBv), AvoidUnsignedICmp(AvoidUnsignedICmp),
+    AvoidIntToPtr(AvoidIntToPtr) {
   initializeSeaInstructionCombiningPassPass(*PassRegistry::getPassRegistry());
 }
 
 SeaInstructionCombiningPass::SeaInstructionCombiningPass(bool ExpensiveCombines,
-                                                   unsigned MaxIterations)
+							 unsigned MaxIterations,
+							 bool AvoidBv,
+							 bool AvoidUnsignedICmp,
+							 bool AvoidIntToPtr)
     : FunctionPass(ID), ExpensiveCombines(ExpensiveCombines),
-      MaxIterations(MaxIterations) {
+      MaxIterations(MaxIterations),
+      AvoidBv(AvoidBv), AvoidUnsignedICmp(AvoidUnsignedICmp),
+      AvoidIntToPtr(AvoidIntToPtr) {
   initializeSeaInstructionCombiningPassPass(*PassRegistry::getPassRegistry());
 }
 
@@ -3738,12 +3764,22 @@ void llvm_seahorn::initializeInstCombine(PassRegistry &Registry) {
 }
 
 FunctionPass *createSeaInstructionCombiningPass(bool ExpensiveCombines) {
-  return new SeaInstructionCombiningPass(ExpensiveCombines);
+  const bool AvoidBv = true;
+  const bool AvoidUnsignedICmp = true;
+  const bool AvoidIntToPtr = true;
+  return new SeaInstructionCombiningPass(ExpensiveCombines,
+					 AvoidBv, AvoidUnsignedICmp,
+					 AvoidIntToPtr);
 }
 
 FunctionPass *createSeaInstructionCombiningPass(bool ExpensiveCombines,
-                                                   unsigned MaxIterations) {
-  return new SeaInstructionCombiningPass(ExpensiveCombines, MaxIterations);
+						unsigned MaxIterations,
+						bool AvoidBv,
+						bool AvoidUnsignedICmp,
+						bool AvoidIntToPtr) {
+  return new SeaInstructionCombiningPass(ExpensiveCombines, MaxIterations,
+					 AvoidBv, AvoidUnsignedICmp,
+					 AvoidIntToPtr);
 }
 
 

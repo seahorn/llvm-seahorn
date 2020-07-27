@@ -28,12 +28,21 @@ class SeaInstCombinePass : public PassInfoMixin<SeaInstCombinePass> {
   InstCombineWorklist Worklist;
   const bool ExpensiveCombines;
   const unsigned MaxIterations;
+  const bool AvoidBv;
+  const bool AvoidUnsignedICmp;
+  const bool AvoidIntToPtr;
 
 public:
   static StringRef name() { return "SeaInstCombinePass"; }
 
-  explicit SeaInstCombinePass(bool ExpensiveCombines = true);
-  explicit SeaInstCombinePass(bool ExpensiveCombines, unsigned MaxIterations);
+  explicit SeaInstCombinePass(bool ExpensiveCombines = true,
+			      bool AvoidBv = true,
+			      bool AvoidUnsignedICmp = true,
+			      bool AvoidIntToPtr = true);
+  explicit SeaInstCombinePass(bool ExpensiveCombines, unsigned MaxIterations,
+			      bool AvoidBv,
+			      bool AvoidUnsignedICmp,
+			      bool AvoidIntToPtr);
 
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
 };
@@ -46,13 +55,22 @@ class SeaInstructionCombiningPass : public FunctionPass {
   InstCombineWorklist Worklist;
   const bool ExpensiveCombines;
   const unsigned MaxIterations;
+  const bool AvoidBv;
+  const bool AvoidUnsignedICmp;
+  const bool AvoidIntToPtr;
 
 public:
   static char ID; // Pass identification, replacement for typeid
 
-  explicit SeaInstructionCombiningPass(bool ExpensiveCombines = true);
+  explicit SeaInstructionCombiningPass(bool ExpensiveCombines = true,
+				       bool AvoidBv = true,
+				       bool AvoidUnsignedICmp = true,
+				       bool AvoidIntToPtr = true);
   explicit SeaInstructionCombiningPass(bool ExpensiveCombines,
-                                    unsigned MaxIterations);
+				       unsigned MaxIterations,
+				       bool AvoidBv,
+				       bool AvoidUnsignedICmp,
+				       bool AvoidIntToPtr);
 
   void getAnalysisUsage(AnalysisUsage &AU) const override;
   bool runOnFunction(Function &F) override;
@@ -75,5 +93,8 @@ void initializeInstCombine(llvm::PassRegistry &Registry);
 
 llvm::FunctionPass *createSeaInstructionCombiningPass(bool ExpensiveCombines = true);
 llvm::FunctionPass *createSeaInstructionCombiningPass(bool ExpensiveCombines,
-                                             unsigned MaxIterations);
+						      unsigned MaxIterations,
+						      bool AvoidBv,
+						      bool AvoidUnsignedICmp,
+						      bool AvoidIntToPtr);
 #endif

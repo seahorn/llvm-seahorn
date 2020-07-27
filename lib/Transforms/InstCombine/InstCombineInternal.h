@@ -349,12 +349,20 @@ private:
 
 public:
   InstCombiner(InstCombineWorklist &Worklist, BuilderTy &Builder,
-               bool MinimizeSize, bool ExpensiveCombines, AliasAnalysis *AA,
+               bool MinimizeSize, bool ExpensiveCombines,
+#if 1 /* SEAHORN ADD */	       
+	       bool AvoidBv, bool AvoidUnsignedICmp, bool AvoidIntToPtr,
+#endif 	       
+	       AliasAnalysis *AA,
                AssumptionCache &AC, TargetLibraryInfo &TLI, DominatorTree &DT,
                OptimizationRemarkEmitter &ORE, BlockFrequencyInfo *BFI,
                ProfileSummaryInfo *PSI, const DataLayout &DL, LoopInfo *LI)
       : Worklist(Worklist), Builder(Builder), MinimizeSize(MinimizeSize),
-        ExpensiveCombines(ExpensiveCombines), AA(AA), AC(AC), TLI(TLI), DT(DT),
+        ExpensiveCombines(ExpensiveCombines),
+#if 1 /* SEAHORN ADD */    
+        AvoidBv(AvoidBv), AvoidUnsignedICmp(AvoidUnsignedICmp), AvoidIntToPtr(AvoidIntToPtr),
+#endif     
+        AA(AA), AC(AC), TLI(TLI), DT(DT),
         DL(DL), SQ(DL, &TLI, &DT, &AC), ORE(ORE), BFI(BFI), PSI(PSI), LI(LI) {}
 
   /// Run the combiner over the entire worklist until it is empty.
