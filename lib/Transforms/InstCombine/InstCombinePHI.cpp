@@ -503,7 +503,20 @@ Instruction *InstCombiner::FoldPHIArgGEPIntoPHI(PHINode &PN) {
 /// Finally, it is safe, but not profitable, to sink a load targeting a
 /// non-address-taken alloca.  Doing so will cause us to not promote the alloca
 /// to a register.
-static bool isSafeAndProfitableToSinkLoad(LoadInst *L) {
+///
+/// llvm-seahorn: If we sink load instructions, we may introduce aliasing. This
+/// means that its not profitable to sink a load whenever the AvoidAliasing flag
+/// is set. However, this method is static, so the AvoidAliasing flag is
+/// forwarded as an argument.
+static bool isSafeAndProfitableToSinkLoad(LoadInst *L, bool AvoidAliasing) {
+  // begin: llvm-seahorn
+  // The compiler will check if it is 'safe and profitable' to sink a load, when
+  // there is an opportunity to merge two or more load instructions. If we merge
+  // these nodes, they can alias.
+  if (AvoidAliasing)
+    return false;
+  // end: llvm-seahorn
+
   BasicBlock::iterator BBI = L->getIterator(), E = L->getParent()->end();
 
   for (++BBI; BBI != E; ++BBI)
@@ -561,7 +574,7 @@ Instruction *InstCombiner::FoldPHIArgLoadIntoPHI(PHINode &PN) {
   // We can't sink the load if the loaded value could be modified between the
   // load and the PHI.
   if (FirstLI->getParent() != PN.getIncomingBlock(0) ||
-      !isSafeAndProfitableToSinkLoad(FirstLI))
+      !isSafeAndProfitableToSinkLoad(FirstLI, AvoidAliasing))
     return nullptr;
 
   // If the PHI is of volatile loads and the load block has multiple
@@ -582,7 +595,7 @@ Instruction *InstCombiner::FoldPHIArgLoadIntoPHI(PHINode &PN) {
     if (LI->isVolatile() != isVolatile ||
         LI->getParent() != PN.getIncomingBlock(i) ||
         LI->getPointerAddressSpace() != LoadAddrSpace ||
-        !isSafeAndProfitableToSinkLoad(LI))
+        !isSafeAndProfitableToSinkLoad(LI, AvoidAliasing))
       return nullptr;
 
     // If some of the loads have an alignment specified but not all of them,
