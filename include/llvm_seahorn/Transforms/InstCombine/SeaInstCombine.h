@@ -31,6 +31,7 @@ class SeaInstCombinePass : public PassInfoMixin<SeaInstCombinePass> {
   const bool AvoidBv;
   const bool AvoidUnsignedICmp;
   const bool AvoidIntToPtr;
+  const bool AvoidAliasing;
 
 public:
   static StringRef name() { return "SeaInstCombinePass"; }
@@ -38,11 +39,13 @@ public:
   explicit SeaInstCombinePass(bool ExpensiveCombines = true,
 			      bool AvoidBv = true,
 			      bool AvoidUnsignedICmp = true,
-			      bool AvoidIntToPtr = true);
+			      bool AvoidIntToPtr = true,
+			      bool AvoidAliasing = true);
   explicit SeaInstCombinePass(bool ExpensiveCombines, unsigned MaxIterations,
 			      bool AvoidBv,
 			      bool AvoidUnsignedICmp,
-			      bool AvoidIntToPtr);
+			      bool AvoidIntToPtr,
+			      bool AvoidAliasing);
 
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
 };
@@ -58,6 +61,7 @@ class SeaInstructionCombiningPass : public FunctionPass {
   const bool AvoidBv;
   const bool AvoidUnsignedICmp;
   const bool AvoidIntToPtr;
+  const bool AvoidAliasing;
 
 public:
   static char ID; // Pass identification, replacement for typeid
@@ -65,12 +69,14 @@ public:
   explicit SeaInstructionCombiningPass(bool ExpensiveCombines = true,
 				       bool AvoidBv = true,
 				       bool AvoidUnsignedICmp = true,
-				       bool AvoidIntToPtr = true);
+				       bool AvoidIntToPtr = true,
+				       bool AvoidAliasing = true);
   explicit SeaInstructionCombiningPass(bool ExpensiveCombines,
 				       unsigned MaxIterations,
 				       bool AvoidBv,
 				       bool AvoidUnsignedICmp,
-				       bool AvoidIntToPtr);
+				       bool AvoidIntToPtr,
+				       bool AvoidAliasing);
 
   void getAnalysisUsage(AnalysisUsage &AU) const override;
   bool runOnFunction(Function &F) override;

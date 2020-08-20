@@ -3568,7 +3568,7 @@ static bool combineInstructionsOverFunction(
     AssumptionCache &AC, TargetLibraryInfo &TLI, DominatorTree &DT,
     OptimizationRemarkEmitter &ORE, BlockFrequencyInfo *BFI,
     ProfileSummaryInfo *PSI, bool ExpensiveCombines, unsigned MaxIterations,
-    bool AvoidBv, bool AvoidUnsignedICmp, bool AvoidIntToPtr,
+    bool AvoidBv, bool AvoidUnsignedICmp, bool AvoidIntToPtr, bool AvoidAliasing,
     LoopInfo *LI) {
   auto &DL = F.getParent()->getDataLayout();
   if (EnableExpensiveCombines.getNumOccurrences())
@@ -3615,7 +3615,7 @@ static bool combineInstructionsOverFunction(
     MadeIRChange |= prepareICWorklistFromFunction(F, DL, &TLI, Worklist);
 
     InstCombiner IC(Worklist, Builder, F.hasMinSize(), ExpensiveCombines,
-		    AvoidBv, AvoidUnsignedICmp, AvoidIntToPtr,
+		    AvoidBv, AvoidUnsignedICmp, AvoidIntToPtr, AvoidAliasing,
 		    AA, AC, TLI, DT, ORE, BFI, PSI, DL, LI);
                     
     IC.MaxArraySizeForCombine = MaxArraySize;
@@ -3632,18 +3632,20 @@ static bool combineInstructionsOverFunction(
 SeaInstCombinePass::SeaInstCombinePass(bool ExpensiveCombines,
 				       bool AvoidBv,
 				       bool AvoidUnsignedICmp,
-				       bool AvoidIntToPtr)
+				       bool AvoidIntToPtr,
+				       bool AvoidAliasing)
   : ExpensiveCombines(ExpensiveCombines), MaxIterations(LimitMaxIterations),
     AvoidBv(AvoidBv), AvoidUnsignedICmp(AvoidUnsignedICmp),
-    AvoidIntToPtr(AvoidIntToPtr) {}
+    AvoidIntToPtr(AvoidIntToPtr), AvoidAliasing(AvoidAliasing) {}
 
 SeaInstCombinePass::SeaInstCombinePass(bool ExpensiveCombines, unsigned MaxIterations,
 				       bool AvoidBv,
 				       bool AvoidUnsignedICmp,
-				       bool AvoidIntToPtr)
+				       bool AvoidIntToPtr,
+				       bool AvoidAliasing)
   : ExpensiveCombines(ExpensiveCombines), MaxIterations(MaxIterations),
     AvoidBv(AvoidBv), AvoidUnsignedICmp(AvoidUnsignedICmp),
-    AvoidIntToPtr(AvoidIntToPtr){}
+    AvoidIntToPtr(AvoidIntToPtr), AvoidAliasing(AvoidAliasing) {}
 
 PreservedAnalyses SeaInstCombinePass::run(Function &F,
                                        FunctionAnalysisManager &AM) {
@@ -3664,8 +3666,8 @@ PreservedAnalyses SeaInstCombinePass::run(Function &F,
 
   if (!combineInstructionsOverFunction(F, Worklist, AA, AC, TLI, DT, ORE, BFI,
                                        PSI, ExpensiveCombines, MaxIterations,
-				       AvoidBv, AvoidUnsignedICmp, AvoidIntToPtr,
-                                       LI))
+                                       AvoidBv, AvoidUnsignedICmp, AvoidIntToPtr,
+                                       AvoidAliasing, LI))
     // No changes, all analyses are preserved.
     return PreservedAnalyses::all();
 
@@ -3716,8 +3718,8 @@ bool SeaInstructionCombiningPass::runOnFunction(Function &F) {
 
   return combineInstructionsOverFunction(F, Worklist, AA, AC, TLI, DT, ORE, BFI,
                                          PSI, ExpensiveCombines, MaxIterations,
-					 AvoidBv, AvoidUnsignedICmp, AvoidIntToPtr,
-                                         LI);
+                                         AvoidBv, AvoidUnsignedICmp, AvoidIntToPtr,
+                                         AvoidAliasing, LI);
 }
 
 char SeaInstructionCombiningPass::ID = 0;
@@ -3725,11 +3727,12 @@ char SeaInstructionCombiningPass::ID = 0;
 SeaInstructionCombiningPass::SeaInstructionCombiningPass(bool ExpensiveCombines,
 							 bool AvoidBv,
 							 bool AvoidUnsignedICmp,
-							 bool AvoidIntToPtr)
+							 bool AvoidIntToPtr,
+							 bool AvoidAliasing)
   : FunctionPass(ID), ExpensiveCombines(ExpensiveCombines),    
     MaxIterations(InstCombineDefaultMaxIterations),
     AvoidBv(AvoidBv), AvoidUnsignedICmp(AvoidUnsignedICmp),
-    AvoidIntToPtr(AvoidIntToPtr) {
+    AvoidIntToPtr(AvoidIntToPtr), AvoidAliasing(AvoidAliasing) {
   initializeSeaInstructionCombiningPassPass(*PassRegistry::getPassRegistry());
 }
 
@@ -3737,11 +3740,12 @@ SeaInstructionCombiningPass::SeaInstructionCombiningPass(bool ExpensiveCombines,
 							 unsigned MaxIterations,
 							 bool AvoidBv,
 							 bool AvoidUnsignedICmp,
-							 bool AvoidIntToPtr)
+							 bool AvoidIntToPtr,
+							 bool AvoidAliasing)
     : FunctionPass(ID), ExpensiveCombines(ExpensiveCombines),
       MaxIterations(MaxIterations),
       AvoidBv(AvoidBv), AvoidUnsignedICmp(AvoidUnsignedICmp),
-      AvoidIntToPtr(AvoidIntToPtr) {
+      AvoidIntToPtr(AvoidIntToPtr), AvoidAliasing(AvoidAliasing) {
   initializeSeaInstructionCombiningPassPass(*PassRegistry::getPassRegistry());
 }
 

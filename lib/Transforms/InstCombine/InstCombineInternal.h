@@ -327,6 +327,8 @@ private:
   // Avoid generating IntToPtr instructions.
   // /Accessible with IC.seaAvoidIntToPtr().
   bool AvoidIntToPtr;
+  // Avoid transformations which introduce new aliasing.
+  bool AvoidAliasing;
 #endif
 
   AliasAnalysis *AA;
@@ -351,9 +353,10 @@ public:
   InstCombiner(InstCombineWorklist &Worklist, BuilderTy &Builder,
                bool MinimizeSize, bool ExpensiveCombines,
 #if 1 /* SEAHORN ADD */	       
-	       bool AvoidBv, bool AvoidUnsignedICmp, bool AvoidIntToPtr,
+               bool AvoidBv, bool AvoidUnsignedICmp, bool AvoidIntToPtr,
+               bool AvoidAliasing,
 #endif 	       
-	       AliasAnalysis *AA,
+               AliasAnalysis *AA,
                AssumptionCache &AC, TargetLibraryInfo &TLI, DominatorTree &DT,
                OptimizationRemarkEmitter &ORE, BlockFrequencyInfo *BFI,
                ProfileSummaryInfo *PSI, const DataLayout &DL, LoopInfo *LI)
@@ -361,6 +364,7 @@ public:
         ExpensiveCombines(ExpensiveCombines),
 #if 1 /* SEAHORN ADD */    
         AvoidBv(AvoidBv), AvoidUnsignedICmp(AvoidUnsignedICmp), AvoidIntToPtr(AvoidIntToPtr),
+        AvoidAliasing(AvoidAliasing),
 #endif     
         AA(AA), AC(AC), TLI(TLI), DT(DT),
         DL(DL), SQ(DL, &TLI, &DT, &AC), ORE(ORE), BFI(BFI), PSI(PSI), LI(LI) {}
