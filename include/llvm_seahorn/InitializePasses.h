@@ -20,6 +20,7 @@ namespace llvm {
 void initializeSeaIndVarSimplifyLegacyPassPass(PassRegistry &);
 void initializeSeaInstructionCombiningPassPass(PassRegistry &);
 void initializeSeaLoopRotateLegacyPassPass(PassRegistry &);
+void initializeSeaLoopUnrollPass(PassRegistry &);
 } // end namespace llvm
 
 #endif // SEA_LLVM_INITIALIZEPASSES_H

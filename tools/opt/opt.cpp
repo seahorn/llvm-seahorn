@@ -568,6 +568,7 @@ int main(int argc, char **argv) {
 
   initializeSeaIndVarSimplifyLegacyPassPass(Registry);
   initializeSeaInstructionCombiningPassPass(Registry);
+  initializeSeaLoopUnrollPass(Registry);
 
 
 #ifdef BUILD_EXAMPLES

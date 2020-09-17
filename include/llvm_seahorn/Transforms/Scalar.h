@@ -13,6 +13,9 @@ namespace llvm_seahorn {
 llvm::Pass *createIndVarSimplifyPass();
 llvm::Pass *createFakeLatchExitPass();
 llvm::Pass *createLoopRotatePass(int MaxHeaderSize = -1);
+llvm::Pass *createSeaLoopUnrollPass(int OptLevel, bool ForgetAllSCEV, int Count,
+                                    int AllowPartial, int UpperBound,
+                                    int AllowPeeling);
 } // namespace llvm_seahorn
 
 #endif
