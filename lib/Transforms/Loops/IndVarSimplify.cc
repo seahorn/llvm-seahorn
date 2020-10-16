@@ -2504,7 +2504,17 @@ linearFunctionTestReplace(Loop *L, BasicBlock *ExitingBB,
 #if 0 /* SEAHORN REPLACE  */
     P = ICmpInst::ICMP_NE;
 #else
-    P = ICmpInst::ICMP_SLT;
+    P = ICmpInst::ICMP_NE;
+    if (auto *cmp = dyn_cast<ICmpInst>(BI->getCondition())) {
+      switch (cmp->getPredicate()) {
+      case ICmpInst::ICMP_SLT:
+      case ICmpInst::ICMP_ULT:
+        // -- preserve SLT/ULT predicate
+        P = cmp->getPredicate();
+      defaut:
+        P = ICmpInst::ICMP_NE;
+      }
+    }
 #endif
   } else
     P = ICmpInst::ICMP_EQ;
@@ -2514,10 +2524,11 @@ linearFunctionTestReplace(Loop *L, BasicBlock *ExitingBB,
 #if 0
                     << "       op:\t" << (P == ICmpInst::ICMP_NE ? "!=" : "==")
 #else
-                    << "       op:\t" << (P == ICmpInst::ICMP_EQ ? "==" : "<")
+                    << "       op:\t" << (P == ICmpInst::ICMP_EQ ? "==" : "<s")
 #endif
                     << "\n"
-                    << "      RHS:\t" << *ExitCnt << "\n");
+                    << "      RHS:\t" << *ExitCnt << "\n"
+                    << "  was: " << *BI->getCondition() << "\n");
 
   IRBuilder<> Builder(BI);
 
@@ -2572,7 +2583,11 @@ linearFunctionTestReplace(Loop *L, BasicBlock *ExitingBB,
   }
   LLVM_DEBUG(dbgs() << "INDVARS: Rewriting loop exit condition to:\n"
                     << "      LHS:" << *CmpIndVar << '\n'
+#if 0
                     << "       op:\t" << (P == ICmpInst::ICMP_NE ? "!=" : "==")
+#else
+                    << "       op:\t" << (P == ICmpInst::ICMP_EQ ? "==" : "<s")
+#endif
                     << "\n"
                     << "      RHS:\t" << *ExitCnt << "\n"
                     << "ExitCount:\t" << *ExitCount << "\n"
