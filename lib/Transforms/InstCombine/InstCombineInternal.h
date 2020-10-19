@@ -329,6 +329,8 @@ private:
   bool AvoidIntToPtr;
   // Avoid transformations which introduce new aliasing.
   bool AvoidAliasing;
+  // Avoid transforming inequalities to disequalities
+  bool AvoidDisequalities;
 #endif
 
   AliasAnalysis *AA;
@@ -354,7 +356,7 @@ public:
                bool MinimizeSize, bool ExpensiveCombines,
 #if 1 /* SEAHORN ADD */	       
                bool AvoidBv, bool AvoidUnsignedICmp, bool AvoidIntToPtr,
-               bool AvoidAliasing,
+               bool AvoidAliasing, bool AvoidDisequalities,
 #endif 	       
                AliasAnalysis *AA,
                AssumptionCache &AC, TargetLibraryInfo &TLI, DominatorTree &DT,
@@ -364,7 +366,7 @@ public:
         ExpensiveCombines(ExpensiveCombines),
 #if 1 /* SEAHORN ADD */    
         AvoidBv(AvoidBv), AvoidUnsignedICmp(AvoidUnsignedICmp), AvoidIntToPtr(AvoidIntToPtr),
-        AvoidAliasing(AvoidAliasing),
+        AvoidAliasing(AvoidAliasing), AvoidDisequalities(AvoidDisequalities),
 #endif     
         AA(AA), AC(AC), TLI(TLI), DT(DT),
         DL(DL), SQ(DL, &TLI, &DT, &AC), ORE(ORE), BFI(BFI), PSI(PSI), LI(LI) {}
@@ -823,6 +825,7 @@ public:
 #if 1 /* ADD SEAHORN */
   bool seaAvoidIntToPtr() const { return AvoidIntToPtr; }
   bool seaAvoidBv() const { return AvoidBv; }
+  bool seaAvoidDisequalities() const { return AvoidDisequalities; }
 #endif 
 
 private:

@@ -5072,8 +5072,10 @@ Instruction *InstCombiner::foldICmpUsingKnownBits(ICmpInst &I) {
       return replaceInstUsesWith(I, ConstantInt::getTrue(I.getType()));
     if (Op0Min.uge(Op1Max)) // A <u B -> false if min(A) >= max(B)
       return replaceInstUsesWith(I, ConstantInt::getFalse(I.getType()));
-    if (Op1Min == Op0Max) // A <u B -> A != B if max(A) == min(B)
-      return new ICmpInst(ICmpInst::ICMP_NE, Op0, Op1);
+    if (!AvoidDisequalities) {
+      if (Op1Min == Op0Max) // A <u B -> A != B if max(A) == min(B)
+	return new ICmpInst(ICmpInst::ICMP_NE, Op0, Op1);
+    }
 
     const APInt *CmpC;
     if (match(Op1, m_APInt(CmpC))) {
@@ -5094,8 +5096,10 @@ Instruction *InstCombiner::foldICmpUsingKnownBits(ICmpInst &I) {
       return replaceInstUsesWith(I, ConstantInt::getTrue(I.getType()));
     if (Op0Max.ule(Op1Min)) // A >u B -> false if max(A) <= max(B)
       return replaceInstUsesWith(I, ConstantInt::getFalse(I.getType()));
-    if (Op1Max == Op0Min) // A >u B -> A != B if min(A) == max(B)
-      return new ICmpInst(ICmpInst::ICMP_NE, Op0, Op1);
+    if (!AvoidDisequalities) {    
+       if (Op1Max == Op0Min) // A >u B -> A != B if min(A) == max(B)
+	 return new ICmpInst(ICmpInst::ICMP_NE, Op0, Op1);
+    }
 
     const APInt *CmpC;
     if (match(Op1, m_APInt(CmpC))) {
@@ -5105,9 +5109,11 @@ Instruction *InstCombiner::foldICmpUsingKnownBits(ICmpInst &I) {
                             ConstantInt::get(Op1->getType(), *CmpC + 1));
       // X >u C --> X != 0, if the number of zero bits in the bottom of X
       // exceeds the log2 of C.
-      if (Op0Known.countMinTrailingZeros() >= CmpC->getActiveBits())
-        return new ICmpInst(ICmpInst::ICMP_NE, Op0,
-                            Constant::getNullValue(Op1->getType()));
+      if (!AvoidDisequalities) {    
+	if (Op0Known.countMinTrailingZeros() >= CmpC->getActiveBits())
+	  return new ICmpInst(ICmpInst::ICMP_NE, Op0,
+			      Constant::getNullValue(Op1->getType()));
+      }
     }
     break;
   }
@@ -5116,8 +5122,11 @@ Instruction *InstCombiner::foldICmpUsingKnownBits(ICmpInst &I) {
       return replaceInstUsesWith(I, ConstantInt::getTrue(I.getType()));
     if (Op0Min.sge(Op1Max)) // A <s B -> false if min(A) >= max(C)
       return replaceInstUsesWith(I, ConstantInt::getFalse(I.getType()));
-    if (Op1Min == Op0Max) // A <s B -> A != B if max(A) == min(B)
-      return new ICmpInst(ICmpInst::ICMP_NE, Op0, Op1);
+    if (!AvoidDisequalities) {    
+      if (Op1Min == Op0Max) // A <s B -> A != B if max(A) == min(B)
+	return new ICmpInst(ICmpInst::ICMP_NE, Op0, Op1);
+    }
+    
     const APInt *CmpC;
     if (match(Op1, m_APInt(CmpC))) {
       if (*CmpC == Op0Min + 1) // A <s C -> A == C-1 if min(A)+1 == C
@@ -5131,8 +5140,10 @@ Instruction *InstCombiner::foldICmpUsingKnownBits(ICmpInst &I) {
       return replaceInstUsesWith(I, ConstantInt::getTrue(I.getType()));
     if (Op0Max.sle(Op1Min)) // A >s B -> false if max(A) <= min(B)
       return replaceInstUsesWith(I, ConstantInt::getFalse(I.getType()));
-    if (Op1Max == Op0Min) // A >s B -> A != B if min(A) == max(B)
-      return new ICmpInst(ICmpInst::ICMP_NE, Op0, Op1);
+    if (!AvoidDisequalities) {        
+      if (Op1Max == Op0Min) // A >s B -> A != B if min(A) == max(B)
+	return new ICmpInst(ICmpInst::ICMP_NE, Op0, Op1);
+    }
     const APInt *CmpC;
     if (match(Op1, m_APInt(CmpC))) {
       if (*CmpC == Op0Max - 1) // A >s C -> A == C+1 if max(A)-1 == C

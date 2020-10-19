@@ -32,6 +32,7 @@ class SeaInstCombinePass : public PassInfoMixin<SeaInstCombinePass> {
   const bool AvoidUnsignedICmp;
   const bool AvoidIntToPtr;
   const bool AvoidAliasing;
+  const bool AvoidDisequalities;
 
 public:
   static StringRef name() { return "SeaInstCombinePass"; }
@@ -40,12 +41,14 @@ public:
 			      bool AvoidBv = true,
 			      bool AvoidUnsignedICmp = true,
 			      bool AvoidIntToPtr = true,
-			      bool AvoidAliasing = true);
+			      bool AvoidAliasing = true,
+			      bool AvoidDisequalities = false);
   explicit SeaInstCombinePass(bool ExpensiveCombines, unsigned MaxIterations,
 			      bool AvoidBv,
 			      bool AvoidUnsignedICmp,
 			      bool AvoidIntToPtr,
-			      bool AvoidAliasing);
+			      bool AvoidAliasing,
+			      bool AvoidDisequalities);
 
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
 };
@@ -62,6 +65,7 @@ class SeaInstructionCombiningPass : public FunctionPass {
   const bool AvoidUnsignedICmp;
   const bool AvoidIntToPtr;
   const bool AvoidAliasing;
+  const bool AvoidDisequalities;
 
 public:
   static char ID; // Pass identification, replacement for typeid
@@ -70,13 +74,15 @@ public:
 				       bool AvoidBv = true,
 				       bool AvoidUnsignedICmp = true,
 				       bool AvoidIntToPtr = true,
-				       bool AvoidAliasing = true);
+				       bool AvoidAliasing = true,
+				       bool AvoidDisequalities = false);
   explicit SeaInstructionCombiningPass(bool ExpensiveCombines,
 				       unsigned MaxIterations,
 				       bool AvoidBv,
 				       bool AvoidUnsignedICmp,
 				       bool AvoidIntToPtr,
-				       bool AvoidAliasing);
+				       bool AvoidAliasing,
+				       bool AvoidDisequalities);
 
   void getAnalysisUsage(AnalysisUsage &AU) const override;
   bool runOnFunction(Function &F) override;
@@ -102,5 +108,7 @@ llvm::FunctionPass *createSeaInstructionCombiningPass(bool ExpensiveCombines,
 						      unsigned MaxIterations,
 						      bool AvoidBv,
 						      bool AvoidUnsignedICmp,
-						      bool AvoidIntToPtr);
+						      bool AvoidIntToPtr,
+						      bool AvoidAliasing,
+						      bool AvoidDisequalities);
 #endif
