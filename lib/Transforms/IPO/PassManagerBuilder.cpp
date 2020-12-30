@@ -49,6 +49,12 @@
 #include "llvm/Transforms/Vectorize/LoopVectorize.h"
 #include "llvm/Transforms/Vectorize/SLPVectorizer.h"
 
+#if 1 /* SEAHORN ADD (SEADSA) */
+#include "seadsa/SeaDsaAliasAnalysis.hh"
+//#include "seadsa/DsaLibFuncInfo.hh"
+#include "seadsa/support/RemovePtrToInt.hh"
+#endif
+
 using namespace llvm;
 using namespace llvm_seahorn;
 
@@ -97,6 +103,11 @@ static cl::opt<CFLAAType>
                                    "Enable inclusion-based CFL-AA"),
                         clEnumValN(CFLAAType::Both, "both",
                                    "Enable both variants of CFL-AA")));
+
+static cl::opt<bool>
+UseSeaDsa(
+    "seaopt-use-seadsa-aa", cl::init(false), 
+    cl::desc("Enable the SeaDsa-based alias analysis"));
 
 static cl::opt<bool> EnableLoopInterchange(
     "seaopt-enable-loopinterchange", cl::init(false), cl::Hidden,
@@ -272,6 +283,22 @@ void PassManagerBuilder::addInitialAliasAnalysisPasses(
     break;
   }
 
+
+#if 1 /* SEAHORN ADD (SEADSA) */
+  if (UseSeaDsa) {
+    PM.add(seadsa::createRemovePtrToIntPass());
+    //PM.add(seadsa::createDsaLibFuncInfoPass());
+    PM.add(seadsa::createSeaDsaAAWrapperPass());
+    // -- make available through AAResultsWrapperPass via ExternalAAWrapperPass
+    PM.add(createExternalAAWrapperPass(
+      [](llvm::Pass &P, llvm::Function &, llvm::AAResults &AAR) {
+        if (auto *WrapperPass =
+                P.getAnalysisIfAvailable<seadsa::SeaDsaAAWrapperPass>())
+          AAR.addAAResult(WrapperPass->getResult());
+      }));
+  }
+#endif
+  
   // Add TypeBasedAliasAnalysis before BasicAliasAnalysis so that
   // BasicAliasAnalysis wins if they disagree. This is intended to help
   // support "obvious" type-punning idioms.

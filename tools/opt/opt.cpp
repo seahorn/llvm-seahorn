@@ -60,6 +60,11 @@
 #include "llvm/Transforms/Utils/Debugify.h"
 #include <algorithm>
 #include <memory>
+
+#if 1 /* SEAHORN ADD (SEADSA) */
+#include "seadsa/InitializePasses.hh"
+#endif
+
 using namespace llvm;
 using namespace opt_tool;
 
@@ -570,7 +575,16 @@ int main(int argc, char **argv) {
   initializeSeaInstructionCombiningPassPass(Registry);
   initializeSeaLoopUnrollPass(Registry);
 
-
+#if 1 /* SEAHORN ADD (SEADSA) */
+  initializeRemovePtrToIntPass(Registry);
+  initializeDsaAnalysisPass(Registry);
+  initializeAllocWrapInfoPass(Registry);
+  //initializeDsaLibFuncInfoPass(Registry);
+  initializeAllocSiteInfoPass(Registry);
+  initializeCompleteCallGraphPass(Registry);
+  initializeSeaDsaAAWrapperPassPass(Registry);
+#endif
+  
 #ifdef BUILD_EXAMPLES
   initializeExampleIRTransforms(Registry);
 #endif
