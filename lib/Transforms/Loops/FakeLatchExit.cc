@@ -42,6 +42,7 @@ namespace
                                               dummy,
                                               ConstantInt::getTrue (ctx), bi);
       newBi->setDebugLoc (bi->getDebugLoc ());
+      newBi->copyMetadata(*bi);
       bi->eraseFromParent ();
       
       return true;
