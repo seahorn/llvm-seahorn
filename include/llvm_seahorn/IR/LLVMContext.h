@@ -6,7 +6,7 @@ namespace llvm_seahorn {
 // See llvm/include/llvm/IR/FixedMetadataKinds.def
 class LLVMContext {
 public:
-  static unsigned const MD_annotation;
+  static const char *MD_annotation;
 };
 } // namespace llvm_seahorn
 

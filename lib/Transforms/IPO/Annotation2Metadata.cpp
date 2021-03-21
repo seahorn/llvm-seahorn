@@ -28,7 +28,7 @@ using namespace llvm;
 
 #define DEBUG_TYPE "annotation2metadata"
 
-unsigned const llvm_seahorn::LLVMContext::MD_annotation = 30;
+const char *llvm_seahorn::LLVMContext::MD_annotation = "sea.annotations";
 
 // In llvm-12 this is Instruction::addAnnotationMetadata.
 // See llvm/lib/IR/Metadata.cpp.
