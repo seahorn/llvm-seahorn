@@ -25,7 +25,6 @@
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
 #include "llvm/Transforms/Utils/LoopRotationUtils.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
-
 #include "llvm_seahorn/Transforms/Scalar.h"
 #include <limits>
 using namespace llvm;
@@ -100,3 +99,4 @@ INITIALIZE_PASS_END(SeaLoopRotateLegacyPass, "sea-loop-rotate", "Rotate Loops",
 Pass *llvm_seahorn::createLoopRotatePass(int MaxHeaderSize) {
   return new SeaLoopRotateLegacyPass(MaxHeaderSize);
 }
+
