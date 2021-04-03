@@ -8,6 +8,7 @@ add_llvm_library(SeaInstCombine DISABLE_LLVM_LINK_LLVM_DYLIB
   InstCombineCompares.cpp
   InstCombineLoadStoreAlloca.cpp
   InstCombineMulDivRem.cpp
+  InstCombineNegator.cpp
   InstCombinePHI.cpp
   InstCombineSelect.cpp
   InstCombineShifts.cpp
