@@ -358,7 +358,7 @@ private:
 
 public:
   InstCombiner(InstCombineWorklist &Worklist, BuilderTy &Builder,
-               bool MinimizeSize, bool ExpensiveCombines,
+               bool MinimizeSize, 
 #if 1 /* SEAHORN ADD */	       
                bool AvoidBv, bool AvoidUnsignedICmp, bool AvoidIntToPtr,
                bool AvoidAliasing, bool AvoidDisequalities,
