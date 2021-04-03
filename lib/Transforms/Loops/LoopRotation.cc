@@ -99,4 +99,3 @@ INITIALIZE_PASS_END(SeaLoopRotateLegacyPass, "sea-loop-rotate", "Rotate Loops",
 Pass *llvm_seahorn::createLoopRotatePass(int MaxHeaderSize) {
   return new SeaLoopRotateLegacyPass(MaxHeaderSize);
 }
-
