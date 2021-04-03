@@ -5,6 +5,7 @@ set(LLVM_LINK_COMPONENTS
   AllTargetsInfos
   AggressiveInstCombine
   Analysis
+  AsmParser
   BitWriter
   CodeGen
   Core
@@ -35,13 +36,11 @@ add_llvm_executable(seaopt
   PrintSCC.cpp
   opt.cpp
 
-
   DEPENDS
   intrinsics_gen
   SUPPORT_PLUGINS
   )
-
-export_executable_symbols(seaopt)
+export_executable_symbols_for_plugins(seaopt)
 
 target_link_libraries(seaopt PRIVATE SeaLlvmIpo SeaInstCombine SeaLoops)
 
