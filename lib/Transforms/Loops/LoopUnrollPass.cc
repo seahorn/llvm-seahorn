@@ -103,8 +103,15 @@ tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution &SE,
   TargetTransformInfo::UnrollingPreferences UP = gatherUnrollingPreferences(
       L, SE, TTI, BFI, PSI, OptLevel,
       std::numeric_limits<unsigned>::max() /* Threshold*/, ProvidedCount, false,
-      false, ProvidedUpperBound, ProvidedAllowPeeling, false,
-      ProvidedFullUnrollMaxCount);
+      false, ProvidedUpperBound, ProvidedFullUnrollMaxCount);
+  TargetTransformInfo::PeelingPreferences PP = gatherPeelingPreferences(
+      L, SE, TTI, ProvidedAllowPeeling, false);
+
+  // Exit early if unrolling is disabled. For OptForSize, we pick the loop size
+  // as threshold later on.
+  if (UP.Threshold == 0 && (!UP.Partial || UP.PartialThreshold == 0) &&
+      !OptForSize)
+    return LoopUnrollResult::Unmodified;
 
   SmallPtrSet<const Value *, 32> EphValues;
   CodeMetrics::collectEphemeralValues(L, &AC, EphValues);
@@ -119,7 +126,8 @@ tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution &SE,
   }
 
   if (NumInlineCandidates != 0) {
-    LLVM_DEBUG(dbgs() << "  Unrolling loop with inlinable calls.\n");
+    LLVM_DEBUG(dbgs() << "  Not unrolling loop with inlinable calls.\n");
+    return LoopUnrollResult::Unmodified;
   }
 
   // Find trip count and trip multiple if count is not available
@@ -165,7 +173,7 @@ tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution &SE,
   bool UseUpperBound = false;
   bool IsCountSetExplicitly = computeUnrollCount(
       L, TTI, DT, LI, SE, EphValues, &ORE, TripCount, MaxTripCount, MaxOrZero,
-      TripMultiple, LoopSize, UP, UseUpperBound);
+      TripMultiple, LoopSize, UP, PP, UseUpperBound);
 
   if (!UP.Count) {
     LLVM_DEBUG(dbgs() << "  Not unrolling loop without known unroll count\n");
@@ -183,9 +191,9 @@ tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution &SE,
   LoopUnrollResult UnrollResult = UnrollLoop(
       L,
       {UP.Count, TripCount, UP.Force, UP.Runtime, UP.AllowExpensiveTripCount,
-       UseUpperBound, MaxOrZero, TripMultiple, UP.PeelCount, UP.UnrollRemainder,
+       UseUpperBound, MaxOrZero, TripMultiple, PP.PeelCount, UP.UnrollRemainder,
        ForgetAllSCEV},
-      LI, &SE, &DT, &AC, &ORE, PreserveLCSSA, &RemainderLoop);
+      LI, &SE, &DT, &AC, &TTI, &ORE, PreserveLCSSA, &RemainderLoop);
   if (UnrollResult == LoopUnrollResult::Unmodified)
     return LoopUnrollResult::Unmodified;
 
@@ -215,7 +223,7 @@ tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution &SE,
   // If the loop was peeled, we already "used up" the profile information
   // we had, so we don't want to unroll or peel again.
   if (UnrollResult != LoopUnrollResult::FullyUnrolled &&
-      (IsCountSetExplicitly || (UP.PeelProfiledIterations && UP.PeelCount)))
+      (IsCountSetExplicitly || (PP.PeelProfiledIterations && PP.PeelCount)))
     L->setLoopAlreadyUnrolled();
 
   return UnrollResult;
