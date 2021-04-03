@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.10.2)
 project(Llvm-SeaHorn)
+
+set(CMAKE_CXX_STANDARD 14)
+
 if(CMAKE_VERSION VERSION_GREATER "3.13.0")
   cmake_policy(SET CMP0074 NEW)
   cmake_policy(SET CMP0077 NEW)
