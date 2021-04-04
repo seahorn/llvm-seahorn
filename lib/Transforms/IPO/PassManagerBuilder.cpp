@@ -116,7 +116,7 @@ static cl::opt<bool>
     EnablePerformThinLTO("seaopt-perform-thinlto", cl::init(false), cl::Hidden,
                          cl::desc("Enable performing ThinLTO."));
 
-cl::opt<bool> EnableHotColdSplit("seaopt-hot-cold-split", cl::init(false),
+static cl::opt<bool> EnableHotColdSplit("seaopt-hot-cold-split", cl::init(false),
     cl::ZeroOrMore, cl::desc("Enable hot-cold splitting pass"));
 
 static cl::opt<bool> UseLoopVersioningLICM(
@@ -156,12 +156,12 @@ static cl::opt<bool>
     EnableCHR("seaopt-enable-chr", cl::init(true), cl::Hidden,
               cl::desc("Enable control height reduction optimization (CHR)"));
 
-cl::opt<bool> FlattenedProfileUsed(
+static cl::opt<bool> FlattenedProfileUsed(
     "seaopt-flattened-profile-used", cl::init(false), cl::Hidden,
     cl::desc("Indicate the sample profile being used is flattened, i.e., "
              "no inline hierachy exists in the profile. "));
 
-cl::opt<bool> EnableOrderFileInstrumentation(
+static cl::opt<bool> EnableOrderFileInstrumentation(
     "seaopt-enable-order-file-instrumentation", cl::init(false), cl::Hidden,
     cl::desc("Enable order file instrumentation (default = off)"));
 
@@ -169,7 +169,7 @@ static cl::opt<bool>
     EnableMatrix("seaopt-enable-matrix", cl::init(false), cl::Hidden,
                  cl::desc("Enable lowering of the matrix intrinsics"));
 
-cl::opt<AttributorRunOption> AttributorRun(
+static cl::opt<AttributorRunOption> AttributorRun(
     "seaopt-attributor-enable", cl::Hidden, cl::init(AttributorRunOption::NONE),
     cl::desc("Enable the attributor inter-procedural deduction pass."),
     cl::values(clEnumValN(AttributorRunOption::ALL, "all",
