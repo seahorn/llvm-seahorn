@@ -103,8 +103,7 @@ void initializeInstCombine(llvm::PassRegistry &Registry);
 }
 
 llvm::FunctionPass *createSeaInstructionCombiningPass();
-llvm::FunctionPass *createSeaInstructionCombiningPass(bool ExpensiveCombines,
-						      unsigned MaxIterations,
+llvm::FunctionPass *createSeaInstructionCombiningPass(unsigned MaxIterations,
 						      bool AvoidBv,
 						      bool AvoidUnsignedICmp,
 						      bool AvoidIntToPtr,
