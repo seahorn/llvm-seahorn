@@ -75,7 +75,7 @@ UseGVNAfterVectorization("seaopt-use-gvn-after-vectorization",
   cl::init(false), cl::Hidden,
   cl::desc("Run GVN instead of Early CSE after vectorization passes"));
 
-cl::opt<bool> ExtraVectorizerPasses(
+static cl::opt<bool> ExtraVectorizerPasses(
     "seaopt-extra-vectorizer-passes", cl::init(false), cl::Hidden,
     cl::desc("Run cleanup optimization passes after vectorization."));
 
@@ -83,7 +83,7 @@ static cl::opt<bool>
 RunLoopRerolling("seaopt-reroll-loops", cl::Hidden,
                  cl::desc("Run the loop rerolling pass"));
 
-cl::opt<bool> RunNewGVN("seaopt-enable-newgvn", cl::init(false), cl::Hidden,
+static cl::opt<bool> RunNewGVN("seaopt-enable-newgvn", cl::init(false), cl::Hidden,
                                cl::desc("Run the NewGVN pass"));
 
 // Experimental option to use CFL-AA
@@ -130,11 +130,11 @@ static cl::opt<bool> UseLoopVersioningLICM(
     "seaopt-enable-loop-versioning-licm", cl::init(false), cl::Hidden,
     cl::desc("Enable the experimental Loop Versioning LICM pass"));
 
-cl::opt<bool>
+static cl::opt<bool>
     DisablePreInliner("seaopt-disable-preinline", cl::init(false), cl::Hidden,
                       cl::desc("Disable pre-instrumentation inliner"));
 
-cl::opt<int> PreInlineThreshold(
+static cl::opt<int> PreInlineThreshold(
     "seaopt-preinline-threshold", cl::Hidden, cl::init(75), cl::ZeroOrMore,
     cl::desc("Control the amount of inlining in pre-instrumentation inliner "
              "(default = 75)"));
