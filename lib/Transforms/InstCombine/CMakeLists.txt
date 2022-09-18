@@ -21,4 +21,10 @@ add_llvm_library(SeaInstCombine DISABLE_LLVM_LINK_LLVM_DYLIB
 
   DEPENDS
   intrinsics_gen
+
+  LINK_COMPONENTS
+  Analysis
+  Core
+  Support
+  TransformUtils
   )
