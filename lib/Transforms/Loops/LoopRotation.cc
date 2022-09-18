@@ -42,6 +42,7 @@ static cl::opt<bool> PrepareForLTOOption(
     cl::desc("Run loop-rotation in the prepare-for-lto stage. This option "
              "should be used for testing only."));
 
+#if 0 /* SEAHORN DISABLE */
 LoopRotatePass::LoopRotatePass(bool EnableHeaderDuplication, bool PrepareForLTO)
     : EnableHeaderDuplication(EnableHeaderDuplication),
       PrepareForLTO(PrepareForLTO) {}
@@ -78,6 +79,9 @@ PreservedAnalyses LoopRotatePass::run(Loop &L, LoopAnalysisManager &AM,
     PA.preserve<MemorySSAAnalysis>();
   return PA;
 }
+
+#endif
+
 namespace {
 
 class SeaLoopRotateLegacyPass : public LoopPass {
