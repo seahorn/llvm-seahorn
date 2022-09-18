@@ -12,6 +12,7 @@
 
 #include "llvm/Transforms/Scalar/LoopRotation.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/MemorySSA.h"
@@ -36,14 +37,58 @@ static cl::opt<unsigned> DefaultRotationThreshold(
     cl::init(std::numeric_limits<unsigned>::max()), cl::Hidden,
     cl::desc("The default maximum header size for automatic loop rotation"));
 
+static cl::opt<bool> PrepareForLTOOption(
+    "sea-rotation-prepare-for-lto", cl::init(false), cl::Hidden,
+    cl::desc("Run loop-rotation in the prepare-for-lto stage. This option "
+             "should be used for testing only."));
+
+LoopRotatePass::LoopRotatePass(bool EnableHeaderDuplication, bool PrepareForLTO)
+    : EnableHeaderDuplication(EnableHeaderDuplication),
+      PrepareForLTO(PrepareForLTO) {}
+
+PreservedAnalyses LoopRotatePass::run(Loop &L, LoopAnalysisManager &AM,
+                                      LoopStandardAnalysisResults &AR,
+                                      LPMUpdater &) {
+  // Vectorization requires loop-rotation. Use default threshold for loops the
+  // user explicitly marked for vectorization, even when header duplication is
+  // disabled.
+  int Threshold = EnableHeaderDuplication ||
+                          hasVectorizeTransformation(&L) == TM_ForcedByUser
+                      ? DefaultRotationThreshold
+                      : 0;
+  const DataLayout &DL = L.getHeader()->getModule()->getDataLayout();
+  const SimplifyQuery SQ = getBestSimplifyQuery(AR, DL);
+
+  Optional<MemorySSAUpdater> MSSAU;
+  if (AR.MSSA)
+    MSSAU = MemorySSAUpdater(AR.MSSA);
+  bool Changed =
+      LoopRotation(&L, &AR.LI, &AR.TTI, &AR.AC, &AR.DT, &AR.SE,
+                   MSSAU.hasValue() ? MSSAU.getPointer() : nullptr, SQ, false,
+                   Threshold, false, PrepareForLTO || PrepareForLTOOption);
+
+  if (!Changed)
+    return PreservedAnalyses::all();
+
+  if (AR.MSSA && VerifyMemorySSA)
+    AR.MSSA->verifyMemorySSA();
+
+  auto PA = getLoopPassPreservedAnalyses();
+  if (AR.MSSA)
+    PA.preserve<MemorySSAAnalysis>();
+  return PA;
+}
 namespace {
 
 class SeaLoopRotateLegacyPass : public LoopPass {
   unsigned MaxHeaderSize;
+  bool PrepareForLTO;
 
 public:
   static char ID; // Pass ID, replacement for typeid
-  SeaLoopRotateLegacyPass(int SpecifiedMaxHeaderSize = -1) : LoopPass(ID) {
+  SeaLoopRotateLegacyPass(int SpecifiedMaxHeaderSize = -1,
+                       bool PrepareForLTO = false)
+      : LoopPass(ID), PrepareForLTO(PrepareForLTO) {
     initializeSeaLoopRotateLegacyPassPass(*PassRegistry::getPassRegistry());
     if (SpecifiedMaxHeaderSize == -1)
       MaxHeaderSize = DefaultRotationThreshold;
@@ -79,9 +124,17 @@ public:
       if (MSSAA)
         MSSAU = MemorySSAUpdater(&MSSAA->getMSSA());
     }
+    // Vectorization requires loop-rotation. Use default threshold for loops the
+    // user explicitly marked for vectorization, even when header duplication is
+    // disabled.
+    int Threshold = hasVectorizeTransformation(L) == TM_ForcedByUser
+                        ? DefaultRotationThreshold
+                        : MaxHeaderSize;
+
     return LoopRotation(L, LI, TTI, AC, &DT, &SE,
                         MSSAU.hasValue() ? MSSAU.getPointer() : nullptr, SQ,
-                        false, MaxHeaderSize, true /*  IsUtilMode */);
+                        false, Threshold, false,
+                        PrepareForLTO || PrepareForLTOOption);
   }
 };
 } // namespace
@@ -96,6 +149,6 @@ INITIALIZE_PASS_DEPENDENCY(MemorySSAWrapperPass)
 INITIALIZE_PASS_END(SeaLoopRotateLegacyPass, "sea-loop-rotate", "Rotate Loops",
                     false, false)
 
-Pass *llvm_seahorn::createLoopRotatePass(int MaxHeaderSize) {
-  return new SeaLoopRotateLegacyPass(MaxHeaderSize);
+Pass *llvm_seahorn::createLoopRotatePass(int MaxHeaderSize, bool PrepareForLTO) {
+  return new SeaLoopRotateLegacyPass(MaxHeaderSize, PrepareForLTO);
 }

@@ -24,7 +24,11 @@ class Loop;
 class LPMUpdater;
 
 class SeaIndVarSimplifyPass : public PassInfoMixin<SeaIndVarSimplifyPass> {
+  /// Perform IV widening during the pass.
+  bool WidenIndVars;
+
 public:
+  SeaIndVarSimplifyPass(bool WidenIndVars = true) : WidenIndVars(WidenIndVars) {}
   PreservedAnalyses run(Loop &L, LoopAnalysisManager &AM,
                         LoopStandardAnalysisResults &AR, LPMUpdater &U);
 };
