@@ -166,6 +166,8 @@ static cl::opt<unsigned> MaxArraySize(
 static cl::opt<unsigned> ShouldLowerDbgDeclare("seaopt-instcombine-lower-dbg-declare",
                                                cl::Hidden, cl::init(true));
 
+#if 0 /* SEAHORN DISABLE */
+
 Optional<Instruction *>
 InstCombiner::targetInstCombineIntrinsic(IntrinsicInst &II) {
   // Handle target specific intrinsics
@@ -199,6 +201,7 @@ Optional<Value *> InstCombiner::targetSimplifyDemandedVectorEltsIntrinsic(
   }
   return None;
 }
+#endif 
 
 Value *SeaInstCombinerImpl::EmitGEPOffset(User *GEP) {
   return llvm::EmitGEPOffset(&Builder, DL, GEP);

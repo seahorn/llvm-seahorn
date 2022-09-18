@@ -5239,6 +5239,7 @@ Instruction *SeaInstCombinerImpl::foldICmpUsingKnownBits(ICmpInst &I) {
   return nullptr;
 }
 
+#if 0 /* SEAHORN DISABLE */
 llvm::Optional<std::pair<CmpInst::Predicate, Constant *>>
 InstCombiner::getFlippedStrictnessPredicateAndConstant(CmpInst::Predicate Pred,
                                                Constant *C) {
@@ -5304,6 +5305,7 @@ InstCombiner::getFlippedStrictnessPredicateAndConstant(CmpInst::Predicate Pred,
 
   return std::make_pair(NewPred, NewC);
 }
+#endif
 
 /// If we have an icmp le or icmp ge instruction with a constant operand, turn
 /// it into the appropriate icmp lt or icmp gt instruction. This transform
