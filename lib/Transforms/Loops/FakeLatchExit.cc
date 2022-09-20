@@ -17,6 +17,7 @@ namespace
     bool runOnLoop (Loop *L, LPPassManager &LPM) override
     {
       LoopInfo *LI = &getAnalysis<LoopInfoWrapperPass> ().getLoopInfo();
+      (void)LI;
       
       BasicBlock *latch = L->getLoopLatch ();
 
