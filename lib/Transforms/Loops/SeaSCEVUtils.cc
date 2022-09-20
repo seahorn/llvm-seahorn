@@ -11,9 +11,12 @@ bool seaSCEVContainsMul(const llvm::SCEV *Expr) {
   if (const auto *M = dyn_cast<SCEVMulExpr>(Expr)) {
     // If there is more than one non-constant SCEV subexpression we consider
     // multiplication costly for *verification*.
-    if (std::count_if(M->op_begin(), M->op_end(), [](const SCEV *C) {
+    auto numOps =
+        (unsigned)std::count_if(M->op_begin(), M->op_end(), [](const SCEV *C) {
           return isa<SCEVConstant>(C);
-        }) < M->getNumOperands() - 1)
+        });
+
+    if (numOps < M->getNumOperands() - 1)
       return true;
   }
 
