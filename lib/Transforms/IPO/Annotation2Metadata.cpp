@@ -11,55 +11,30 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm_seahorn/IR/LLVMContext.h"
-#include "llvm_seahorn/Transforms/IPO/Annotation2Metadata.h"
+#include "llvm/Transforms/IPO/Annotation2Metadata.h"
+#include "llvm_seahorn/InitializePasses.h"
+#include "llvm_seahorn/Transforms/IPO.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstIterator.h"
-#include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Module.h"
-#include "llvm_seahorn/InitializePasses.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
-#include "llvm/Transforms/IPO.h"
-#include "llvm_seahorn/Transforms/IPO.h"
 
 using namespace llvm;
 
-#define DEBUG_TYPE "annotation2metadata"
+#define DEBUG_TYPE "sea-annotation2metadata"
 
-const char *llvm_seahorn::LLVMContext::MD_annotation = "sea.annotations";
-
-// In llvm-12 this is Instruction::addAnnotationMetadata.
-// See llvm/lib/IR/Metadata.cpp.
-static void addAnnotationMetadata(Instruction &I, StringRef Name) {
-  MDBuilder MDB(I.getContext());
-
-  auto *Existing = I.getMetadata(llvm_seahorn::LLVMContext::MD_annotation);
-  SmallVector<Metadata *, 4> Names;
-  bool AppendName = true;
-  if (Existing) {
-    auto *Tuple = cast<MDTuple>(Existing);
-    for (auto &N : Tuple->operands()) {
-      if (cast<MDString>(N.get())->getString() == Name)
-        AppendName = false;
-      Names.push_back(N.get());
-    }
-  }
-  if (AppendName)
-    Names.push_back(MDB.createString(Name));
-
-  MDNode *MD = MDTuple::get(I.getContext(), Names);
-  I.setMetadata(llvm_seahorn::LLVMContext::MD_annotation, MD);
-}
 
 static bool convertAnnotation2Metadata(Module &M) {
-  // Run convertAnnotations2Metadata unconditionally.
-  /*
-   *if (!OptimizationRemarkEmitter::allowExtraAnalysis(M.getContext(),
-   *                                                   "annotation-remarks"))
-   *  return false;
-   */
+#if 0 /* SEAHORN DISABLE */
+  // Only add !annotation metadata if the corresponding remarks pass is also
+  // enabled.
+  if (!OptimizationRemarkEmitter::allowExtraAnalysis(M.getContext(),
+                                                     "annotation-remarks"))
+    return false;
+#endif
 
   auto *Annotations = M.getGlobalVariable("llvm.global.annotations");
   auto *C = dyn_cast_or_null<Constant>(Annotations);
@@ -68,7 +43,11 @@ static bool convertAnnotation2Metadata(Module &M) {
 
   C = cast<Constant>(C->getOperand(0));
 
+  // Iterate over all entries in C and attach !annotation metadata to suitable
+  // entries.
   for (auto &Op : C->operands()) {
+    // Look at the operands to check if we can use the entry to generate
+    // !annotation metadata.
     auto *OpC = dyn_cast<ConstantStruct>(&Op);
     if (!OpC || OpC->getNumOperands() != 4)
       continue;
@@ -81,6 +60,7 @@ static bool convertAnnotation2Metadata(Module &M) {
     auto *StrData = dyn_cast<ConstantDataSequential>(StrC->getOperand(0));
     if (!StrData)
       continue;
+    // Look through bitcast.
     auto *Bitcast = dyn_cast<ConstantExpr>(OpC->getOperand(0));
     if (!Bitcast || Bitcast->getOpcode() != Instruction::BitCast)
       continue;
@@ -88,18 +68,19 @@ static bool convertAnnotation2Metadata(Module &M) {
     if (!Fn)
       continue;
 
+    // Add annotation to all instructions in the function.
     for (auto &I : instructions(Fn))
-      addAnnotationMetadata(I, StrData->getAsCString());
+      I.addAnnotationMetadata(StrData->getAsCString());
   }
   return true;
 }
 
 namespace {
-struct Annotation2MetadataLegacy : public ModulePass {
+struct SeaAnnotation2MetadataLegacy : public ModulePass {
   static char ID;
 
-  Annotation2MetadataLegacy() : ModulePass(ID) {
-    initializeAnnotation2MetadataLegacyPass(*PassRegistry::getPassRegistry());
+  SeaAnnotation2MetadataLegacy() : ModulePass(ID) {
+    initializeSeaAnnotation2MetadataLegacyPass(*PassRegistry::getPassRegistry());
   }
 
   bool runOnModule(Module &M) override { return convertAnnotation2Metadata(M); }
@@ -111,19 +92,14 @@ struct Annotation2MetadataLegacy : public ModulePass {
 
 } // end anonymous namespace
 
-char Annotation2MetadataLegacy::ID = 0;
+char SeaAnnotation2MetadataLegacy::ID = 0;
 
-INITIALIZE_PASS_BEGIN(Annotation2MetadataLegacy, DEBUG_TYPE,
-                      "Annotation2Metadata", false, false)
-INITIALIZE_PASS_END(Annotation2MetadataLegacy, DEBUG_TYPE,
-                    "Annotation2Metadata", false, false)
+INITIALIZE_PASS_BEGIN(SeaAnnotation2MetadataLegacy, DEBUG_TYPE,
+                      "SeaAnnotation2Metadata", false, false)
+INITIALIZE_PASS_END(SeaAnnotation2MetadataLegacy, DEBUG_TYPE,
+                    "SeaAnnotation2Metadata", false, false)
 
-ModulePass *llvm_seahorn::createAnnotation2MetadataLegacyPass() {
-  return new Annotation2MetadataLegacy();
+ModulePass *llvm_seahorn::createSeaAnnotation2MetadataLegacyPass() {
+  return new SeaAnnotation2MetadataLegacy();
 }
 
-PreservedAnalyses llvm_seahorn::Annotation2MetadataPass::run(Module &M,
-                                                             ModuleAnalysisManager &AM) {
-  convertAnnotation2Metadata(M);
-  return PreservedAnalyses::all();
-}

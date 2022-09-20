@@ -6,7 +6,7 @@ class ModulePass;
 } // namespace llvm
 
 namespace llvm_seahorn {
-llvm::ModulePass *createAnnotation2MetadataLegacyPass();
+llvm::ModulePass *createSeaAnnotation2MetadataLegacyPass();
 } // namespace llvm_seahorn
 
 #endif

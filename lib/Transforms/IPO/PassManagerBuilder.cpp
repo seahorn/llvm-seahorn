@@ -12,6 +12,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm_seahorn/Transforms/IPO/PassManagerBuilder.h"
+#include "llvm_seahorn/Transforms/IPO.h"
+#include "llvm_seahorn/Transforms/InstCombine/SeaInstCombine.h"
 #include "llvm_seahorn/Transforms/Scalar.h"
 #include "llvm-c/Transforms/PassManagerBuilder.h"
 #include "llvm/ADT/STLExtras.h"
@@ -36,7 +38,6 @@
 #include "llvm/Transforms/IPO/ForceFunctionAttrs.h"
 #include "llvm/Transforms/IPO/FunctionAttrs.h"
 #include "llvm/Transforms/IPO/InferFunctionAttrs.h"
-#include "llvm_seahorn/Transforms/InstCombine/SeaInstCombine.h"
 #include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVN.h"
@@ -540,7 +541,7 @@ void PassManagerBuilder::populateModulePassManager(
   // is handled separately, so just check this is not the ThinLTO post-link.
   bool DefaultOrPreLinkPipeline = !PerformThinLTO;
 
-  MPM.add(createAnnotation2MetadataLegacyPass());
+  MPM.add(createSeaAnnotation2MetadataLegacyPass());
 
   if (!PGOSampleUse.empty()) {
     MPM.add(createPruneEHPass());
