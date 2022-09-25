@@ -28,7 +28,6 @@ set(LLVM_LINK_COMPONENTS
 
 add_llvm_executable(seaopt
   AnalysisWrappers.cpp
-  CallGraphPrinterWrapper.cc
   BreakpointPrinter.cpp
   GraphPrinters.cpp
   NewPMDriver.cpp
@@ -36,12 +35,16 @@ add_llvm_executable(seaopt
   PrintSCC.cpp
   opt.cpp
 
+  # linking dynamic llvm library messes library include order
+  DISABLE_LLVM_LINK_LLVM_DYLIB
+
   DEPENDS
   intrinsics_gen
   SUPPORT_PLUGINS
   )
 export_executable_symbols_for_plugins(seaopt)
 
+# insert our libraries at the front
 target_link_libraries(seaopt PRIVATE SeaLlvmIpo SeaInstCombine SeaLoops)
 
 install(TARGETS seaopt RUNTIME DESTINATION bin)
