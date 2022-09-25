@@ -27,5 +27,4 @@ add_llvm_library(SeaInstCombine DISABLE_LLVM_LINK_LLVM_DYLIB
   Core
   Support
   TransformUtils
-  InstCombine
   )
