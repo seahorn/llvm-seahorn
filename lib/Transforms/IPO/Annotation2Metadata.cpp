@@ -49,7 +49,7 @@ static bool convertAnnotation2Metadata(Module &M) {
     // Look at the operands to check if we can use the entry to generate
     // !annotation metadata.
     auto *OpC = dyn_cast<ConstantStruct>(&Op);
-    if (!OpC || OpC->getNumOperands() != 4)
+    if (!OpC || OpC->getNumOperands() < 4)
       continue;
     auto *StrGEP = dyn_cast<ConstantExpr>(OpC->getOperand(1));
     if (!StrGEP || StrGEP->getNumOperands() < 2)
