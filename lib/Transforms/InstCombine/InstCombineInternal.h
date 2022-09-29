@@ -71,10 +71,10 @@ public:
                       bool AvoidAliasing, bool AvoidDisequalities,
 #endif
                       AAResults *AA, AssumptionCache &AC,
-                      TargetLibraryInfo &TLI, TargetTransformInfo &TTI,
-                      DominatorTree &DT, OptimizationRemarkEmitter &ORE,
-                      BlockFrequencyInfo *BFI, ProfileSummaryInfo *PSI,
-                      const DataLayout &DL, LoopInfo *LI)
+                   TargetLibraryInfo &TLI, TargetTransformInfo &TTI,
+                   DominatorTree &DT, OptimizationRemarkEmitter &ORE,
+                   BlockFrequencyInfo *BFI, ProfileSummaryInfo *PSI,
+                   const DataLayout &DL, LoopInfo *LI)
       : InstCombiner(Worklist, Builder, MinimizeSize, AA, AC, TLI, TTI, DT, ORE,
                      BFI, PSI, DL, LI),
 #if 1 /* SEAHORN ADD */
@@ -183,6 +183,8 @@ public:
   Instruction *visitExtractValueInst(ExtractValueInst &EV);
   Instruction *visitLandingPadInst(LandingPadInst &LI);
   Instruction *visitVAEndInst(VAEndInst &I);
+  Value *pushFreezeToPreventPoisonFromPropagating(FreezeInst &FI);
+  bool freezeDominatedUses(FreezeInst &FI);
   Instruction *visitFreeze(FreezeInst &I);
 
   /// Specify what to return for unhandled instructions.
@@ -202,7 +204,6 @@ public:
                                  const Twine &Suffix = "");
 
 private:
-
 #if 1 /* SEAHORN ADD */
   // Avoid transforming linear operations into nonlinear
   bool AvoidBv;
@@ -217,6 +218,7 @@ private:
   bool AvoidDisequalities;
 #endif
 
+  void annotateAnyAllocSite(CallBase &Call, const TargetLibraryInfo *TLI);
   bool shouldChangeType(unsigned FromBitWidth, unsigned ToBitWidth) const;
   bool shouldChangeType(Type *From, Type *To) const;
   Value *dyn_castNegVal(Value *V) const;
@@ -368,6 +370,7 @@ private:
   /// \see CastInst::isEliminableCastPair
   Instruction::CastOps isEliminableCastPair(const CastInst *CI1,
                                             const CastInst *CI2);
+  Value *simplifyIntToPtrRoundTripCast(Value *Val);
 
   Value *foldAndOfICmps(ICmpInst *LHS, ICmpInst *RHS, BinaryOperator &And);
   Value *foldOrOfICmps(ICmpInst *LHS, ICmpInst *RHS, BinaryOperator &Or);
@@ -379,12 +382,20 @@ private:
   Value *foldLogicOfFCmps(FCmpInst *LHS, FCmpInst *RHS, bool IsAnd);
 
   Value *foldAndOrOfICmpsOfAndWithPow2(ICmpInst *LHS, ICmpInst *RHS,
-                                       BinaryOperator &Logic);
+                                       Instruction *CxtI, bool IsAnd,
+                                       bool IsLogical = false);
   Value *matchSelectFromAndOr(Value *A, Value *B, Value *C, Value *D);
   Value *getSelectCondition(Value *A, Value *B);
 
   Instruction *foldIntrinsicWithOverflowCommon(IntrinsicInst *II);
   Instruction *foldFPSignBitOps(BinaryOperator &I);
+
+  // Optimize one of these forms:
+  //   and i1 Op, SI / select i1 Op, i1 SI, i1 false (if IsAnd = true)
+  //   or i1 Op, SI  / select i1 Op, i1 true, i1 SI  (if IsAnd = false)
+  // into simplier select instruction using isImpliedCondition.
+  Instruction *foldAndOrOfSelectUsingImpliedCond(Value *Op, SelectInst &SI,
+                                                 bool IsAnd);
 
 public:
   /// Inserts an instruction \p New before instruction \p Old
@@ -443,16 +454,6 @@ public:
   void replaceUse(Use &U, Value *NewValue) {
     Worklist.addValue(U);
     U = NewValue;
-  }
-
-  /// Creates a result tuple for an overflow intrinsic \p II with a given
-  /// \p Result and a constant \p Overflow value.
-  Instruction *CreateOverflowTuple(IntrinsicInst *II, Value *Result,
-                                   Constant *Overflow) {
-    Constant *V[] = {UndefValue::get(Result->getType()), Overflow};
-    StructType *ST = cast<StructType>(II->getType());
-    Constant *Struct = ConstantStruct::get(ST, V);
-    return InsertValueInst::Create(Struct, Result, 0);
   }
 
   /// Create and insert the idiom we use to indicate a block is unreachable
@@ -754,10 +755,10 @@ private:
   Instruction *PromoteCastOfAllocation(BitCastInst &CI, AllocaInst &AI);
   bool mergeStoreIntoSuccessor(StoreInst &SI);
 
-  /// Given an 'or' instruction, check to see if it is part of a
+  /// Given an initial instruction, check to see if it is the root of a
   /// bswap/bitreverse idiom. If so, return the equivalent bswap/bitreverse
   /// intrinsic.
-  Instruction *matchBSwapOrBitReverse(BinaryOperator &Or, bool MatchBSwaps,
+  Instruction *matchBSwapOrBitReverse(Instruction &I, bool MatchBSwaps,
                                       bool MatchBitReversals);
 
   Instruction *SimplifyAnyMemTransfer(AnyMemTransferInst *MI);
