@@ -103,10 +103,13 @@ tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution &SE,
   bool Convergent;
   TargetTransformInfo::UnrollingPreferences UP = gatherUnrollingPreferences(
       L, SE, TTI, BFI, PSI, OptLevel,
-      std::numeric_limits<unsigned>::max() /* Threshold*/, ProvidedCount, false,
-      false, ProvidedUpperBound, ProvidedFullUnrollMaxCount);
-  TargetTransformInfo::PeelingPreferences PP = gatherPeelingPreferences(
-      L, SE, TTI, ProvidedAllowPeeling, false);
+      std::numeric_limits<unsigned>::max() /* Threshold*/, ProvidedCount,
+      false /* UserAllowPartial */, false /* UserRuntime */, ProvidedUpperBound,
+      ProvidedFullUnrollMaxCount);
+  TargetTransformInfo::PeelingPreferences PP =
+      gatherPeelingPreferences(L, SE, TTI, ProvidedAllowPeeling,
+                               false /* UserAllowProfileBasedPeeling */,
+                               false /* UnrollingSpecficValues */);
 
   // Exit early if unrolling is disabled. For OptForSize, we pick the loop size
   // as threshold later on.
@@ -131,24 +134,35 @@ tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution &SE,
     return LoopUnrollResult::Unmodified;
   }
 
-  // Find trip count and trip multiple if count is not available
+  // Find the smallest exact trip count for any exit. This is an upper bound
+  // on the loop trip count, but an exit at an earlier iteration is still
+  // possible. An unroll by the smallest exact trip count guarantees that all
+  // brnaches relating to at least one exit can be eliminated. This is unlike
+  // the max trip count, which only guarantees that the backedge can be broken.
   unsigned TripCount = 0;
   unsigned TripMultiple = 1;
-  // If there are multiple exiting blocks but one of them is the latch, use the
-  // latch for the trip count estimation. Otherwise insist on a single exiting
-  // block for the trip count estimation.
+  SmallVector<BasicBlock *, 8> ExitingBlocks;
+  L->getExitingBlocks(ExitingBlocks);
+  for (BasicBlock *ExitingBlock : ExitingBlocks)
+    if (unsigned TC = SE.getSmallConstantTripCount(L, ExitingBlock))
+      if (!TripCount || TC < TripCount)
+        TripCount = TripMultiple = TC;
+
+  if (!TripCount) {
+    // If no exact trip count is known, determine the trip multiple of either
+    // the loop latch or the single exiting block.
+    // TODO: Relax for multiple exits.
   BasicBlock *ExitingBlock = L->getLoopLatch();
   if (!ExitingBlock || !L->isLoopExiting(ExitingBlock))
     ExitingBlock = L->getExitingBlock();
-  if (ExitingBlock) {
-    TripCount = SE.getSmallConstantTripCount(L, ExitingBlock);
+  if (ExitingBlock)
     TripMultiple = SE.getSmallConstantTripMultiple(L, ExitingBlock);
   }
 
   // If the loop contains a convergent operation, the prelude we'd add
   // to do the first few instructions before we hit the unrolled loop
   // is unsafe -- it adds a control-flow dependency to the convergent
-  // operation.  Therefore restrict remainder loop (try unrollig without).
+  // operation.  Therefore restrict remainder loop (try unrolling without).
   //
   // TODO: This is quite conservative.  In practice, convergent_op()
   // is likely to be called unconditionally in the loop.  In this
@@ -175,14 +189,38 @@ tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution &SE,
   bool IsCountSetExplicitly = computeUnrollCount(
       L, TTI, DT, LI, SE, EphValues, &ORE, TripCount, MaxTripCount, MaxOrZero,
       TripMultiple, LoopSize, UP, PP, UseUpperBound);
-
   if (!UP.Count) {
     LLVM_DEBUG(dbgs() << "  Not unrolling loop without known unroll count\n");
     return LoopUnrollResult::Unmodified;
   }
-  // Unroll factor (Count) must be less or equal to TripCount.
-  if (TripCount && UP.Count > TripCount)
-    UP.Count = TripCount;
+
+  if (PP.PeelCount) {
+    assert(UP.Count == 1 && "Cannot perform peel and unroll in the same step");
+    LLVM_DEBUG(dbgs() << "PEELING loop %" << L->getHeader()->getName()
+                      << " with iteration count " << PP.PeelCount << "!\n");
+    ORE.emit([&]() {
+      return OptimizationRemark(DEBUG_TYPE, "Peeled", L->getStartLoc(),
+                                L->getHeader())
+             << " peeled loop by " << ore::NV("PeelCount", PP.PeelCount)
+             << " iterations";
+    });
+
+    if (peelLoop(L, PP.PeelCount, LI, &SE, &DT, &AC, PreserveLCSSA)) {
+      simplifyLoopAfterUnroll(L, true, LI, &SE, &DT, &AC, &TTI);
+      // If the loop was peeled, we already "used up" the profile information
+      // we had, so we don't want to unroll or peel again.
+      if (PP.PeelProfiledIterations)
+        L->setLoopAlreadyUnrolled();
+      return LoopUnrollResult::PartiallyUnrolled;
+    }
+    return LoopUnrollResult::Unmodified;
+  }
+  // At this point, UP.Runtime indicates that run-time unrolling is allowed.
+  // However, we only want to actually perform it if we don't know the trip
+  // count and the unroll count doesn't divide the known trip multiple.
+  // TODO: This decision should probably be pushed up into
+  // computeUnrollCount().
+  UP.Runtime &= TripCount == 0 && TripMultiple % UP.Count != 0;
 
   // Save loop properties before it is transformed.
   MDNode *OrigLoopID = L->getLoopID();
@@ -191,9 +229,8 @@ tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution &SE,
   Loop *RemainderLoop = nullptr;
   LoopUnrollResult UnrollResult = UnrollLoop(
       L,
-      {UP.Count, TripCount, UP.Force, UP.Runtime, UP.AllowExpensiveTripCount,
-       UseUpperBound, MaxOrZero, TripMultiple, PP.PeelCount, UP.UnrollRemainder,
-       ForgetAllSCEV},
+      {UP.Count, UP.Force, UP.Runtime, UP.AllowExpensiveTripCount,
+       UP.UnrollRemainder, ForgetAllSCEV},
       LI, &SE, &DT, &AC, &TTI, &ORE, PreserveLCSSA, &RemainderLoop);
   if (UnrollResult == LoopUnrollResult::Unmodified)
     return LoopUnrollResult::Unmodified;
@@ -221,10 +258,7 @@ tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution &SE,
 
   // If loop has an unroll count pragma or unrolled by explicitly set count
   // mark loop as unrolled to prevent unrolling beyond that requested.
-  // If the loop was peeled, we already "used up" the profile information
-  // we had, so we don't want to unroll or peel again.
-  if (UnrollResult != LoopUnrollResult::FullyUnrolled &&
-      (IsCountSetExplicitly || (PP.PeelProfiledIterations && PP.PeelCount)))
+  if (UnrollResult != LoopUnrollResult::FullyUnrolled && IsCountSetExplicitly)
     L->setLoopAlreadyUnrolled();
 
   return UnrollResult;
