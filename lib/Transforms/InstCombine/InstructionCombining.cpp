@@ -177,7 +177,7 @@ InstCombiner::targetInstCombineIntrinsic(IntrinsicInst &II) {
   return None;
 }
 
-Optional<Value *> InstCombiner::targetSimplifyDemandedUseBitsIntrinsic(
+Optional<Value *> SeaInstCombiner::targetSimplifyDemandedUseBitsIntrinsic(
     IntrinsicInst &II, APInt DemandedMask, KnownBits &Known,
     bool &KnownBitsComputed) {
   // Handle target specific intrinsics
@@ -188,7 +188,7 @@ Optional<Value *> InstCombiner::targetSimplifyDemandedUseBitsIntrinsic(
   return None;
 }
 
-Optional<Value *> InstCombiner::targetSimplifyDemandedVectorEltsIntrinsic(
+Optional<Value *> SeaInstCombiner::targetSimplifyDemandedVectorEltsIntrinsic(
     IntrinsicInst &II, APInt DemandedElts, APInt &UndefElts, APInt &UndefElts2,
     APInt &UndefElts3,
     std::function<void(Instruction *, unsigned, APInt, APInt &)>
@@ -353,7 +353,7 @@ static bool simplifyAssocCastAssoc(BinaryOperator *BinOp1,
 
 // Simplifies IntToPtr/PtrToInt RoundTrip Cast To BitCast.
 // inttoptr ( ptrtoint (x) ) --> x
-Value *InstCombinerImpl::simplifyIntToPtrRoundTripCast(Value *Val) {
+Value *SeaInstCombinerImpl::simplifyIntToPtrRoundTripCast(Value *Val) {
   auto *IntToPtr = dyn_cast<IntToPtrInst>(Val);
   if (IntToPtr && DL.getPointerTypeSizeInBits(IntToPtr->getDestTy()) ==
                       DL.getTypeSizeInBits(IntToPtr->getSrcTy())) {
@@ -3572,7 +3572,7 @@ Instruction *SeaInstCombinerImpl::visitLandingPadInst(LandingPadInst &LI) {
 }
 
 Value *
-InstCombinerImpl::pushFreezeToPreventPoisonFromPropagating(FreezeInst &OrigFI) {
+SeaInstCombinerImpl::pushFreezeToPreventPoisonFromPropagating(FreezeInst &OrigFI) {
   // Try to push freeze through instructions that propagate but don't produce
   // poison as far as possible.  If an operand of freeze follows three
   // conditions 1) one-use, 2) does not produce poison, and 3) has all but one
@@ -3622,7 +3622,7 @@ InstCombinerImpl::pushFreezeToPreventPoisonFromPropagating(FreezeInst &OrigFI) {
   return OrigOp;
 }
 
-bool InstCombinerImpl::freezeDominatedUses(FreezeInst &FI) {
+bool SeaInstCombinerImpl::freezeDominatedUses(FreezeInst &FI) {
   Value *Op = FI.getOperand(0);
 
   if (isa<Constant>(Op))

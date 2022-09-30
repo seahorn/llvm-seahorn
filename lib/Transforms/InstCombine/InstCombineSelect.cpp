@@ -2582,7 +2582,7 @@ static Value *foldSelectWithFrozenICmp(SelectInst &Sel, InstCombiner::BuilderTy 
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::foldAndOrOfSelectUsingImpliedCond(Value *Op,
+Instruction *SeaInstCombinerImpl::foldAndOrOfSelectUsingImpliedCond(Value *Op,
                                                                  SelectInst &SI,
                                                                  bool IsAnd) {
   Value *CondVal = SI.getCondition();
