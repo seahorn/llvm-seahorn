@@ -22,14 +22,15 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/PatternMatch.h"
+#include "llvm/IR/Value.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/KnownBits.h"
-#include "llvm/Transforms/InstCombine/InstCombineWorklist.h"
 #include "llvm/Transforms/InstCombine/InstCombiner.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include <cassert>
 
 #define DEBUG_TYPE "sea-instcombine"
+#include "llvm/Transforms/Utils/InstructionWorklist.h"
 
 using namespace llvm::PatternMatch;
 
@@ -64,7 +65,7 @@ class LLVM_LIBRARY_VISIBILITY SeaInstCombinerImpl final
     : public InstCombiner,
       public InstVisitor<SeaInstCombinerImpl, Instruction *> {
 public:
-  SeaInstCombinerImpl(InstCombineWorklist &Worklist, BuilderTy &Builder,
+  SeaInstCombinerImpl(InstructionWorklist &Worklist, BuilderTy &Builder,
                       bool MinimizeSize,
 #if 1 /* SEAHORN ADD */
                       bool AvoidBv, bool AvoidUnsignedICmp, bool AvoidIntToPtr,
@@ -162,6 +163,8 @@ public:
   Instruction *SliceUpIllegalIntegerPHI(PHINode &PN);
   Instruction *visitPHINode(PHINode &PN);
   Instruction *visitGetElementPtrInst(GetElementPtrInst &GEP);
+  Instruction *visitGEPOfGEP(GetElementPtrInst &GEP, GEPOperator *Src);
+  Instruction *visitGEPOfBitcast(BitCastInst *BCI, GetElementPtrInst &GEP);
   Instruction *visitAllocaInst(AllocaInst &AI);
   Instruction *visitAllocSite(Instruction &FI);
   Instruction *visitFree(CallInst &FI);
@@ -219,11 +222,10 @@ private:
 #endif
 
   void annotateAnyAllocSite(CallBase &Call, const TargetLibraryInfo *TLI);
+  bool isDesirableIntType(unsigned BitWidth) const;
   bool shouldChangeType(unsigned FromBitWidth, unsigned ToBitWidth) const;
   bool shouldChangeType(Type *From, Type *To) const;
   Value *dyn_castNegVal(Value *V) const;
-  Type *FindElementAtOffset(PointerType *PtrTy, int64_t Offset,
-                            SmallVectorImpl<Value *> &NewIndices);
 
   /// Classify whether a cast is worth optimizing.
   ///
@@ -269,15 +271,11 @@ private:
   ///
   /// \param ICI The icmp of the (zext icmp) pair we are interested in.
   /// \parem CI The zext of the (zext icmp) pair we are interested in.
-  /// \param DoTransform Pass false to just test whether the given (zext icmp)
-  /// would be transformed. Pass true to actually perform the transformation.
   ///
   /// \return null if the transformation cannot be performed. If the
   /// transformation can be performed the new instruction that replaces the
-  /// (zext icmp) pair will be returned (if \p DoTransform is false the
-  /// unmodified \p ICI will be returned in this case).
-  Instruction *transformZExtICmp(ICmpInst *ICI, ZExtInst &CI,
-                                 bool DoTransform = true);
+  /// (zext icmp) pair will be returned.
+  Instruction *transformZExtICmp(ICmpInst *ICI, ZExtInst &CI);
 
   Instruction *transformSExtICmp(ICmpInst *ICI, Instruction &CI);
 
@@ -348,13 +346,16 @@ private:
 
   Value *EmitGEPOffset(User *GEP);
   Instruction *scalarizePHI(ExtractElementInst &EI, PHINode *PN);
+  Instruction *foldBitcastExtElt(ExtractElementInst &ExtElt);
   Instruction *foldCastedBitwiseLogic(BinaryOperator &I);
+  Instruction *foldBinopOfSextBoolToSelect(BinaryOperator &I);
   Instruction *narrowBinOp(TruncInst &Trunc);
   Instruction *narrowMaskedBinOp(BinaryOperator &And);
   Instruction *narrowMathIfNoOverflow(BinaryOperator &I);
   Instruction *narrowFunnelShift(TruncInst &Trunc);
   Instruction *optimizeBitCastFromPhi(CastInst &CI, PHINode *PN);
-  Instruction *matchSAddSubSat(SelectInst &MinMax1);
+  Instruction *matchSAddSubSat(Instruction &MinMax1);
+  Instruction *foldNot(BinaryOperator &I);
 
   void freelyInvertAllUsersOf(Value *V);
 
@@ -375,6 +376,8 @@ private:
   Value *foldAndOfICmps(ICmpInst *LHS, ICmpInst *RHS, BinaryOperator &And);
   Value *foldOrOfICmps(ICmpInst *LHS, ICmpInst *RHS, BinaryOperator &Or);
   Value *foldXorOfICmps(ICmpInst *LHS, ICmpInst *RHS, BinaryOperator &Xor);
+
+  Value *foldEqOfParts(ICmpInst *Cmp0, ICmpInst *Cmp1, bool IsAnd);
 
   /// Optimize (fcmp)&(fcmp) or (fcmp)|(fcmp).
   /// NOTE: Unlike most of instcombine, this returns a Value which should
@@ -635,19 +638,27 @@ private:
   /// Canonicalize the position of binops relative to shufflevector.
   Instruction *foldVectorBinop(BinaryOperator &Inst);
   Instruction *foldVectorSelect(SelectInst &Sel);
+  Instruction *foldSelectShuffle(ShuffleVectorInst &Shuf);
 
   /// Given a binary operator, cast instruction, or select which has a PHI node
   /// as operand #0, see if we can fold the instruction into the PHI (which is
   /// only possible if all operands to the PHI are constants).
   Instruction *foldOpIntoPhi(Instruction &I, PHINode *PN);
 
-public:
+  /// For a binary operator with 2 phi operands, try to hoist the binary
+  /// operation before the phi. This can result in fewer instructions in
+  /// patterns where at least one set of phi operands simplifies.
+  /// Example:
+  /// BB3: binop (phi [X, BB1], [C1, BB2]), (phi [Y, BB1], [C2, BB2])
+  /// -->
+  /// BB1: BO = binop X, Y
+  /// BB3: phi [BO, BB1], [(binop C1, C2), BB2]
+  Instruction *foldBinopWithPhiOperands(BinaryOperator &BO);
   /// Given an instruction with a select as one operand and a constant as the
   /// other operand, try to fold the binary operator into the select arguments.
   /// This also works for Cast instructions, which obviously do not have a
   /// second operand.
   Instruction *FoldOpIntoSelect(Instruction &Op, SelectInst *SI);
-private:
 
   /// This is a convenience wrapper function for the above two functions.
   Instruction *foldBinOpIntoSelectOrPhi(BinaryOperator &I);
@@ -663,6 +674,7 @@ private:
   Instruction *foldPHIArgGEPIntoPHI(PHINode &PN);
   Instruction *foldPHIArgLoadIntoPHI(PHINode &PN);
   Instruction *foldPHIArgZextsIntoPHI(PHINode &PN);
+  Instruction *foldPHIArgIntToPtrToPHI(PHINode &PN);
 
   /// If an integer typed PHI has only one use which is an IntToPtr operation,
   /// replace the PHI with an existing pointer typed PHI if it exists. Otherwise
@@ -697,7 +709,7 @@ private:
   Instruction *foldSignBitTest(ICmpInst &I);
   Instruction *foldICmpWithZero(ICmpInst &Cmp);
 
-  Value *foldUnsignedMultiplicationOverflowCheck(ICmpInst &Cmp);
+  Value *foldMultiplicationOverflowCheck(ICmpInst &Cmp);
 
   Instruction *foldICmpSelectConstant(ICmpInst &Cmp, SelectInst *Select,
                                       ConstantInt *C);
@@ -741,6 +753,7 @@ private:
                                              const APInt &C);
   Instruction *foldICmpEqIntrinsicWithConstant(ICmpInst &ICI, IntrinsicInst *II,
                                                const APInt &C);
+  Instruction *foldICmpBitCast(ICmpInst &Cmp);
 
   // Helpers of visitSelectInst().
   Instruction *foldSelectExtConst(SelectInst &Sel);
