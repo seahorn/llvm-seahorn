@@ -103,7 +103,7 @@ static cl::opt<::CFLAAType>
                         clEnumValN(::CFLAAType::Both, "both",
                                    "Enable both variants of CFL-AA")));
 
-cl::opt<bool> EnableLoopInterchange(
+static cl::opt<bool> EnableLoopInterchange(
     "seaopt-enable-loopinterchange", cl::init(false), cl::Hidden,
     cl::desc("Enable the experimental LoopInterchange Pass"));
 
@@ -584,7 +584,7 @@ void PassManagerBuilder::addVectorPasses(legacy::PassManagerBase &PM,
     PM.add(createLoopLoadEliminationPass());
   }
   // Cleanup after the loop optimization passes.
-  PM.add(createInstructionCombiningPass());
+  PM.add(createSeaInstructionCombiningPass());
 
   if (OptLevel > 1 && ExtraVectorizerPasses) {
     // At higher optimization levels, try to clean up any runtime overlap and
@@ -595,11 +595,11 @@ void PassManagerBuilder::addVectorPasses(legacy::PassManagerBase &PM,
     // dead (or speculatable) control flows or more combining opportunities.
     PM.add(createEarlyCSEPass());
     PM.add(createCorrelatedValuePropagationPass());
-    PM.add(createInstructionCombiningPass());
+    PM.add(createSeaInstructionCombiningPass());
     PM.add(createLICMPass(LicmMssaOptCap, LicmMssaNoAccForPromotionCap));
     PM.add(createLoopUnswitchPass(SizeLevel || OptLevel < 3, DivergentTarget));
     PM.add(createCFGSimplificationPass());
-    PM.add(createInstructionCombiningPass());
+    PM.add(createSeaInstructionCombiningPass());
   }
 
   // Now that we've formed fast to execute loop structures, we do further
@@ -620,7 +620,7 @@ void PassManagerBuilder::addVectorPasses(legacy::PassManagerBase &PM,
 
   if (IsFullLTO) {
     PM.add(createSCCPPass());                 // Propagate exposed constants
-    PM.add(createInstructionCombiningPass()); // Clean up again
+    PM.add(createSeaInstructionCombiningPass()); // Clean up again
     PM.add(createBitTrackingDCEPass());
   }
 
@@ -636,7 +636,7 @@ void PassManagerBuilder::addVectorPasses(legacy::PassManagerBase &PM,
 
   if (!IsFullLTO) {
     addExtensionsToPM(EP_Peephole, PM);
-    PM.add(createInstructionCombiningPass());
+    PM.add(createSeaInstructionCombiningPass());
 
     if (EnableUnrollAndJam && !DisableUnrollLoops) {
       // Unroll and Jam. We do this before unroll but need to be in a separate
@@ -651,7 +651,7 @@ void PassManagerBuilder::addVectorPasses(legacy::PassManagerBase &PM,
 
     if (!DisableUnrollLoops) {
       // LoopUnroll may generate some redundency to cleanup.
-      PM.add(createInstructionCombiningPass());
+      PM.add(createSeaInstructionCombiningPass());
 
       // Runtime unrolling will introduce runtime check in loop prologue. If the
       // unrolled loop is a inner loop, then the prologue will be inside the
@@ -668,7 +668,7 @@ void PassManagerBuilder::addVectorPasses(legacy::PassManagerBase &PM,
   PM.add(createAlignmentFromAssumptionsPass());
 
   if (IsFullLTO)
-    PM.add(createInstructionCombiningPass());
+    PM.add(createSeaInstructionCombiningPass());
 }
 
 void PassManagerBuilder::populateModulePassManager(
