@@ -1439,7 +1439,7 @@ static bool optimizeLoopExitWithUnknownExitCount(
   return true;
 }
 
-bool IndVarSimplify::canonicalizeExitCondition(Loop *L) {
+bool SeaIndVarSimplify::canonicalizeExitCondition(Loop *L) {
   // Note: This is duplicating a particular part on SimplifyIndVars reasoning.
   // We need to duplicate it because given icmp zext(small-iv), C, IVUsers
   // never reaches the icmp since the zext doesn't fold to an AddRec unless
