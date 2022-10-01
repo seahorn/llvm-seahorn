@@ -984,7 +984,7 @@ Instruction *SeaInstCombinerImpl::visitTrunc(TruncInst &Trunc) {
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::transformZExtICmp(ICmpInst *Cmp, ZExtInst &Zext) {
+Instruction *SeaInstCombinerImpl::transformZExtICmp(ICmpInst *Cmp, ZExtInst &Zext) {
 
 
   if (AvoidBv) return nullptr;

@@ -654,11 +654,14 @@ private:
   /// BB1: BO = binop X, Y
   /// BB3: phi [BO, BB1], [(binop C1, C2), BB2]
   Instruction *foldBinopWithPhiOperands(BinaryOperator &BO);
+
+public:
   /// Given an instruction with a select as one operand and a constant as the
   /// other operand, try to fold the binary operator into the select arguments.
   /// This also works for Cast instructions, which obviously do not have a
   /// second operand.
   Instruction *FoldOpIntoSelect(Instruction &Op, SelectInst *SI);
+private:
 
   /// This is a convenience wrapper function for the above two functions.
   Instruction *foldBinOpIntoSelectOrPhi(BinaryOperator &I);

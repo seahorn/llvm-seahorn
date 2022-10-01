@@ -298,7 +298,7 @@ Instruction *SeaInstCombinerImpl::foldIntegerTypedPHI(PHINode &PN) {
 
 // Remove RoundTrip IntToPtr/PtrToInt Cast on PHI-Operand and
 // fold Phi-operand to bitcast.
-Instruction *InstCombinerImpl::foldPHIArgIntToPtrToPHI(PHINode &PN) {
+Instruction *SeaInstCombinerImpl::foldPHIArgIntToPtrToPHI(PHINode &PN) {
   // convert ptr2int ( phi[ int2ptr(ptr2int(x))] ) --> ptr2int ( phi [ x ] )
   // Make sure all uses of phi are ptr2int.
   if (!all_of(PN.users(), [](User *U) { return isa<PtrToIntInst>(U); }))

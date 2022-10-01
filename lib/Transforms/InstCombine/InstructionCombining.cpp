@@ -213,7 +213,7 @@ Value *SeaInstCombinerImpl::EmitGEPOffset(User *GEP) {
 /// the backend.
 /// NOTE: This treats i8, i16 and i32 specially because they are common
 ///       types in frontend languages.
-bool InstCombinerImpl::isDesirableIntType(unsigned BitWidth) const {
+bool SeaInstCombinerImpl::isDesirableIntType(unsigned BitWidth) const {
   switch (BitWidth) {
   case 8:
   case 16:
@@ -976,7 +976,7 @@ Value *SeaInstCombinerImpl::dyn_castNegVal(Value *V) const {
 /// A binop with a constant operand and a sign-extended boolean operand may be
 /// converted into a select of constants by applying the binary operation to
 /// the constant with the two possible values of the extended boolean (0 or -1).
-Instruction *InstCombinerImpl::foldBinopOfSextBoolToSelect(BinaryOperator &BO) {
+Instruction *SeaInstCombinerImpl::foldBinopOfSextBoolToSelect(BinaryOperator &BO) {
   // TODO: Handle non-commutative binop (constant is operand 0).
   // TODO: Handle zext.
   // TODO: Peek through 'not' of cast.
@@ -1293,7 +1293,7 @@ Instruction *SeaInstCombinerImpl::foldOpIntoPhi(Instruction &I, PHINode *PN) {
   return replaceInstUsesWith(I, NewPN);
 }
 
-Instruction *InstCombinerImpl::foldBinopWithPhiOperands(BinaryOperator &BO) {
+Instruction *SeaInstCombinerImpl::foldBinopWithPhiOperands(BinaryOperator &BO) {
   // TODO: This should be similar to the incoming values check in foldOpIntoPhi:
   //       we are guarding against replicating the binop in >1 predecessor.
   //       This could miss matching a phi with 2 constant incoming values.
@@ -1953,7 +1953,7 @@ static Instruction *foldSelectGEP(GetElementPtrInst &GEP,
   return SelectInst::Create(Cond, NewTrueC, NewFalseC, "", nullptr, Sel);
 }
 
-Instruction *InstCombinerImpl::visitGEPOfGEP(GetElementPtrInst &GEP,
+Instruction *SeaInstCombinerImpl::visitGEPOfGEP(GetElementPtrInst &GEP,
                                              GEPOperator *Src) {
   // Combine Indices - If the source pointer to this getelementptr instruction
   // is a getelementptr instruction with matching element type, combine the
@@ -2087,7 +2087,7 @@ Instruction *InstCombinerImpl::visitGEPOfGEP(GetElementPtrInst &GEP,
 }
 
 // Note that we may have also stripped an address space cast in between.
-Instruction *InstCombinerImpl::visitGEPOfBitcast(BitCastInst *BCI,
+Instruction *SeaInstCombinerImpl::visitGEPOfBitcast(BitCastInst *BCI,
                                                  GetElementPtrInst &GEP) {
   // With opaque pointers, there is no pointer element type we can use to
   // adjust the GEP type.
@@ -3289,7 +3289,7 @@ Instruction *SeaInstCombinerImpl::visitExtractValueInst(ExtractValueInst &EV) {
         auto *NewLHS = WO->getLHS();
         if (Offset != 0)
           NewLHS = Builder.CreateAdd(NewLHS, ConstantInt::get(OpTy, Offset));
-          return new ICmpInst(ICmpInst::getInversePredicate(Pred), NewLHS,
+        return new ICmpInst(ICmpInst::getInversePredicate(Pred), NewLHS,
                               ConstantInt::get(OpTy, NewRHSC));
         }
       }
@@ -4023,7 +4023,7 @@ bool SeaInstCombinerImpl::run() {
       if (!UserInst)
         return None;
 
-        BasicBlock *BB = I->getParent();
+      BasicBlock *BB = I->getParent();
       BasicBlock *UserParent = nullptr;
 
       // Special handling for Phi nodes - get the block the use occurs in.

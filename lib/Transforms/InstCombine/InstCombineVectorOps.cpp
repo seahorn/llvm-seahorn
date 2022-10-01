@@ -179,7 +179,7 @@ Instruction *SeaInstCombinerImpl::scalarizePHI(ExtractElementInst &EI,
   return &EI;
 }
 
-Instruction *InstCombinerImpl::foldBitcastExtElt(ExtractElementInst &Ext) {
+Instruction *SeaInstCombinerImpl::foldBitcastExtElt(ExtractElementInst &Ext) {
   Value *X;
   uint64_t ExtIndexC;
   if (!match(Ext.getVectorOperand(), m_BitCast(m_Value(X))) ||
@@ -368,7 +368,7 @@ static APInt findDemandedEltsByAllUsers(Value *V) {
 /// return it with the canonical type if it isn't already canonical.  We
 /// arbitrarily pick 64 bit as our canonical type.  The actual bitwidth doesn't
 /// matter, we just want a consistent type to simplify CSE.
-ConstantInt *getPreferredVectorIndex(ConstantInt *IndexC) {
+static ConstantInt *getPreferredVectorIndex(ConstantInt *IndexC) {
   const unsigned IndexBW = IndexC->getType()->getBitWidth();
   if (IndexBW == 64 || IndexC->getValue().getActiveBits() > 64)
     return nullptr;
@@ -2031,7 +2031,7 @@ static Instruction *canonicalizeInsertSplat(ShuffleVectorInst &Shuf,
 }
 
 /// Try to fold shuffles that are the equivalent of a vector select.
-Instruction *InstCombinerImpl::foldSelectShuffle(ShuffleVectorInst &Shuf) {
+Instruction *SeaInstCombinerImpl::foldSelectShuffle(ShuffleVectorInst &Shuf) {
   if (!Shuf.isSelect())
     return nullptr;
 

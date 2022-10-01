@@ -1101,7 +1101,7 @@ static Value *extractIntPart(const IntPart &P, IRBuilderBase &Builder) {
 /// (icmp eq X0, Y0) & (icmp eq X1, Y1) -> icmp eq X01, Y01
 /// (icmp ne X0, Y0) | (icmp ne X1, Y1) -> icmp ne X01, Y01
 /// where X0, X1 and Y0, Y1 are adjacent parts extracted from an integer.
-Value *InstCombinerImpl::foldEqOfParts(ICmpInst *Cmp0, ICmpInst *Cmp1,
+Value *SeaInstCombinerImpl::foldEqOfParts(ICmpInst *Cmp0, ICmpInst *Cmp1,
                                        bool IsAnd) {
   if (!Cmp0->hasOneUse() || !Cmp1->hasOneUse())
     return nullptr;
@@ -3346,7 +3346,7 @@ bool SeaInstCombinerImpl::sinkNotIntoOtherHandOfAndOrOr(BinaryOperator &I) {
   return true;
 }
 
-Instruction *InstCombinerImpl::foldNot(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::foldNot(BinaryOperator &I) {
   Value *NotOp;
   if (!match(&I, m_Not(m_Value(NotOp))))
     return nullptr;
@@ -3568,7 +3568,7 @@ Instruction *InstCombinerImpl::foldNot(BinaryOperator &I) {
 // FIXME: We use commutative matchers (m_c_*) for some, but not all, matches
 // here. We should standardize that construct where it is needed or choose some
 // other way to ensure that commutated variants of patterns are not missed.
-Instruction *InstCombinerImpl::visitXor(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::visitXor(BinaryOperator &I) {
   if (Value *V = SimplifyXorInst(I.getOperand(0), I.getOperand(1),
                                  SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);

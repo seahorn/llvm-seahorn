@@ -2851,7 +2851,7 @@ Instruction *SeaInstCombinerImpl::foldICmpSelectConstant(ICmpInst &Cmp,
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::foldICmpBitCast(ICmpInst &Cmp) {
+Instruction *SeaInstCombinerImpl::foldICmpBitCast(ICmpInst &Cmp) {
   auto *Bitcast = dyn_cast<BitCastInst>(Cmp.getOperand(0));
   if (!Bitcast)
     return nullptr;

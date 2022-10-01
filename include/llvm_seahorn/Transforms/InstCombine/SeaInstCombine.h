@@ -17,15 +17,20 @@
 #define LLVM_TRANSFORMS_INSTCOMBINE_INSTCOMBINE_H
 
 #include "llvm_seahorn/InitializePasses.h"
+
 #include "llvm/IR/Function.h"
 #include "llvm/IR/PassManager.h"
-#include "llvm/Transforms/InstCombine/InstCombineWorklist.h"
+#include "llvm/Pass.h"
+
+#define DEBUG_TYPE "sea-instcombine"
+#include "llvm/Transforms/Utils/InstructionWorklist.h"
+#undef DEBUG_TYPE
 
 namespace llvm_seahorn {
 using namespace llvm;
 
 class SeaInstCombinePass : public PassInfoMixin<SeaInstCombinePass> {
-  InstCombineWorklist Worklist;
+  InstructionWorklist Worklist;
   const unsigned MaxIterations;
   const bool AvoidBv;
   const bool AvoidUnsignedICmp;
@@ -57,7 +62,7 @@ public:
 /// This is a basic whole-function wrapper around the instcombine utility. It
 /// will try to combine all instructions in the function.
 class SeaInstructionCombiningPass : public FunctionPass {
-  InstCombineWorklist Worklist;
+  InstructionWorklist Worklist;
 
   const unsigned MaxIterations;
   const bool AvoidBv;
