@@ -585,6 +585,10 @@ int main(int argc, char **argv) {
   initializeExampleIRTransforms(Registry);
 #endif
 
+  #if 1 /*  SEAHORN ADD */
+  EnableNewPassManager = false;
+  #endif
+  
   cl::ParseCommandLineOptions(argc, argv,
     "llvm .bc -> .bc modular optimizer and analysis printer\n");
 
