@@ -89,8 +89,11 @@ tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution &SE,
                     << L->getHeader()->getParent()->getName() << "] Loop %"
                     << L->getHeader()->getName() << "\n");
   TransformationMode TM = hasUnrollTransformation(L);
-  if (TM & TM_Disable)
-    return LoopUnrollResult::Unmodified;
+  if (TM & TM_Disable) {
+    LLVM_DEBUG(dbgs() << "Forcing Loop Unroll despite disable metadata: F["
+                      << L->getHeader()->getParent()->getName() << "] Loop %"
+                      << L->getHeader()->getName() << "\n");
+  }
   if (!L->isLoopSimplifyForm()) {
     LLVM_DEBUG(
         dbgs() << "  Not unrolling loop which is not in loop-simplify form.\n");
