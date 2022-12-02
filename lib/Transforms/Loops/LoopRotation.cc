@@ -138,10 +138,11 @@ public:
                         ? DefaultRotationThreshold
                         : MaxHeaderSize;
 
+    Threshold = DefaultRotationThreshold;
     return LoopRotation(L, LI, TTI, AC, &DT, &SE,
                         MSSAU.hasValue() ? MSSAU.getPointer() : nullptr, SQ,
-                        false, Threshold, false,
-                        PrepareForLTO || PrepareForLTOOption);
+                        false, Threshold, true /* IsUtilMode */,
+                        false /*PrepareForLTO || PrepareForLTOOption*/);
   }
 };
 } // namespace
