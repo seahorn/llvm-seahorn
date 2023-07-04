@@ -69,6 +69,10 @@ static cl::opt<bool> SeaEnableIndVar("seaopt-enable-indvar", cl::Hidden,
 static cl::opt<bool> SeaEnableLoopIdiom("seaopt-enable-loop-idiom", cl::Hidden,
                                         cl::desc("Enable loop-idiom pass"),
                                         cl::init(true));
+
+static cl::opt<bool> SeaEnableVectorize("seaopt-enable-vectorize", cl::Hidden,
+                                        cl::desc("Enable loop vectorization"),
+                                        cl::init(false));
 #endif
 
 static cl::opt<bool>
@@ -579,6 +583,9 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
 /// FIXME: Should LTO cause any differences to this set of passes?
 void PassManagerBuilder::addVectorPasses(legacy::PassManagerBase &PM,
                                          bool IsFullLTO) {
+#if 1
+  if (!SeaEnableVectorize) return;
+#endif 
   PM.add(createLoopVectorizePass(!LoopsInterleaved, !LoopVectorize));
 
   if (IsFullLTO) {
