@@ -2711,11 +2711,11 @@ Instruction *SeaInstCombinerImpl::foldICmpAddConstant(ICmpInst &Cmp,
     return new ICmpInst(ICmpInst::ICMP_SGT, X, ConstantInt::get(Ty, ~(*C2)));
 
   // (X + C2) >s C --> X <u (SMAX - C) (if C == C2 - 1)
-  if (Pred == CmpInst::ICMP_SGT && C == *C2 - 1)
+  if (!AvoidUnsignedICmp && Pred == CmpInst::ICMP_SGT && C == *C2 - 1)
     return new ICmpInst(ICmpInst::ICMP_ULT, X, ConstantInt::get(Ty, SMax - C));
 
   // (X + C2) <s C --> X >u (C ^ SMAX) (if C == C2)
-  if (Pred == CmpInst::ICMP_SLT && C == *C2)
+  if (!AvoidUnsignedICmp && Pred == CmpInst::ICMP_SLT && C == *C2)
     return new ICmpInst(ICmpInst::ICMP_UGT, X, ConstantInt::get(Ty, C ^ SMax));
 
   if (!Add->hasOneUse())
