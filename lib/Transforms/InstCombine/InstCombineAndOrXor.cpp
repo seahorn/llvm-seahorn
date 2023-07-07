@@ -689,8 +689,9 @@ static Value *foldLogOpOfMaskedICmps(ICmpInst *LHS, ICmpInst *RHS, bool IsAnd,
 Value *SeaInstCombinerImpl::simplifyRangeCheck(ICmpInst *Cmp0, ICmpInst *Cmp1,
                                             bool Inverted) {
 
-  if (AvoidUnsignedICmp)
+  if (AvoidUnsignedICmp) {
     return nullptr;
+  }
 
   // Check the lower range comparison, e.g. x >= 0
   // InstCombine already ensured that if there is a constant it's on the RHS.
@@ -1196,7 +1197,8 @@ static Value *foldAndOrOfICmpsWithConstEq(ICmpInst *Cmp0, ICmpInst *Cmp1,
 static Value *foldAndOrOfICmpsUsingRanges(
     ICmpInst::Predicate Pred1, Value *V1, const APInt &C1,
     ICmpInst::Predicate Pred2, Value *V2, const APInt &C2,
-    IRBuilderBase &Builder, bool IsAnd) {
+    IRBuilderBase &Builder, bool IsAnd, bool AvoidUnsignedICmp) {
+
   // Look through add of a constant offset on V1, V2, or both operands. This
   // allows us to interpret the V + C' < C'' range idiom into a proper range.
   const APInt *Offset1 = nullptr, *Offset2 = nullptr;
@@ -1228,6 +1230,12 @@ static Value *foldAndOrOfICmpsUsingRanges(
   APInt NewC, Offset;
   CR->getEquivalentICmp(NewPred, NewC, Offset);
 
+  if (AvoidUnsignedICmp &&
+      ((ICmpInst::isSigned(Pred1) || ICmpInst::isSigned(Pred2)) &&
+       (ICmpInst::isUnsigned(NewPred)))) {
+    return nullptr;
+  }
+  
   Type *Ty = V1->getType();
   Value *NewV = V1;
   if (Offset != 0)
@@ -1355,7 +1363,7 @@ Value *SeaInstCombinerImpl::foldAndOfICmps(ICmpInst *LHS, ICmpInst *RHS,
   }
 
   return foldAndOrOfICmpsUsingRanges(PredL, LHS0, *LHSC, PredR, RHS0, *RHSC,
-                                     Builder, /* IsAnd */ true);
+                                     Builder, /* IsAnd */ true, AvoidUnsignedICmp);
 }
 
 Value *SeaInstCombinerImpl::foldLogicOfFCmps(FCmpInst *LHS, FCmpInst *RHS,
@@ -2671,7 +2679,7 @@ Value *SeaInstCombinerImpl::foldOrOfICmps(ICmpInst *LHS, ICmpInst *RHS,
   if (!LHSC || !RHSC)
     return nullptr;
   return foldAndOrOfICmpsUsingRanges(PredL, LHS0, *LHSC, PredR, RHS0, *RHSC,
-                                     Builder, /* IsAnd */ false);
+                                     Builder, /* IsAnd */ false, AvoidUnsignedICmp);
 }
 
 // FIXME: We use commutative matchers (m_c_*) for some, but not all, matches
