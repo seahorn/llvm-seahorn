@@ -7,6 +7,8 @@ class ModulePass;
 
 namespace llvm_seahorn {
 llvm::ModulePass *createSeaAnnotation2MetadataLegacyPass();
+llvm::ModulePass *createSeaLoopExtractorPass();
+llvm::ModulePass *createSeaSingleLoopExtractorPass();
 } // namespace llvm_seahorn
 
 #endif

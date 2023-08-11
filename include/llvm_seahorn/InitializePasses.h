@@ -22,6 +22,8 @@ void initializeSeaInstructionCombiningPassPass(PassRegistry &);
 void initializeSeaLoopRotateLegacyPassPass(PassRegistry &);
 void initializeSeaLoopUnrollPass(PassRegistry &);
 void initializeSeaAnnotation2MetadataLegacyPass(PassRegistry &);
+void initializeSeaLoopExtractorLegacyPassPass(PassRegistry &);
+void initializeSeaSingleLoopExtractorPass(PassRegistry &);
 } // end namespace llvm
 
 #endif // SEA_LLVM_INITIALIZEPASSES_H
