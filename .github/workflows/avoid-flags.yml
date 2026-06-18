@@ -1,0 +1,56 @@
+name: avoid-flags
+
+# Guards the SeaHorn InstCombine Avoid* behavior on both LLVM lines.
+# The source differs per branch, so the LLVM version tracks the branch:
+#   dev14 -> LLVM 14,  dev15 -> LLVM 15.
+# This file must exist on each branch for Actions to run it there; it is carried
+# over automatically when dev15 is branched from dev14.
+on:
+  push:
+    branches: [dev14, dev15]
+  pull_request:
+    branches: [dev14, dev15]
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select LLVM version for this branch
+        id: llvm
+        run: |
+          # base_ref is set for PRs (target branch); ref_name for pushes.
+          BR="${GITHUB_BASE_REF:-$GITHUB_REF_NAME}"
+          case "$BR" in
+            dev15) V=15 ;;
+            *)     V=14 ;;
+          esac
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Building against LLVM $V (branch $BR)"
+
+      - name: Install LLVM + tooling
+        env:
+          V: ${{ steps.llvm.outputs.version }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y "llvm-$V-dev" "llvm-$V-tools" "clang-$V" ninja-build cmake
+
+      - name: Work around missing libPolly.a (Ubuntu llvm packaging)
+        # llvm-*-dev's cmake exports reference libPolly.a but don't ship it; the
+        # `Extensions` link component drags it in. Drop it for this build.
+        run: sed -i '/^  Extensions$/d' tools/opt/CMakeLists.txt
+
+      - name: Build seaopt
+        env:
+          V: ${{ steps.llvm.outputs.version }}
+        run: |
+          cmake -B build -G Ninja \
+            -DLLVM_DIR="$(llvm-config-$V --cmakedir)" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --target seaopt -j"$(nproc)"
+
+      - name: Run avoid-flag corpus
+        env:
+          V: ${{ steps.llvm.outputs.version }}
+        run: SEAOPT=./build/bin/seaopt OPT="opt-$V" ./test/avoid_flags/run.sh
