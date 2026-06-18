@@ -1,6 +1,6 @@
-name: avoid-flags
+name: sea-transforms
 
-# Guards the SeaHorn InstCombine Avoid* behavior on both LLVM lines.
+# Guards the SeaHorn-specific transform behavior on both LLVM lines.
 # The source differs per branch, so the LLVM version tracks the branch:
 #   dev14 -> LLVM 14,  dev15 -> LLVM 15.
 # This file must exist on each branch for Actions to run it there; it is carried
@@ -50,7 +50,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release
           cmake --build build --target seaopt -j"$(nproc)"
 
-      - name: Run avoid-flag corpus
+      - name: Run sea-transforms corpus
         env:
           V: ${{ steps.llvm.outputs.version }}
-        run: SEAOPT=./build/bin/seaopt OPT="opt-$V" ./test/avoid_flags/run.sh
+        run: SEAOPT=./build/bin/seaopt OPT="opt-$V" ./test/sea_transforms/run.sh
