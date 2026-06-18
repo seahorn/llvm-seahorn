@@ -76,13 +76,9 @@ test fails.
 The `.ll` files also carry lit-style `RUN:`/`CHECK:` lines, so they can be driven
 by `llvm-lit` + `FileCheck` once a lit config is added.
 
-## Build notes (this machine)
+## Build note
 
-Reproducing the `seaopt` used to validate these tests:
-
-- Use a real CMake (the `~/.local/bin/cmake` shim is broken); e.g.
-  `~/cmake-3.31.7-linux-x86_64/bin/cmake`.
-- Ubuntu's `llvm-14` package references `libPolly.a` in its CMake exports but
-  does not ship it. The `Extensions` link component drags Polly in, so for a
-  local `seaopt` build drop `Extensions` from `tools/opt/CMakeLists.txt`
-  (`LLVM_LINK_COMPONENTS`). Expect the same with `llvm-15-dev`.
+Ubuntu's `llvm-N` packages reference `libPolly.a` in their CMake exports but do
+not ship it. The `Extensions` link component pulls Polly in, so building
+`seaopt` against a distro LLVM may require dropping `Extensions` from
+`tools/opt/CMakeLists.txt` (`LLVM_LINK_COMPONENTS`).
