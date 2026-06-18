@@ -1,18 +1,20 @@
-# Avoid-flag behavioral corpus
+# SeaHorn transform behavioral corpus
 
-These tests pin the *intended* behavior of the SeaHorn-specific InstCombine
-modifications. In `seaopt` the flags are hardcoded **on**
+These tests pin the *intended* behavior of the SeaHorn-specific passes. Each
+test is built so that a **stock** LLVM pass performs a transformation SeaHorn
+wants to suppress (or skips one SeaHorn wants to force), and asserts that the
+corresponding `seaopt -sea-*` pass does the SeaHorn thing instead. The stock
+`opt` result is the oracle.
+
+## InstCombine Avoid* flags
+
+In `seaopt` the flags are hardcoded **on**
 (`AvoidBv = AvoidUnsignedICmp = AvoidIntToPtr = AvoidAliasing = true`, see
 `InstructionCombining.cpp` ~line 4542), so there is no run-time off switch.
+Validated against a `seaopt` built from `dev14` on LLVM 14:
 
-Each test is built so that **stock** instcombine performs a transformation that
-SeaHorn wants to suppress, and asserts that `seaopt -sea-instcombine` leaves the
-verification-friendly form instead. The stock `opt` result is the oracle.
-
-All four were validated against a `seaopt` built from `dev14` on LLVM 14:
-
-| File | Flag | stock `opt -instcombine` | `seaopt` keeps |
-|------|------|--------------------------|----------------|
+| File | Flag | stock instcombine | `seaopt -sea-instcombine` keeps |
+|------|------|-------------------|----------------|
 | `avoidbv_urem_pow2.ll`      | AvoidBv            | `and i32 %x, 7`              | `urem i32 %x, 8` |
 | `avoidbv_add_disjoint.ll`   | AvoidBv            | `or i32 %a, %b`             | `add nuw nsw i32 %a, %b` |
 | `avoidunsignedicmp_slt.ll`  | AvoidUnsignedICmp | `icmp ult`                  | `icmp slt` |
@@ -27,6 +29,28 @@ On LLVM 15 the merged form is `phi ptr`; the test forbids both `phi i32*` and
 `AvoidIntToPtr` is intentionally **not** covered: in dev14 the flag is set and
 has an accessor (`seaAvoidIntToPtr()`) but is never read anywhere. Confirm or
 restore its gating during the port, then add a test here.
+
+## Loop passes
+
+| File | Pass | stock | `seaopt -sea-loop-unroll` |
+|------|------|-------|----------------|
+| `loopunroll_ignore_disable.ll` | LoopUnroll | respects `llvm.loop.unroll.disable` (loop kept) | ignores it → fully unrolled |
+
+SeaHorn's LoopUnroll deliberately ignores the `llvm.loop.unroll.disable`
+metadata (it only logs "Forcing Loop Unroll despite disable metadata" where
+stock bails). Validated on LLVM 14.
+
+Two other loop customizations are **not** unit-tested here, by design:
+
+- **IndVarSimplify disequality avoidance** (`sea-indvars`): SeaHorn preserves the
+  `slt`/`ult` exit predicate where stock LFTR would emit `icmp ne`. On LLVM 14,
+  stock `-indvars` is too conservative to perform that LFTR rewrite on ordinary
+  integer-counter loops, so any standalone test would pass *vacuously* without
+  exercising the patch. Re-evaluate on LLVM 15 (LFTR behavior may differ), or
+  cover it at the pipeline level.
+- **LoopRotate aggressiveness** (`sea-loop-rotate`): not registered as a
+  standalone legacy pass in `seaopt` (it is wired only through the pass-manager
+  pipeline), so it cannot be driven in isolation by this harness.
 
 ## Running
 
