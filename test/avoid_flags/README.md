@@ -62,9 +62,16 @@ SEAOPT=/path/to/seaopt OPT=opt-14 ./run.sh
 SEAOPT=./build/bin/seaopt OPT=opt-15 ./run.sh
 ```
 
-`run.sh` checks the invariant, runs the LLVM verifier on each output (catching
-malformed IR such as opaque-pointer mistakes), and prints the stock contrast for
-any failing case. Exit code is non-zero if any test fails.
+For each test `run.sh`:
+1. asserts the SeaHorn invariant on the `seaopt` output;
+2. runs the LLVM verifier on that output (catches malformed/opaque-pointer IR);
+3. asserts that stock `opt` actually **diverges** (does the thing SeaHorn
+   avoids/forces).
+
+Step 3 is the non-vacuity guard: if a future LLVM makes stock behave like
+SeaHorn, the divergence vanishes and the test fails with `VACUOUS:
+stock-did-not-diverge` instead of passing silently. Exit code is non-zero if any
+test fails.
 
 The `.ll` files also carry lit-style `RUN:`/`CHECK:` lines, so they can be driven
 by `llvm-lit` + `FileCheck` once a lit config is added.

@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # Behavioral checks for the SeaHorn-specific transform customizations.
 #
-# For each test, run it through `seaopt` with the relevant legacy pass, assert
-# the verification-friendly invariant, run the LLVM verifier on the output, and
-# print the stock `opt` result for contrast on failure.
+# For each test:
+#   1. run it through `seaopt` and assert the verification-friendly invariant;
+#   2. run the LLVM verifier on the output (catches malformed/opaque-ptr IR);
+#   3. assert that *stock* `opt` actually DIVERGES (does the thing SeaHorn
+#      avoids/forces). Step 3 is what keeps a test from passing vacuously: if a
+#      future LLVM makes stock behave like SeaHorn, the divergence disappears
+#      and the test fails loudly instead of silently green.
 #
 # seaopt keeps the legacy pass manager, so the sea passes are invoked as
 # `-sea-*`. The stock contrast and the verifier use the new-PM `-passes=` form
@@ -51,26 +55,38 @@ declare -A FORBID=(
 declare -A REQUIRE2=(
   [avoidaliasing_phi_load]='load i32, i32\* %q'
 )
+# What stock `opt -passes=<pass>` must produce, i.e. the divergence that proves
+# the test is non-vacuous. (Comment/header lines are stripped before matching so
+# we don't accidentally match the source filename.)
+declare -A STOCK_DIVERGES=(
+  [avoidbv_urem_pow2]='= and i32'
+  [avoidbv_add_disjoint]='= or i32'
+  [avoidunsignedicmp_slt]='icmp ult i32'
+  [avoidaliasing_phi_load]='phi i32\*'
+  [loopunroll_ignore_disable]='= phi'
+)
 
 fail=0
 for t in "${TESTS[@]}"; do
   f="$DIR/$t.ll"
   p="${PASS[$t]}"
   out="$("$SEAOPT" "-$p" -S < "$f" 2>/dev/null)"
-  ok=1
-  grep -Eq "${REQUIRE[$t]}"  <<<"$out" || ok=0
-  if [[ -n "${REQUIRE2[$t]:-}" ]]; then grep -Eq "${REQUIRE2[$t]}" <<<"$out" || ok=0; fi
-  ! grep -Eq "${FORBID[$t]}" <<<"$out" || ok=0
+  stock="$("$OPT" -S -passes="${p#sea-}" < "$f" 2>/dev/null | sed -e '/^;/d' -e '/^source_filename/d')"
+  ok=1; why=""
+  grep -Eq "${REQUIRE[$t]}"  <<<"$out" || { ok=0; why+=" seaopt-missing:/${REQUIRE[$t]}/"; }
+  if [[ -n "${REQUIRE2[$t]:-}" ]]; then grep -Eq "${REQUIRE2[$t]}" <<<"$out" || { ok=0; why+=" seaopt-missing:/${REQUIRE2[$t]}/"; }; fi
+  ! grep -Eq "${FORBID[$t]}" <<<"$out" || { ok=0; why+=" seaopt-has-forbidden:/${FORBID[$t]}/"; }
   # verify the produced IR is well-formed (catches opaque-ptr malformations)
-  vrfy=$("$OPT" -S -passes=verify <<<"$out" 2>&1 >/dev/null) || ok=0
+  vrfy=$("$OPT" -S -passes=verify <<<"$out" 2>&1 >/dev/null) || { ok=0; why+=" verifier-failed"; }
+  # non-vacuity: stock must actually diverge
+  grep -Eq "${STOCK_DIVERGES[$t]}" <<<"$stock" || { ok=0; why+=" VACUOUS:stock-did-not-diverge(/${STOCK_DIVERGES[$t]}/)"; }
   if [[ $ok -eq 1 ]]; then
     echo "PASS  $t"
   else
     fail=1
-    echo "FAIL  $t"
+    echo "FAIL  $t  --$why"
     echo "  --- seaopt -$p output ---"; sed 's/^/    /' <<<"$out"
-    echo "  --- stock $OPT -passes=${p#sea-} (contrast) ---"
-    "$OPT" -S -passes="${p#sea-}" < "$f" 2>/dev/null | sed 's/^/    /'
+    echo "  --- stock $OPT -passes=${p#sea-} (must diverge) ---"; sed 's/^/    /' <<<"$stock"
     [[ -n "$vrfy" ]] && { echo "  --- verifier ---"; sed 's/^/    /' <<<"$vrfy"; }
   fi
 done
