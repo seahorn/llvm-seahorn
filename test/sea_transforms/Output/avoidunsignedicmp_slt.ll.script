@@ -1,0 +1,3 @@
+set -o pipefail;{ : 'RUN: at line 10';   /tmp/ls-build/build/bin/seaopt -sea-instcombine -S /tmp/ls-dev14/test/sea_transforms/avoidunsignedicmp_slt.ll | FileCheck-14 /tmp/ls-dev14/test/sea_transforms/avoidunsignedicmp_slt.ll; } &&
+{ : 'RUN: at line 11';   /tmp/ls-build/build/bin/seaopt -sea-instcombine -S /tmp/ls-dev14/test/sea_transforms/avoidunsignedicmp_slt.ll | opt-14 -passes=verify -disable-output; } &&
+{ : 'RUN: at line 12';   opt-14 -passes=instcombine -S /tmp/ls-dev14/test/sea_transforms/avoidunsignedicmp_slt.ll | FileCheck-14 --check-prefix=STOCK /tmp/ls-dev14/test/sea_transforms/avoidunsignedicmp_slt.ll; }

@@ -6,7 +6,9 @@
 ;   stock opt -instcombine: %r = or i32 %a, %b
 ;   seaopt -sea-instcombine: %r = add nuw nsw i32 %a, %b   (kept)
 ;
-; RUN: seaopt -sea-instcombine -S < %s | FileCheck %s
+; RUN: %seaopt -sea-instcombine -S %s | %FileCheck %s
+; RUN: %seaopt -sea-instcombine -S %s | %opt -passes=verify -disable-output
+; RUN: %opt -passes=instcombine -S %s | %FileCheck --check-prefix=STOCK %s
 
 define i32 @add_disjoint(i32 %x, i32 %y) {
   %a = and i32 %x, 3
@@ -17,3 +19,6 @@ define i32 @add_disjoint(i32 %x, i32 %y) {
 ; CHECK-LABEL: @add_disjoint
 ; CHECK: %r = add{{.*}}i32 %a, %b
 ; CHECK-NOT: = or
+;
+; non-vacuity: stock instcombine turns the disjoint add into an or
+; STOCK: = or i32

@@ -54,27 +54,29 @@ Two other loop customizations are **not** unit-tested here, by design:
 
 ## Running
 
+The corpus runs under `llvm-lit` (this is what CI uses). Tool paths come from
+the environment, so the same tests run against any build:
+
 ```sh
 # LLVM 14 baseline (proven green)
-SEAOPT=/path/to/seaopt OPT=opt-14 ./run.sh
+SEAOPT=/path/to/seaopt OPT=opt-14 FILECHECK=FileCheck-14 lit -v test/sea_transforms
 
 # LLVM 15 (dev15 build under test)
-SEAOPT=./build/bin/seaopt OPT=opt-15 ./run.sh
+SEAOPT=./build/bin/seaopt OPT=opt-15 FILECHECK=FileCheck-15 lit -v test/sea_transforms
 ```
 
-For each test `run.sh`:
-1. asserts the SeaHorn invariant on the `seaopt` output;
+Each test (see its `RUN:` lines) does three things:
+1. asserts the SeaHorn invariant on the `seaopt` output (`CHECK` / `CHECK-NOT`);
 2. runs the LLVM verifier on that output (catches malformed/opaque-pointer IR);
-3. asserts that stock `opt` actually **diverges** (does the thing SeaHorn
-   avoids/forces).
+3. asserts that stock `opt` actually **diverges** — the `STOCK:` lines, matched
+   against `opt -passes=<pass>`, do what SeaHorn avoids/forces.
 
 Step 3 is the non-vacuity guard: if a future LLVM makes stock behave like
-SeaHorn, the divergence vanishes and the test fails with `VACUOUS:
-stock-did-not-diverge` instead of passing silently. Exit code is non-zero if any
-test fails.
+SeaHorn, the `STOCK:` match fails (`expected string not found`) and the test
+fails loudly instead of passing silently.
 
-The `.ll` files also carry lit-style `RUN:`/`CHECK:` lines, so they can be driven
-by `llvm-lit` + `FileCheck` once a lit config is added.
+`run.sh` is an equivalent dependency-free runner (no lit/FileCheck needed) for
+quick local checks: `SEAOPT=… OPT=opt-14 ./run.sh`.
 
 ## Build note
 
