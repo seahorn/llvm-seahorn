@@ -1206,6 +1206,13 @@ Value *SeaInstCombinerImpl::foldAndOrOfICmpsUsingRanges(ICmpInst *ICmp1,
   APInt NewC, Offset;
   CR->getEquivalentICmp(NewPred, NewC, Offset);
 
+  // begin: llvm-seahorn -- do not turn signed comparisons into unsigned ones
+  if (AvoidUnsignedICmp &&
+      (ICmpInst::isSigned(Pred1) || ICmpInst::isSigned(Pred2)) &&
+      ICmpInst::isUnsigned(NewPred))
+    return nullptr;
+  // end: llvm-seahorn
+
   if (Offset != 0)
     NewV = Builder.CreateAdd(NewV, ConstantInt::get(Ty, Offset));
   return Builder.CreateICmp(NewPred, NewV, ConstantInt::get(Ty, NewC));
@@ -2618,7 +2625,8 @@ Value *SeaInstCombinerImpl::foldAndOrOfICmps(ICmpInst *LHS, ICmpInst *RHS,
   // (icmp ne A, 0) | (icmp ne B, 0) --> (icmp ne (A|B), 0)
   // (icmp eq A, 0) & (icmp eq B, 0) --> (icmp eq (A|B), 0)
   // TODO: Remove this when foldLogOpOfMaskedICmps can handle undefs.
-  if (!IsLogical && PredL == (IsAnd ? ICmpInst::ICMP_EQ : ICmpInst::ICMP_NE) &&
+  if (!AvoidBv && !IsLogical &&
+      PredL == (IsAnd ? ICmpInst::ICMP_EQ : ICmpInst::ICMP_NE) &&
       PredL == PredR && match(LHS1, m_ZeroInt()) && match(RHS1, m_ZeroInt()) &&
       LHS0->getType() == RHS0->getType()) {
     Value *NewOr = Builder.CreateOr(LHS0, RHS0);
