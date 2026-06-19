@@ -1,5 +1,0 @@
-7.070112e-02 avoidaliasing_phi_load.ll
-7.052016e-02 avoidbv_add_disjoint.ll
-7.013273e-02 avoidbv_urem_pow2.ll
-7.035637e-02 avoidunsignedicmp_slt.ll
-7.028389e-02 loopunroll_ignore_disable.ll

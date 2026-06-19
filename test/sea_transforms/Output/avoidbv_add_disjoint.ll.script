@@ -1,3 +1,0 @@
-set -o pipefail;{ : 'RUN: at line 9';   /tmp/ls-build/build/bin/seaopt -sea-instcombine -S /tmp/ls-dev14/test/sea_transforms/avoidbv_add_disjoint.ll | FileCheck-14 /tmp/ls-dev14/test/sea_transforms/avoidbv_add_disjoint.ll; } &&
-{ : 'RUN: at line 10';   /tmp/ls-build/build/bin/seaopt -sea-instcombine -S /tmp/ls-dev14/test/sea_transforms/avoidbv_add_disjoint.ll | opt-14 -passes=verify -disable-output; } &&
-{ : 'RUN: at line 11';   opt-14 -passes=instcombine -S /tmp/ls-dev14/test/sea_transforms/avoidbv_add_disjoint.ll | FileCheck-14 --check-prefix=STOCK /tmp/ls-dev14/test/sea_transforms/avoidbv_add_disjoint.ll; }
