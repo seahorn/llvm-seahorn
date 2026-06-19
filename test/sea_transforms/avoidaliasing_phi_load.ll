@@ -12,7 +12,9 @@
 ; is `phi ptr`; a port regression here therefore also flags opaque-pointer drift.
 ; Typed-pointer syntax (i32*) is used so the test runs on both LLVM 14 and 15.
 ;
-; RUN: seaopt -sea-instcombine -S < %s | FileCheck %s
+; RUN: %seaopt -sea-instcombine -S %s | %FileCheck %s
+; RUN: %seaopt -sea-instcombine -S %s | %opt -passes=verify -disable-output
+; RUN: %opt -passes=instcombine -S %s | %FileCheck --check-prefix=STOCK %s
 
 define i32 @phi_load(i1 %c, i32* %p, i32* %q) {
 entry:
@@ -33,3 +35,6 @@ m:
 ; CHECK-DAG: load i32, i32* %p
 ; CHECK-DAG: load i32, i32* %q
 ; CHECK: phi i32 [
+;
+; non-vacuity: stock instcombine sinks the loads, creating a pointer-typed phi
+; STOCK: phi i32*

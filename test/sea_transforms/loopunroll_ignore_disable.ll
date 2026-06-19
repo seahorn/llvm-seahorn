@@ -7,8 +7,9 @@
 ;   stock opt -loop-unroll:      respects metadata -> loop kept, 1 store
 ;   seaopt -sea-loop-unroll:     ignores metadata  -> fully unrolled, 4 stores, no phi
 ;
-; PASS: sea-loop-unroll
-; RUN: seaopt -sea-loop-unroll -S < %s | FileCheck %s
+; RUN: %seaopt -sea-loop-unroll -S %s | %FileCheck %s
+; RUN: %seaopt -sea-loop-unroll -S %s | %opt -passes=verify -disable-output
+; RUN: %opt -passes=loop-unroll -S %s | %FileCheck --check-prefix=STOCK %s
 
 define void @u(i32* %a) {
 entry:
@@ -30,3 +31,6 @@ exit:
 ; fully unrolled: the 4th iteration's store is present and the loop phi is gone
 ; CHECK: store i32 3,
 ; CHECK-NOT: = phi
+;
+; non-vacuity: stock respects the disable metadata and keeps the loop (a phi)
+; STOCK: = phi

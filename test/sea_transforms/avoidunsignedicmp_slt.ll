@@ -7,7 +7,9 @@
 ;   stock opt -instcombine: %c = icmp ult i32 %a, %b
 ;   seaopt -sea-instcombine: %c = icmp slt i32 %a, %b   (kept)
 ;
-; RUN: seaopt -sea-instcombine -S < %s | FileCheck %s
+; RUN: %seaopt -sea-instcombine -S %s | %FileCheck %s
+; RUN: %seaopt -sea-instcombine -S %s | %opt -passes=verify -disable-output
+; RUN: %opt -passes=instcombine -S %s | %FileCheck --check-prefix=STOCK %s
 
 define i1 @sicmp_to_uicmp(i32 %x, i32 %y) {
   %a = and i32 %x, 255
@@ -18,3 +20,6 @@ define i1 @sicmp_to_uicmp(i32 %x, i32 %y) {
 ; CHECK-LABEL: @sicmp_to_uicmp
 ; CHECK: icmp slt
 ; CHECK-NOT: icmp ult
+;
+; non-vacuity: stock instcombine flips the signed compare to unsigned
+; STOCK: icmp ult i32
