@@ -86,18 +86,23 @@ void replaceFnBodyWithND(Function *oldfn, SetVector<Value *> &inputs,
   // ASSUME: CodeRegionExtractor creates function formal arg list in the order:
   // fn(IN_0, IN_1, ..., IN_N, OUT_0, OUT_1, ..., OUT_M)
   for (auto i = inputs.size(); i < inputs.size() + outputs.size(); i++) {
-    // ASSUME: type is pointer
-    // TODO: remove use of deprecated getPointerElementType
-    auto nd_val = Builder.CreateCall(
-        getNondetFn(TheFunction->getArg(i)->getType()->getPointerElementType(),
-                    TheFunction->getParent()));
+    // The output arg at index i is a pointer to outputs[i - inputs.size()];
+    // recover the pointee type from the output value itself. Opaque-pointer
+    // safe, replacing the deprecated getPointerElementType().
+    Type *outTy = outputs[i - inputs.size()]->getType();
+    auto nd_val =
+        Builder.CreateCall(getNondetFn(outTy, TheFunction->getParent()));
     Builder.CreateStore(nd_val, TheFunction->getArg(i));
   }
 
-  // set return value to nd
-  auto nd_retval =
-      Builder.CreateCall(getNondetFn(ret_ty, TheFunction->getParent()));
-  Builder.CreateRet(nd_retval);
+  // set return value to nd (extracted functions commonly return void)
+  if (ret_ty->isVoidTy()) {
+    Builder.CreateRetVoid();
+  } else {
+    auto nd_retval =
+        Builder.CreateCall(getNondetFn(ret_ty, TheFunction->getParent()));
+    Builder.CreateRet(nd_retval);
+  }
   verifyFunction(*TheFunction);
 }
 
