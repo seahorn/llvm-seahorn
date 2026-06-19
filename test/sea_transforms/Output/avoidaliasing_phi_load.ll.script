@@ -1,3 +1,0 @@
-set -o pipefail;{ : 'RUN: at line 15';   /tmp/ls-build/build/bin/seaopt -sea-instcombine -S /tmp/ls-dev14/test/sea_transforms/avoidaliasing_phi_load.ll | FileCheck-14 /tmp/ls-dev14/test/sea_transforms/avoidaliasing_phi_load.ll; } &&
-{ : 'RUN: at line 16';   /tmp/ls-build/build/bin/seaopt -sea-instcombine -S /tmp/ls-dev14/test/sea_transforms/avoidaliasing_phi_load.ll | opt-14 -passes=verify -disable-output; } &&
-{ : 'RUN: at line 17';   opt-14 -passes=instcombine -S /tmp/ls-dev14/test/sea_transforms/avoidaliasing_phi_load.ll | FileCheck-14 --check-prefix=STOCK /tmp/ls-dev14/test/sea_transforms/avoidaliasing_phi_load.ll; }
