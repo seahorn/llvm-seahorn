@@ -11,6 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm_seahorn/InitializePasses.h"
+
 #include "BreakpointPrinter.h"
 #include "NewPMDriver.h"
 #include "llvm/ADT/Triple.h"
@@ -53,7 +55,7 @@
 #include "llvm/Support/YAMLTraits.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/IPO/AlwaysInliner.h"
-#include "llvm/Transforms/IPO/PassManagerBuilder.h"
+#include "llvm_seahorn/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/IPO/WholeProgramDevirt.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/Debugify.h"
@@ -333,7 +335,7 @@ static void AddOptimizationPasses(legacy::PassManagerBase &MPM,
   if (!NoVerify || VerifyEach)
     FPM.add(createVerifierPass()); // Verify that input is correct
 
-  PassManagerBuilder Builder;
+  llvm_seahorn::PassManagerBuilder Builder;
   Builder.OptLevel = OptLevel;
   Builder.SizeLevel = SizeLevel;
 
@@ -349,8 +351,10 @@ static void AddOptimizationPasses(legacy::PassManagerBase &MPM,
 
   Builder.SLPVectorize = OptLevel > 1 && SizeLevel < 2;
 
+#if 0 /*  REMOVE SEAHORN */
   if (TM)
     TM->adjustPassManager(Builder);
+#endif
 
   Builder.populateFunctionPassManager(FPM);
   Builder.populateModulePassManager(MPM);
@@ -529,9 +533,18 @@ int main(int argc, char **argv) {
   initializeReplaceWithVeclibLegacyPass(Registry);
   initializeJMCInstrumenterPass(Registry);
 
+  initializeSeaIndVarSimplifyLegacyPassPass(Registry);
+  initializeSeaInstructionCombiningPassPass(Registry);
+  initializeSeaLoopUnrollPass(Registry);
+
+
 #ifdef BUILD_EXAMPLES
   initializeExampleIRTransforms(Registry);
 #endif
+
+  #if 1 /*  SEAHORN ADD */
+  EnableNewPassManager = false;
+  #endif
 
   SmallVector<PassPlugin, 1> PluginList;
   PassPlugins.setCallback([&](const std::string &PluginPath) {
@@ -543,6 +556,7 @@ int main(int argc, char **argv) {
     }
     PluginList.emplace_back(Plugin.get());
   });
+
 
   cl::ParseCommandLineOptions(argc, argv,
     "llvm .bc -> .bc modular optimizer and analysis printer\n");

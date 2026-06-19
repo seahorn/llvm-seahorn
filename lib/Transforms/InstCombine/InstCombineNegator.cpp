@@ -88,7 +88,7 @@ STATISTIC(NegatorNumInstructionsNegatedSuccess,
           "Negator: Number of new negated instructions created in successful "
           "negation sinking attempts");
 
-DEBUG_COUNTER(NegatorCounter, "instcombine-negator",
+DEBUG_COUNTER(NegatorCounter, "sea-instcombine-negator",
               "Controls Negator transformations in InstCombine pass");
 
 static cl::opt<bool>

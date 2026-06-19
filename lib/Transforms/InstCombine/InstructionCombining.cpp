@@ -124,7 +124,7 @@ STATISTIC(NumSunkInst , "Number of instructions sunk");
 STATISTIC(NumExpand,    "Number of expansions");
 STATISTIC(NumFactor   , "Number of factorizations");
 STATISTIC(NumReassoc  , "Number of reassociations");
-DEBUG_COUNTER(VisitCounter, "instcombine-visit",
+DEBUG_COUNTER(VisitCounter, "sea-instcombine-visit",
               "Controls which instructions are visited");
 
 // FIXME: these limits eventually should be as low as 2.
@@ -140,7 +140,7 @@ static cl::opt<bool> EnableCodeSinking("seaopt-instcombine-code-sinking",
                                               cl::init(true));
 
 static cl::opt<unsigned> MaxSinkNumUsers(
-    "instcombine-max-sink-users", cl::init(32),
+    "sea-instcombine-max-sink-users", cl::init(32),
     cl::desc("Maximum number of undroppable users for instruction sinking"));
 
 static cl::opt<unsigned> LimitMaxIterations(

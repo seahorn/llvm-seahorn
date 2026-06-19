@@ -2497,7 +2497,7 @@ Value *SeaInstCombinerImpl::matchSelectFromAndOr(Value *A, Value *C, Value *B,
 
 // (icmp eq X, 0) | (icmp ult Other, X) -> (icmp ule Other, X-1)
 // (icmp ne X, 0) & (icmp uge Other, X) -> (icmp ugt Other, X-1)
-Value *foldAndOrOfICmpEqZeroAndICmp(ICmpInst *LHS, ICmpInst *RHS, bool IsAnd,
+static Value *foldAndOrOfICmpEqZeroAndICmp(ICmpInst *LHS, ICmpInst *RHS, bool IsAnd,
                                     IRBuilderBase &Builder) {
   ICmpInst::Predicate LPred =
       IsAnd ? LHS->getInversePredicate() : LHS->getPredicate();
