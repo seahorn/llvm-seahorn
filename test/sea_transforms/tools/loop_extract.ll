@@ -1,10 +1,13 @@
-; Input for sea_loop_extract_driver: a single loop that the SeaLoopExtractor
-; will extract (its exit goes to a block that does work, not a plain return),
-; so replaceFnBodyWithND replaces the extracted function body with
-; verifier.nondet.* stubs.
+; Loop-extract / replaceFnBodyWithND behavioral test, driven by the standalone
+; sea_loop_extract_driver (which runs createSeaLoopExtractorPass over the module
+; and verifies the result). The driver exits non-zero on invalid IR, so the
+; void-return / opaque-pointer bug in replaceFnBodyWithND makes this RUN fail.
 ;
-; Expected: the loop is extracted into an internal void function whose body is
-; verifier.nondet.* calls + stores into the output args, and the module verifies.
+; The single loop here is extracted (its exit goes to a block that does work,
+; not a plain return), and the extracted function's body is replaced with
+; non-deterministic verifier.nondet.* stubs.
+;
+; RUN: %sea-loop-extract-driver %s | %FileCheck %s
 
 define i32 @f(i32* %a, i32 %n) {
 entry:
@@ -26,3 +29,8 @@ done:
   %r = phi i32 [ 0, %entry ], [ %x, %after ]
   ret i32 %r
 }
+
+; the loop is extracted into an internal, void-returning function ...
+; CHECK: define internal void @f.loop(
+; ... whose body is a non-deterministic stub
+; CHECK: call i32 @verifier.nondet
