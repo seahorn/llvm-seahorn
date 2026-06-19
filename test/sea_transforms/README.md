@@ -40,17 +40,33 @@ SeaHorn's LoopUnroll deliberately ignores the `llvm.loop.unroll.disable`
 metadata (it only logs "Forcing Loop Unroll despite disable metadata" where
 stock bails). Validated on LLVM 14.
 
-Two other loop customizations are **not** unit-tested here, by design:
+Two other loop customizations are **not** behaviorally unit-tested here, by
+design:
 
 - **IndVarSimplify disequality avoidance** (`sea-indvars`): SeaHorn preserves the
   `slt`/`ult` exit predicate where stock LFTR would emit `icmp ne`. On LLVM 14,
   stock `-indvars` is too conservative to perform that LFTR rewrite on ordinary
-  integer-counter loops, so any standalone test would pass *vacuously* without
-  exercising the patch. Re-evaluate on LLVM 15 (LFTR behavior may differ), or
-  cover it at the pipeline level.
+  integer-counter loops -- even through the full `-O2` pipeline -- so any test
+  asserting the divergence would pass *vacuously*. Re-evaluate on LLVM 15.
 - **LoopRotate aggressiveness** (`sea-loop-rotate`): not registered as a
   standalone legacy pass in `seaopt` (it is wired only through the pass-manager
-  pipeline), so it cannot be driven in isolation by this harness.
+  pipeline), so it cannot be driven in isolation; and at `-O2` a large header
+  either folds below the stock threshold or blocks rotation, so the aggressive
+  threshold has no observable effect to assert on LLVM 14.
+
+## Pipeline test
+
+`pipeline_o2.ll` runs the full SeaHorn `-O2` pipeline (`PassManagerBuilder`),
+which engages sea-instcombine *and* the sea loop passes:
+
+- **Behavioral**: `urem`-by-pow2 survives `seaopt -O2` but stock `opt -O2` folds
+  it to `and` -- proving the pipeline uses `createSeaInstructionCombiningPass`
+  rather than stock InstCombine (a wiring regression the single-pass tests miss).
+- **Smoke/verify**: a loop function drives sea-loop-rotate / sea-indvars /
+  sea-loop-unroll under `-O2`, and the verifier RUN line asserts the output is
+  well-formed. Since those passes have no assertable behavioral divergence on
+  LLVM 14 (see above), this is their coverage -- it catches crashes / malformed
+  IR (e.g. opaque-pointer breakage during the port), not a specific rewrite.
 
 ## Running
 
