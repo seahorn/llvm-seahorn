@@ -100,10 +100,14 @@ void replaceFnBodyWithND(Function *oldfn, SetVector<Value *> &inputs,
     Builder.CreateStore(nd_val, TheFunction->getArg(i));
   }
 
-  // set return value to nd
-  auto nd_retval =
-      Builder.CreateCall(getNondetFn(ret_ty, TheFunction->getParent()));
-  Builder.CreateRet(nd_retval);
+  // set return value to nd (extracted functions commonly return void)
+  if (ret_ty->isVoidTy()) {
+    Builder.CreateRetVoid();
+  } else {
+    auto nd_retval =
+        Builder.CreateCall(getNondetFn(ret_ty, TheFunction->getParent()));
+    Builder.CreateRet(nd_retval);
+  }
   verifyFunction(*TheFunction);
 }
 
