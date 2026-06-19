@@ -75,8 +75,8 @@ Step 3 is the non-vacuity guard: if a future LLVM makes stock behave like
 SeaHorn, the `STOCK:` match fails (`expected string not found`) and the test
 fails loudly instead of passing silently.
 
-`run.sh` is an equivalent dependency-free runner (no lit/FileCheck needed) for
-quick local checks: `SEAOPT=… OPT=opt-14 ./run.sh`.
+The `.ll` files are the single source of truth: the `RUN:`/`CHECK:`/`STOCK:`
+lines fully define each test, with no separate runner to keep in sync.
 
 ## Build note
 
