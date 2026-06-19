@@ -42,21 +42,22 @@ jobs:
         # `Extensions` link component drags it in. Drop it for this build.
         run: sed -i '/^  Extensions$/d' tools/opt/CMakeLists.txt
 
-      - name: Build seaopt
+      - name: Build seaopt + test driver
         env:
           V: ${{ steps.llvm.outputs.version }}
         run: |
           cmake -B build -G Ninja \
             -DLLVM_DIR="$(llvm-config-$V --cmakedir)" \
             -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --target seaopt -j"$(nproc)"
+          cmake --build build --target seaopt sea_loop_extract_driver -j"$(nproc)"
 
       - name: Run sea-transforms corpus (llvm-lit)
         env:
           V: ${{ steps.llvm.outputs.version }}
         run: |
-          # seaopt must be an absolute path: lit runs each test from its own
-          # Output/ dir, so a relative ./build path would not resolve.
+          # Tool paths must be absolute: lit runs each test from its own Output/
+          # dir, so a relative ./build path would not resolve.
           export SEAOPT="$GITHUB_WORKSPACE/build/bin/seaopt"
+          export SEA_LOOP_EXTRACT_DRIVER="$GITHUB_WORKSPACE/build/bin/sea_loop_extract_driver"
           export OPT="opt-$V" FILECHECK="FileCheck-$V"
           lit -v test/sea_transforms
