@@ -58,9 +58,8 @@ class LLVMContext;
 } // namespace llvm
 
 using namespace llvm;
-using namespace llvm_seahorn;
 
-#define DEBUG_TYPE "sea-instcombine"
+#define DEBUG_TYPE "instcombine"
 
 STATISTIC(NegatorTotalNegationsAttempted,
           "Negator: Number of negations attempted to be sinked");
@@ -92,11 +91,11 @@ DEBUG_COUNTER(NegatorCounter, "instcombine-negator",
               "Controls Negator transformations in InstCombine pass");
 
 static cl::opt<bool>
-    NegatorEnabled("sea-instcombine-negator-enabled", cl::init(true),
+    NegatorEnabled("instcombine-negator-enabled", cl::init(true),
                    cl::desc("Should we attempt to sink negations?"));
 
 static cl::opt<unsigned>
-    NegatorMaxDepth("sea-instcombine-negator-max-depth",
+    NegatorMaxDepth("instcombine-negator-max-depth",
                     cl::init(NegatorDefaultMaxDepth),
                     cl::desc("What is the maximal lookup depth when trying to "
                              "check for viability of negation sinking."));
@@ -249,6 +248,20 @@ LLVM_NODISCARD Value *Negator::visitImpl(Value *V, unsigned Depth) {
     return nullptr;
 
   switch (I->getOpcode()) {
+  case Instruction::And: {
+    Constant *ShAmt;
+    // sub(y,and(lshr(x,C),1)) --> add(ashr(shl(x,(BW-1)-C),BW-1),y)
+    if (match(I, m_c_And(m_OneUse(m_TruncOrSelf(
+                             m_LShr(m_Value(X), m_ImmConstant(ShAmt)))),
+                         m_One()))) {
+      unsigned BW = X->getType()->getScalarSizeInBits();
+      Constant *BWMinusOne = ConstantInt::get(X->getType(), BW - 1);
+      Value *R = Builder.CreateShl(X, Builder.CreateSub(BWMinusOne, ShAmt));
+      R = Builder.CreateAShr(R, BWMinusOne);
+      return Builder.CreateTruncOrBitCast(R, I->getType());
+    }
+    break;
+  }
   case Instruction::SDiv:
     // `sdiv` is negatible if divisor is not undef/INT_MIN/1.
     // While this is normally not behind a use-check,
@@ -502,7 +515,7 @@ LLVM_NODISCARD Optional<Negator::Result> Negator::run(Value *Root) {
 }
 
 LLVM_NODISCARD Value *Negator::Negate(bool LHSIsZero, Value *Root,
-                                      SeaInstCombinerImpl &IC) {
+                                      InstCombinerImpl &IC) {
   ++NegatorTotalNegationsAttempted;
   LLVM_DEBUG(dbgs() << "Negator: attempting to sink negation into " << *Root
                     << "\n");
