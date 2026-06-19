@@ -11,7 +11,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Transforms/IPO/PassManagerBuilder.h"
+#include "llvm_seahorn/Transforms/IPO/PassManagerBuilder.h"
+#include "llvm_seahorn/Transforms/IPO.h"
+#include "llvm_seahorn/Transforms/InstCombine/SeaInstCombine.h"
+#include "llvm_seahorn/Transforms/Scalar.h"
 #include "llvm-c/Transforms/PassManagerBuilder.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -31,7 +34,6 @@
 #include "llvm/Transforms/IPO/ForceFunctionAttrs.h"
 #include "llvm/Transforms/IPO/FunctionAttrs.h"
 #include "llvm/Transforms/IPO/InferFunctionAttrs.h"
-#include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVN.h"
@@ -42,30 +44,49 @@
 #include "llvm/Transforms/Vectorize.h"
 
 using namespace llvm;
+using namespace llvm_seahorn;
 
 namespace llvm {
-cl::opt<bool> RunPartialInlining("enable-partial-inlining", cl::Hidden,
-                                 cl::desc("Run Partial inlinining pass"));
+#if 1 /*  SEAHORN ADD */
+static cl::opt<bool>
+NeverTrue ("sea-never-true", cl::Hidden, cl::init (false));
+
+static cl::opt<bool> SeaEnableIndVar("seaopt-enable-indvar", cl::Hidden,
+                                     cl::desc("Enable indvar pass"),
+                                     cl::init(true));
+
+static cl::opt<bool> SeaEnableLoopIdiom("seaopt-enable-loop-idiom", cl::Hidden,
+                                        cl::desc("Enable loop-idiom pass"),
+                                        cl::init(true));
+
+static cl::opt<bool> SeaEnableVectorize("seaopt-enable-vectorize", cl::Hidden,
+                                        cl::desc("Enable loop vectorization"),
+                                        cl::init(false));
+#endif
 
 static cl::opt<bool>
-UseGVNAfterVectorization("use-gvn-after-vectorization",
+    RunPartialInlining("seaopt-enable-partial-inlining", cl::init(false), cl::Hidden,
+                       cl::ZeroOrMore, cl::desc("Run Partial inlinining pass"));
+
+static cl::opt<bool>
+UseGVNAfterVectorization("seaopt-use-gvn-after-vectorization",
   cl::init(false), cl::Hidden,
   cl::desc("Run GVN instead of Early CSE after vectorization passes"));
 
-cl::opt<bool> ExtraVectorizerPasses(
-    "extra-vectorizer-passes", cl::init(false), cl::Hidden,
+static cl::opt<bool> ExtraVectorizerPasses(
+    "seaopt-extra-vectorizer-passes", cl::init(false), cl::Hidden,
     cl::desc("Run cleanup optimization passes after vectorization."));
 
 static cl::opt<bool>
-RunLoopRerolling("reroll-loops", cl::Hidden,
+RunLoopRerolling("seaopt-reroll-loops", cl::Hidden,
                  cl::desc("Run the loop rerolling pass"));
 
-cl::opt<bool> RunNewGVN("enable-newgvn", cl::init(false), cl::Hidden,
+static cl::opt<bool> RunNewGVN("seaopt-enable-newgvn", cl::init(false), cl::Hidden,
                         cl::desc("Run the NewGVN pass"));
 
 // Experimental option to use CFL-AA
 static cl::opt<::CFLAAType>
-    UseCFLAA("use-cfl-aa", cl::init(::CFLAAType::None), cl::Hidden,
+    UseCFLAA("seaopt-use-cfl-aa", cl::init(::CFLAAType::None), cl::Hidden,
              cl::desc("Enable the new, experimental CFL alias analysis"),
              cl::values(clEnumValN(::CFLAAType::None, "none", "Disable CFL-AA"),
                         clEnumValN(::CFLAAType::Steensgaard, "steens",
@@ -75,34 +96,34 @@ static cl::opt<::CFLAAType>
                         clEnumValN(::CFLAAType::Both, "both",
                                    "Enable both variants of CFL-AA")));
 
-cl::opt<bool> EnableLoopInterchange(
-    "enable-loopinterchange", cl::init(false), cl::Hidden,
+static cl::opt<bool> EnableLoopInterchange(
+    "seaopt-enable-loopinterchange", cl::init(false), cl::Hidden,
     cl::desc("Enable the experimental LoopInterchange Pass"));
 
-cl::opt<bool> EnableUnrollAndJam("enable-unroll-and-jam", cl::init(false),
+static cl::opt<bool> EnableUnrollAndJam("seaopt-enable-unroll-and-jam", cl::init(false),
                                  cl::Hidden,
                                  cl::desc("Enable Unroll And Jam Pass"));
 
-cl::opt<bool> EnableLoopFlatten("enable-loop-flatten", cl::init(false),
+static cl::opt<bool> EnableLoopFlatten("seaopt-enable-loop-flatten", cl::init(false),
                                 cl::Hidden,
                                 cl::desc("Enable the LoopFlatten Pass"));
 
-cl::opt<bool> EnableDFAJumpThreading("enable-dfa-jump-thread",
+static cl::opt<bool> EnableDFAJumpThreading("seaopt-enable-dfa-jump-thread",
                                      cl::desc("Enable DFA jump threading."),
                                      cl::init(false), cl::Hidden);
 
 cl::opt<bool> EnableHotColdSplit("hot-cold-split",
                                  cl::desc("Enable hot-cold splitting pass"));
 
-cl::opt<bool> EnableIROutliner("ir-outliner", cl::init(false), cl::Hidden,
+static cl::opt<bool> EnableIROutliner("seaopt-ir-outliner", cl::init(false), cl::Hidden,
     cl::desc("Enable ir outliner pass"));
 
 static cl::opt<bool> UseLoopVersioningLICM(
-    "enable-loop-versioning-licm", cl::init(false), cl::Hidden,
+    "seaopt-enable-loop-versioning-licm", cl::init(false), cl::Hidden,
     cl::desc("Enable the experimental Loop Versioning LICM pass"));
 
-cl::opt<bool>
-    DisablePreInliner("disable-preinline", cl::init(false), cl::Hidden,
+static cl::opt<bool>
+    DisablePreInliner("seaopt-disable-preinline", cl::init(false), cl::Hidden,
                       cl::desc("Disable pre-instrumentation inliner"));
 
 cl::opt<int> PreInlineThreshold(
@@ -115,8 +136,8 @@ cl::opt<bool>
                    cl::desc("Enable the GVN hoisting pass (default = off)"));
 
 static cl::opt<bool>
-    DisableLibCallsShrinkWrap("disable-libcalls-shrinkwrap", cl::init(false),
-                              cl::Hidden,
+    DisableLibCallsShrinkWrap("seaopt-disable-libcalls-shrinkwrap",
+                              cl::init(false), cl::Hidden,
                               cl::desc("Disable shrink-wrap library calls"));
 
 cl::opt<bool>
@@ -125,34 +146,34 @@ cl::opt<bool>
 
 // This option is used in simplifying testing SampleFDO optimizations for
 // profile loading.
-cl::opt<bool>
-    EnableCHR("enable-chr", cl::init(true), cl::Hidden,
+static cl::opt<bool>
+    EnableCHR("seaopt-enable-chr", cl::init(true), cl::Hidden,
               cl::desc("Enable control height reduction optimization (CHR)"));
 
-cl::opt<bool> FlattenedProfileUsed(
-    "flattened-profile-used", cl::init(false), cl::Hidden,
+static cl::opt<bool> FlattenedProfileUsed(
+    "seaopt-flattened-profile-used", cl::init(false), cl::Hidden,
     cl::desc("Indicate the sample profile being used is flattened, i.e., "
              "no inline hierachy exists in the profile. "));
 
-cl::opt<bool> EnableOrderFileInstrumentation(
-    "enable-order-file-instrumentation", cl::init(false), cl::Hidden,
+static cl::opt<bool> EnableOrderFileInstrumentation(
+    "seaopt-enable-order-file-instrumentation", cl::init(false), cl::Hidden,
     cl::desc("Enable order file instrumentation (default = off)"));
 
-cl::opt<bool> EnableMatrix(
-    "enable-matrix", cl::init(false), cl::Hidden,
+static cl::opt<bool>
+    EnableMatrix("seaopt-enable-matrix", cl::init(false), cl::Hidden,
     cl::desc("Enable lowering of the matrix intrinsics"));
 
-cl::opt<bool> EnableConstraintElimination(
-    "enable-constraint-elimination", cl::init(false), cl::Hidden,
+static cl::opt<bool> EnableConstraintElimination(
+    "seaopt-enable-constraint-elimination", cl::init(false), cl::Hidden,
     cl::desc(
         "Enable pass to eliminate conditions based on linear constraints."));
 
-cl::opt<bool> EnableFunctionSpecialization(
-    "enable-function-specialization", cl::init(false), cl::Hidden,
+static cl::opt<bool> EnableFunctionSpecialization(
+    "seaopt-enable-function-specialization", cl::init(false), cl::Hidden,
     cl::desc("Enable Function Specialization pass"));
 
-cl::opt<AttributorRunOption> AttributorRun(
-    "attributor-enable", cl::Hidden, cl::init(AttributorRunOption::NONE),
+static cl::opt<AttributorRunOption> AttributorRun(
+    "seaopt-attributor-enable", cl::Hidden, cl::init(AttributorRunOption::NONE),
     cl::desc("Enable the attributor inter-procedural deduction pass."),
     cl::values(clEnumValN(AttributorRunOption::ALL, "all",
                           "enable all attributor runs"),
@@ -338,7 +359,7 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   // Combine silly seq's
   if (OptLevel > 2)
     MPM.add(createAggressiveInstCombinerPass());
-  MPM.add(createInstructionCombiningPass());
+  MPM.add(createSeaInstructionCombiningPass());
   if (SizeLevel == 0 && !DisableLibCallsShrinkWrap)
     MPM.add(createLibCallsShrinkWrapPass());
   addExtensionsToPM(EP_Peephole, MPM);
@@ -383,14 +404,18 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   // need for this.
   MPM.add(createCFGSimplificationPass(
       SimplifyCFGOptions().convertSwitchRangeToICmp(true)));
-  MPM.add(createInstructionCombiningPass());
+  MPM.add(createSeaInstructionCombiningPass());
   // We resume loop passes creating a second loop pipeline here.
   if (EnableLoopFlatten) {
     MPM.add(createLoopFlattenPass()); // Flatten loops
     MPM.add(createLoopSimplifyCFGPass());
   }
-  MPM.add(createLoopIdiomPass());             // Recognize idioms like memset.
-  MPM.add(createIndVarSimplifyPass());        // Canonicalize indvars
+  if (SeaEnableLoopIdiom)  
+    MPM.add(createLoopIdiomPass());             // Recognize idioms like memset.
+  if (SeaEnableIndVar)
+    MPM.add(llvm_seahorn::createIndVarSimplifyPass());        // Canonicalize indvars
+  
+
   addExtensionsToPM(EP_LateLoopOptimizations, MPM);
   MPM.add(createLoopDeletionPass());          // Delete dead loops
 
@@ -423,7 +448,7 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
 
   // Run instcombine after redundancy elimination to exploit opportunities
   // opened up by them.
-  MPM.add(createInstructionCombiningPass());
+  MPM.add(createSeaInstructionCombiningPass());
   addExtensionsToPM(EP_Peephole, MPM);
   if (OptLevel > 1) {
     if (EnableDFAJumpThreading && SizeLevel == 0)
@@ -451,13 +476,16 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   MPM.add(createCFGSimplificationPass(
       SimplifyCFGOptions().hoistCommonInsts(true).sinkCommonInsts(true)));
   // Clean up after everything.
-  MPM.add(createInstructionCombiningPass());
+  MPM.add(createSeaInstructionCombiningPass());
   addExtensionsToPM(EP_Peephole, MPM);
 }
 
 /// FIXME: Should LTO cause any differences to this set of passes?
 void PassManagerBuilder::addVectorPasses(legacy::PassManagerBase &PM,
                                          bool IsFullLTO) {
+#if 1
+  if (!SeaEnableVectorize) return;
+#endif 
   PM.add(createLoopVectorizePass(!LoopsInterleaved, !LoopVectorize));
 
   if (IsFullLTO) {
@@ -482,7 +510,7 @@ void PassManagerBuilder::addVectorPasses(legacy::PassManagerBase &PM,
     PM.add(createLoopLoadEliminationPass());
   }
   // Cleanup after the loop optimization passes.
-  PM.add(createInstructionCombiningPass());
+  PM.add(createSeaInstructionCombiningPass());
 
   if (OptLevel > 1 && ExtraVectorizerPasses) {
     // At higher optimization levels, try to clean up any runtime overlap and
@@ -493,13 +521,13 @@ void PassManagerBuilder::addVectorPasses(legacy::PassManagerBase &PM,
     // dead (or speculatable) control flows or more combining opportunities.
     PM.add(createEarlyCSEPass());
     PM.add(createCorrelatedValuePropagationPass());
-    PM.add(createInstructionCombiningPass());
+    PM.add(createSeaInstructionCombiningPass());
     PM.add(createLICMPass(LicmMssaOptCap, LicmMssaNoAccForPromotionCap,
                           /*AllowSpeculation=*/true));
     PM.add(createSimpleLoopUnswitchLegacyPass());
     PM.add(createCFGSimplificationPass(
         SimplifyCFGOptions().convertSwitchRangeToICmp(true)));
-    PM.add(createInstructionCombiningPass());
+    PM.add(createSeaInstructionCombiningPass());
   }
 
   // Now that we've formed fast to execute loop structures, we do further
@@ -521,7 +549,7 @@ void PassManagerBuilder::addVectorPasses(legacy::PassManagerBase &PM,
 
   if (IsFullLTO) {
     PM.add(createSCCPPass());                 // Propagate exposed constants
-    PM.add(createInstructionCombiningPass()); // Clean up again
+    PM.add(createSeaInstructionCombiningPass()); // Clean up again
     PM.add(createBitTrackingDCEPass());
   }
 
@@ -537,7 +565,7 @@ void PassManagerBuilder::addVectorPasses(legacy::PassManagerBase &PM,
 
   if (!IsFullLTO) {
     addExtensionsToPM(EP_Peephole, PM);
-    PM.add(createInstructionCombiningPass());
+    PM.add(createSeaInstructionCombiningPass());
 
     if (EnableUnrollAndJam && !DisableUnrollLoops) {
       // Unroll and Jam. We do this before unroll but need to be in a separate
@@ -552,7 +580,7 @@ void PassManagerBuilder::addVectorPasses(legacy::PassManagerBase &PM,
 
     if (!DisableUnrollLoops) {
       // LoopUnroll may generate some redundency to cleanup.
-      PM.add(createInstructionCombiningPass());
+      PM.add(createSeaInstructionCombiningPass());
 
       // Runtime unrolling will introduce runtime check in loop prologue. If the
       // unrolled loop is a inner loop, then the prologue will be inside the
@@ -570,13 +598,21 @@ void PassManagerBuilder::addVectorPasses(legacy::PassManagerBase &PM,
   PM.add(createAlignmentFromAssumptionsPass());
 
   if (IsFullLTO)
-    PM.add(createInstructionCombiningPass());
+    PM.add(createSeaInstructionCombiningPass());
 }
 
 void PassManagerBuilder::populateModulePassManager(
     legacy::PassManagerBase &MPM) {
-  MPM.add(createAnnotation2MetadataLegacyPass());
+  // Whether this is a default or *LTO pre-link pipeline. The FullLTO post-link
+  // is handled separately, so just check this is not the ThinLTO post-link.
+  bool DefaultOrPreLinkPipeline = !PerformThinLTO;
 
+  MPM.add(createSeaAnnotation2MetadataLegacyPass());
+
+#if 1 /*  SEAHORN ADD */
+  if (NeverTrue)
+    MPM.add (llvm_seahorn::createFakeLatchExitPass ());
+#endif
   // Allow forcing function attributes as a debugging and tuning aid.
   MPM.add(createForceFunctionAttrsLegacyPass());
 
@@ -635,7 +671,7 @@ void PassManagerBuilder::populateModulePassManager(
 
   MPM.add(createDeadArgEliminationPass()); // Dead argument elimination
 
-  MPM.add(createInstructionCombiningPass()); // Clean up after IPCP & DAE
+  MPM.add(createSeaInstructionCombiningPass()); // Clean up after IPCP & DAE
   addExtensionsToPM(EP_Peephole, MPM);
   MPM.add(
       createCFGSimplificationPass(SimplifyCFGOptions().convertSwitchRangeToICmp(
