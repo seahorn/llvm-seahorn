@@ -55,5 +55,8 @@ jobs:
         env:
           V: ${{ steps.llvm.outputs.version }}
         run: |
-          export SEAOPT=./build/bin/seaopt OPT="opt-$V" FILECHECK="FileCheck-$V"
+          # seaopt must be an absolute path: lit runs each test from its own
+          # Output/ dir, so a relative ./build path would not resolve.
+          export SEAOPT="$GITHUB_WORKSPACE/build/bin/seaopt"
+          export OPT="opt-$V" FILECHECK="FileCheck-$V"
           lit -v test/sea_transforms
