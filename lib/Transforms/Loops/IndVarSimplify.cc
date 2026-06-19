@@ -1,4 +1,5 @@
-//===- IndVarSimplify.cpp - Induction Variable Elimination ----------------===//
+//===- SeaIndVarSimplify.cpp - Induction Variable Elimination
+//----------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -23,7 +24,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Transforms/Scalar/IndVarSimplify.h"
+#include "llvm_seahorn/InitializePasses.h"
+#include "llvm_seahorn/Loops/SeaIndVarSimplify.h"
+#include "llvm_seahorn/Loops/SeaSCEVUtils.h"
+#include "llvm/Analysis/InstructionSimplify.h"
+#include "llvm_seahorn/Transforms/Scalar.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Optional.h"
@@ -86,7 +91,10 @@
 using namespace llvm;
 using namespace PatternMatch;
 
-#define DEBUG_TYPE "indvars"
+using namespace llvm_seahorn;
+
+
+#define DEBUG_TYPE "sea-indvars"
 
 STATISTIC(NumWidened     , "Number of indvars widened");
 STATISTIC(NumReplaced    , "Number of exit values replaced");
@@ -98,47 +106,44 @@ STATISTIC(NumElimIV      , "Number of congruent IVs eliminated");
 // implement a strong expression equivalence checker in SCEV. Until then, we
 // use the verify-indvars flag, which may assert in some cases.
 static cl::opt<bool> VerifyIndvars(
-    "verify-indvars", cl::Hidden,
+    "seaopt-verify-indvars", cl::Hidden,
     cl::desc("Verify the ScalarEvolution result after running indvars. Has no "
              "effect in release builds. (Note: this adds additional SCEV "
              "queries potentially changing the analysis result)"));
 
 static cl::opt<ReplaceExitVal> ReplaceExitValue(
-    "replexitval", cl::Hidden, cl::init(OnlyCheapRepl),
-    cl::desc("Choose the strategy to replace exit value in IndVarSimplify"),
+    "seaopt-replexitval", cl::Hidden, cl::init(OnlyCheapRepl),
+    cl::desc("Choose the strategy to replace exit value in SeaIndVarSimplify"),
     cl::values(
         clEnumValN(NeverRepl, "never", "never replace exit value"),
         clEnumValN(OnlyCheapRepl, "cheap",
                    "only replace exit value when the cost is cheap"),
-        clEnumValN(
-            UnusedIndVarInLoop, "unusedindvarinloop",
-            "only replace exit value when it is an unused "
-            "induction variable in the loop and has cheap replacement cost"),
         clEnumValN(NoHardUse, "noharduse",
                    "only replace exit values when loop def likely dead"),
         clEnumValN(AlwaysRepl, "always",
                    "always replace exit value whenever possible")));
 
 static cl::opt<bool> UsePostIncrementRanges(
-  "indvars-post-increment-ranges", cl::Hidden,
-  cl::desc("Use post increment control-dependent ranges in IndVarSimplify"),
+    "seaopt-indvars-post-increment-ranges", cl::Hidden,
+    cl::desc(
+        "Use post increment control-dependent ranges in SeaIndVarSimplify"),
   cl::init(true));
 
 static cl::opt<bool>
-DisableLFTR("disable-lftr", cl::Hidden, cl::init(false),
+    DisableLFTR("seaopt-disable-lftr", cl::Hidden, cl::init(false),
             cl::desc("Disable Linear Function Test Replace optimization"));
 
 static cl::opt<bool>
-LoopPredication("indvars-predicate-loops", cl::Hidden, cl::init(true),
+LoopPredication("seaopt-indvars-predicate-loops", cl::Hidden, cl::init(true),
                 cl::desc("Predicate conditions in read only loops"));
 
 static cl::opt<bool>
-AllowIVWidening("indvars-widen-indvars", cl::Hidden, cl::init(true),
+AllowIVWidening("seaopt-indvars-widen-indvars", cl::Hidden, cl::init(true),
                 cl::desc("Allow widening of indvars to eliminate s/zext"));
 
 namespace {
 
-class IndVarSimplify {
+class SeaIndVarSimplify {
   LoopInfo *LI;
   ScalarEvolution *SE;
   DominatorTree *DT;
@@ -173,7 +178,7 @@ class IndVarSimplify {
   bool sinkUnusedInvariants(Loop *L);
 
 public:
-  IndVarSimplify(LoopInfo *LI, ScalarEvolution *SE, DominatorTree *DT,
+  SeaIndVarSimplify(LoopInfo *LI, ScalarEvolution *SE, DominatorTree *DT,
                  const DataLayout &DL, TargetLibraryInfo *TLI,
                  TargetTransformInfo *TTI, MemorySSA *MSSA, bool WidenIndVars)
       : LI(LI), SE(SE), DT(DT), DL(DL), TLI(TLI), TTI(TTI),
@@ -212,7 +217,7 @@ static bool ConvertToSInt(const APFloat &APF, int64_t &IntVal) {
 /// is converted into
 /// for(int i = 0; i < 10000; ++i)
 ///   bar((double)i);
-bool IndVarSimplify::handleFloatingPointIV(Loop *L, PHINode *PN) {
+bool SeaIndVarSimplify::handleFloatingPointIV(Loop *L, PHINode *PN) {
   unsigned IncomingEdge = L->contains(PN->getIncomingBlock(0));
   unsigned BackEdge     = IncomingEdge^1;
 
@@ -406,7 +411,7 @@ bool IndVarSimplify::handleFloatingPointIV(Loop *L, PHINode *PN) {
   return true;
 }
 
-bool IndVarSimplify::rewriteNonIntegerIVs(Loop *L) {
+bool SeaIndVarSimplify::rewriteNonIntegerIVs(Loop *L) {
   // First step.  Check to see if there are any floating-point recurrences.
   // If there are, change them into integer recurrences, permitting analysis by
   // the SCEV routines.
@@ -438,7 +443,7 @@ bool IndVarSimplify::rewriteNonIntegerIVs(Loop *L) {
 /// exits. If so, we know that if the exit path is taken, it is at the first
 /// loop iteration. This lets us predict exit values of PHI nodes that live in
 /// loop header.
-bool IndVarSimplify::rewriteFirstIterationLoopExitValues(Loop *L) {
+bool SeaIndVarSimplify::rewriteFirstIterationLoopExitValues(Loop *L) {
   // Verify the input to the pass is already in LCSSA form.
   assert(L->isLCSSAForm(*DT));
 
@@ -569,7 +574,7 @@ static void visitIVCast(CastInst *Cast, WideIVInfo &WI,
 
 namespace {
 
-class IndVarSimplifyVisitor : public IVVisitor {
+class SeaIndVarSimplifyVisitor : public IVVisitor {
   ScalarEvolution *SE;
   const TargetTransformInfo *TTI;
   PHINode *IVPhi;
@@ -577,7 +582,7 @@ class IndVarSimplifyVisitor : public IVVisitor {
 public:
   WideIVInfo WI;
 
-  IndVarSimplifyVisitor(PHINode *IV, ScalarEvolution *SCEV,
+  SeaIndVarSimplifyVisitor(PHINode *IV, ScalarEvolution *SCEV,
                         const TargetTransformInfo *TTI,
                         const DominatorTree *DTree)
     : SE(SCEV), TTI(TTI), IVPhi(IV) {
@@ -596,8 +601,7 @@ public:
 /// candidates for simplification.
 ///
 /// Sign/Zero extend elimination is interleaved with IV simplification.
-bool IndVarSimplify::simplifyAndExtend(Loop *L,
-                                       SCEVExpander &Rewriter,
+bool SeaIndVarSimplify::simplifyAndExtend(Loop *L, SCEVExpander &Rewriter,
                                        LoopInfo *LI) {
   SmallVector<WideIVInfo, 8> WideIVs;
 
@@ -625,7 +629,7 @@ bool IndVarSimplify::simplifyAndExtend(Loop *L,
       PHINode *CurrIV = LoopPhis.pop_back_val();
 
       // Information about sign/zero extensions of CurrIV.
-      IndVarSimplifyVisitor Visitor(CurrIV, SE, TTI, DT);
+      SeaIndVarSimplifyVisitor Visitor(CurrIV, SE, TTI, DT);
 
       Changed |= simplifyUsersOfIV(CurrIV, SE, DT, LI, TTI, DeadInsts, Rewriter,
                                    &Visitor);
@@ -1057,7 +1061,7 @@ static Value *genLoopLimit(PHINode *IndVar, BasicBlock *ExitingBB,
 /// able to rewrite the exit tests of any loop where the SCEV analysis can
 /// determine a loop-invariant trip count of the loop, which is actually a much
 /// broader range than just linear tests.
-bool IndVarSimplify::
+bool SeaIndVarSimplify::
 linearFunctionTestReplace(Loop *L, BasicBlock *ExitingBB,
                           const SCEV *ExitCount,
                           PHINode *IndVar, SCEVExpander &Rewriter) {
@@ -1117,10 +1121,36 @@ linearFunctionTestReplace(Loop *L, BasicBlock *ExitingBB,
   // Insert a new icmp_ne or icmp_eq instruction before the branch.
   BranchInst *BI = cast<BranchInst>(ExitingBB->getTerminator());
   ICmpInst::Predicate P;
-  if (L->contains(BI->getSuccessor(0)))
+  if (L->contains(BI->getSuccessor(0))) {
+#if 0 /* SEAHORN REPLACE  */
     P = ICmpInst::ICMP_NE;
-  else
+#else
+    P = ICmpInst::ICMP_NE;
+    if (auto *cmp = dyn_cast<ICmpInst>(BI->getCondition())) {
+      switch (cmp->getPredicate()) {
+      case ICmpInst::ICMP_SLT:
+      case ICmpInst::ICMP_ULT:
+        // -- preserve SLT/ULT predicate
+        P = cmp->getPredicate();
+        break;
+      default:
+        P = ICmpInst::ICMP_NE;
+      }
+    }
+#endif
+  } else
     P = ICmpInst::ICMP_EQ;
+
+  LLVM_DEBUG(dbgs() << "INDVARS: Rewriting loop exit condition to:\n"
+                    << "      LHS:" << *CmpIndVar << '\n'
+#if 0
+                    << "       op:\t" << (P == ICmpInst::ICMP_NE ? "!=" : "==")
+#else
+                    << "       op:\t" << (P == ICmpInst::ICMP_EQ ? "==" : "<s")
+#endif
+                    << "\n"
+                    << "      RHS:\t" << *ExitCnt << "\n"
+                    << "  was: " << *BI->getCondition() << "\n");
 
   IRBuilder<> Builder(BI);
 
@@ -1175,7 +1205,11 @@ linearFunctionTestReplace(Loop *L, BasicBlock *ExitingBB,
   }
   LLVM_DEBUG(dbgs() << "INDVARS: Rewriting loop exit condition to:\n"
                     << "      LHS:" << *CmpIndVar << '\n'
+#if 0
                     << "       op:\t" << (P == ICmpInst::ICMP_NE ? "!=" : "==")
+#else
+                    << "       op:\t" << (P == ICmpInst::ICMP_EQ ? "==" : "<s")
+#endif
                     << "\n"
                     << "      RHS:\t" << *ExitCnt << "\n"
                     << "ExitCount:\t" << *ExitCount << "\n"
@@ -1202,7 +1236,7 @@ linearFunctionTestReplace(Loop *L, BasicBlock *ExitingBB,
 /// If there's a single exit block, sink any loop-invariant values that
 /// were defined in the preheader but not used inside the loop into the
 /// exit block to reduce register pressure in the loop.
-bool IndVarSimplify::sinkUnusedInvariants(Loop *L) {
+bool SeaIndVarSimplify::sinkUnusedInvariants(Loop *L) {
   BasicBlock *ExitBlock = L->getExitBlock();
   if (!ExitBlock) return false;
 
@@ -1332,7 +1366,7 @@ static void replaceLoopPHINodesWithPreheaderValues(
     if (!L->contains(I))
       continue;
 
-    Value *Res = simplifyInstruction(I, I->getModule()->getDataLayout());
+    Value *Res = simplifyInstruction(I, SimplifyQuery(I->getModule()->getDataLayout()));
     if (Res && LI->replacementPreservesLCSSAForm(I, Res)) {
       for (User *U : I->users())
         Worklist.push_back(cast<Instruction>(U));
@@ -1426,7 +1460,7 @@ static bool optimizeLoopExitWithUnknownExitCount(
   return true;
 }
 
-bool IndVarSimplify::canonicalizeExitCondition(Loop *L) {
+bool SeaIndVarSimplify::canonicalizeExitCondition(Loop *L) {
   // Note: This is duplicating a particular part on SimplifyIndVars reasoning.
   // We need to duplicate it because given icmp zext(small-iv), C, IVUsers
   // never reaches the icmp since the zext doesn't fold to an AddRec unless
@@ -1560,7 +1594,7 @@ bool IndVarSimplify::canonicalizeExitCondition(Loop *L) {
   return Changed;
 }
 
-bool IndVarSimplify::optimizeLoopExits(Loop *L, SCEVExpander &Rewriter) {
+bool SeaIndVarSimplify::optimizeLoopExits(Loop *L, SCEVExpander &Rewriter) {
   SmallVector<BasicBlock*, 16> ExitingBlocks;
   L->getExitingBlocks(ExitingBlocks);
 
@@ -1718,7 +1752,7 @@ bool IndVarSimplify::optimizeLoopExits(Loop *L, SCEVExpander &Rewriter) {
   return Changed;
 }
 
-bool IndVarSimplify::predicateLoopExits(Loop *L, SCEVExpander &Rewriter) {
+bool SeaIndVarSimplify::predicateLoopExits(Loop *L, SCEVExpander &Rewriter) {
   SmallVector<BasicBlock*, 16> ExitingBlocks;
   L->getExitingBlocks(ExitingBlocks);
 
@@ -1882,10 +1916,10 @@ bool IndVarSimplify::predicateLoopExits(Loop *L, SCEVExpander &Rewriter) {
 }
 
 //===----------------------------------------------------------------------===//
-//  IndVarSimplify driver. Manage several subpasses of IV simplification.
+//  SeaIndVarSimplify driver. Manage several subpasses of IV simplification.
 //===----------------------------------------------------------------------===//
 
-bool IndVarSimplify::run(Loop *L) {
+bool SeaIndVarSimplify::run(Loop *L) {
   // We need (and expect!) the incoming loop to be in LCSSA.
   assert(L->isRecursivelyLCSSAForm(*DT, *LI) &&
          "LCSSA required to run indvars!");
@@ -1918,7 +1952,7 @@ bool IndVarSimplify::run(Loop *L) {
   Changed |= rewriteNonIntegerIVs(L);
 
   // Create a rewriter object which we'll use to transform the code with.
-  SCEVExpander Rewriter(*SE, DL, "indvars");
+  SCEVExpander Rewriter(*SE, DL, "sea-indvars");
 #ifndef NDEBUG
   Rewriter.setDebugType(DEBUG_TYPE);
 #endif
@@ -2085,13 +2119,13 @@ bool IndVarSimplify::run(Loop *L) {
   return Changed;
 }
 
-PreservedAnalyses IndVarSimplifyPass::run(Loop &L, LoopAnalysisManager &AM,
+PreservedAnalyses SeaIndVarSimplifyPass::run(Loop &L, LoopAnalysisManager &AM,
                                           LoopStandardAnalysisResults &AR,
                                           LPMUpdater &) {
   Function *F = L.getHeader()->getParent();
   const DataLayout &DL = F->getParent()->getDataLayout();
 
-  IndVarSimplify IVS(&AR.LI, &AR.SE, &AR.DT, DL, &AR.TLI, &AR.TTI, AR.MSSA,
+  SeaIndVarSimplify IVS(&AR.LI, &AR.SE, &AR.DT, DL, &AR.TLI, &AR.TTI, AR.MSSA,
                      WidenIndVars && AllowIVWidening);
   if (!IVS.run(&L))
     return PreservedAnalyses::all();
@@ -2105,11 +2139,11 @@ PreservedAnalyses IndVarSimplifyPass::run(Loop &L, LoopAnalysisManager &AM,
 
 namespace {
 
-struct IndVarSimplifyLegacyPass : public LoopPass {
+struct SeaIndVarSimplifyLegacyPass : public LoopPass {
   static char ID; // Pass identification, replacement for typeid
 
-  IndVarSimplifyLegacyPass() : LoopPass(ID) {
-    initializeIndVarSimplifyLegacyPassPass(*PassRegistry::getPassRegistry());
+  SeaIndVarSimplifyLegacyPass() : LoopPass(ID) {
+    initializeSeaIndVarSimplifyLegacyPassPass(*PassRegistry::getPassRegistry());
   }
 
   bool runOnLoop(Loop *L, LPPassManager &LPM) override {
@@ -2129,7 +2163,7 @@ struct IndVarSimplifyLegacyPass : public LoopPass {
     if (MSSAAnalysis)
       MSSA = &MSSAAnalysis->getMSSA();
 
-    IndVarSimplify IVS(LI, SE, DT, DL, TLI, TTI, MSSA, AllowIVWidening);
+    SeaIndVarSimplify IVS(LI, SE, DT, DL, TLI, TTI, MSSA, AllowIVWidening);
     return IVS.run(L);
   }
 
@@ -2142,14 +2176,14 @@ struct IndVarSimplifyLegacyPass : public LoopPass {
 
 } // end anonymous namespace
 
-char IndVarSimplifyLegacyPass::ID = 0;
+char SeaIndVarSimplifyLegacyPass::ID = 0;
 
-INITIALIZE_PASS_BEGIN(IndVarSimplifyLegacyPass, "indvars",
+INITIALIZE_PASS_BEGIN(SeaIndVarSimplifyLegacyPass, "sea-indvars",
                       "Induction Variable Simplification", false, false)
 INITIALIZE_PASS_DEPENDENCY(LoopPass)
-INITIALIZE_PASS_END(IndVarSimplifyLegacyPass, "indvars",
+INITIALIZE_PASS_END(SeaIndVarSimplifyLegacyPass, "sea-indvars",
                     "Induction Variable Simplification", false, false)
 
-Pass *llvm::createIndVarSimplifyPass() {
-  return new IndVarSimplifyLegacyPass();
+Pass *llvm_seahorn::createIndVarSimplifyPass() {
+  return new SeaIndVarSimplifyLegacyPass();
 }
