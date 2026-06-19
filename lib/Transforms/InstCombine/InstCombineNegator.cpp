@@ -58,8 +58,9 @@ class LLVMContext;
 } // namespace llvm
 
 using namespace llvm;
+using namespace llvm_seahorn;
 
-#define DEBUG_TYPE "instcombine"
+#define DEBUG_TYPE "sea-instcombine"
 
 STATISTIC(NegatorTotalNegationsAttempted,
           "Negator: Number of negations attempted to be sinked");
@@ -91,11 +92,11 @@ DEBUG_COUNTER(NegatorCounter, "instcombine-negator",
               "Controls Negator transformations in InstCombine pass");
 
 static cl::opt<bool>
-    NegatorEnabled("instcombine-negator-enabled", cl::init(true),
+    NegatorEnabled("sea-instcombine-negator-enabled", cl::init(true),
                    cl::desc("Should we attempt to sink negations?"));
 
 static cl::opt<unsigned>
-    NegatorMaxDepth("instcombine-negator-max-depth",
+    NegatorMaxDepth("sea-instcombine-negator-max-depth",
                     cl::init(NegatorDefaultMaxDepth),
                     cl::desc("What is the maximal lookup depth when trying to "
                              "check for viability of negation sinking."));
@@ -515,7 +516,7 @@ LLVM_NODISCARD Optional<Negator::Result> Negator::run(Value *Root) {
 }
 
 LLVM_NODISCARD Value *Negator::Negate(bool LHSIsZero, Value *Root,
-                                      InstCombinerImpl &IC) {
+                                      SeaInstCombinerImpl &IC) {
   ++NegatorTotalNegationsAttempted;
   LLVM_DEBUG(dbgs() << "Negator: attempting to sink negation into " << *Root
                     << "\n");

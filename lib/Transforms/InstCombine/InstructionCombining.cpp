@@ -98,7 +98,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/KnownBits.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Transforms/InstCombine/InstCombine.h"
+#include "llvm_seahorn/Transforms/InstCombine/SeaInstCombine.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include <algorithm>
 #include <cassert>
@@ -107,10 +107,11 @@
 #include <string>
 #include <utility>
 
-#define DEBUG_TYPE "instcombine"
+#define DEBUG_TYPE "sea-instcombine"
 #include "llvm/Transforms/Utils/InstructionWorklist.h"
 
 using namespace llvm;
+using namespace llvm_seahorn;
 using namespace llvm::PatternMatch;
 
 STATISTIC(NumWorklistIterations,
@@ -134,8 +135,8 @@ static constexpr unsigned InstCombineDefaultInfiniteLoopThreshold = 100;
 static constexpr unsigned InstCombineDefaultInfiniteLoopThreshold = 1000;
 #endif
 
-static cl::opt<bool>
-EnableCodeSinking("instcombine-code-sinking", cl::desc("Enable code sinking"),
+static cl::opt<bool> EnableCodeSinking("seaopt-instcombine-code-sinking",
+                                       cl::desc("Enable code sinking"),
                                               cl::init(true));
 
 static cl::opt<unsigned> MaxSinkNumUsers(
@@ -143,18 +144,18 @@ static cl::opt<unsigned> MaxSinkNumUsers(
     cl::desc("Maximum number of undroppable users for instruction sinking"));
 
 static cl::opt<unsigned> LimitMaxIterations(
-    "instcombine-max-iterations",
+    "seaopt-instcombine-max-iterations",
     cl::desc("Limit the maximum number of instruction combining iterations"),
     cl::init(InstCombineDefaultMaxIterations));
 
 static cl::opt<unsigned> InfiniteLoopDetectionThreshold(
-    "instcombine-infinite-loop-threshold",
+    "seaopt-instcombine-infinite-loop-threshold",
     cl::desc("Number of instruction combining iterations considered an "
              "infinite loop"),
     cl::init(InstCombineDefaultInfiniteLoopThreshold), cl::Hidden);
 
-static cl::opt<unsigned>
-MaxArraySize("instcombine-maxarray-size", cl::init(1024),
+static cl::opt<unsigned> MaxArraySize(
+    "seaopt-instcombine-maxarray-size", cl::init(1024),
              cl::desc("Maximum array size considered when doing a combine"));
 
 // FIXME: Remove this flag when it is no longer necessary to convert
@@ -164,8 +165,10 @@ MaxArraySize("instcombine-maxarray-size", cl::init(1024),
 // for their entire lifetime. However, passes like DSE and instcombine can
 // delete stores to the alloca, leading to misleading and inaccurate debug
 // information. This flag can be removed when those passes are fixed.
-static cl::opt<unsigned> ShouldLowerDbgDeclare("instcombine-lower-dbg-declare",
+static cl::opt<unsigned> ShouldLowerDbgDeclare("seaopt-instcombine-lower-dbg-declare",
                                                cl::Hidden, cl::init(true));
+
+#if 0 /* SEAHORN DISABLE */
 
 Optional<Instruction *>
 InstCombiner::targetInstCombineIntrinsic(IntrinsicInst &II) {
@@ -176,7 +179,7 @@ InstCombiner::targetInstCombineIntrinsic(IntrinsicInst &II) {
   return None;
 }
 
-Optional<Value *> InstCombiner::targetSimplifyDemandedUseBitsIntrinsic(
+Optional<Value *> SeaInstCombiner::targetSimplifyDemandedUseBitsIntrinsic(
     IntrinsicInst &II, APInt DemandedMask, KnownBits &Known,
     bool &KnownBitsComputed) {
   // Handle target specific intrinsics
@@ -187,7 +190,7 @@ Optional<Value *> InstCombiner::targetSimplifyDemandedUseBitsIntrinsic(
   return None;
 }
 
-Optional<Value *> InstCombiner::targetSimplifyDemandedVectorEltsIntrinsic(
+Optional<Value *> SeaInstCombiner::targetSimplifyDemandedVectorEltsIntrinsic(
     IntrinsicInst &II, APInt DemandedElts, APInt &UndefElts, APInt &UndefElts2,
     APInt &UndefElts3,
     std::function<void(Instruction *, unsigned, APInt, APInt &)>
@@ -200,8 +203,9 @@ Optional<Value *> InstCombiner::targetSimplifyDemandedVectorEltsIntrinsic(
   }
   return None;
 }
+#endif 
 
-Value *InstCombinerImpl::EmitGEPOffset(User *GEP) {
+Value *SeaInstCombinerImpl::EmitGEPOffset(User *GEP) {
   return llvm::EmitGEPOffset(&Builder, DL, GEP);
 }
 
@@ -210,7 +214,7 @@ Value *InstCombinerImpl::EmitGEPOffset(User *GEP) {
 /// the backend.
 /// NOTE: This treats i8, i16 and i32 specially because they are common
 ///       types in frontend languages.
-bool InstCombinerImpl::isDesirableIntType(unsigned BitWidth) const {
+bool SeaInstCombinerImpl::isDesirableIntType(unsigned BitWidth) const {
   switch (BitWidth) {
   case 8:
   case 16:
@@ -228,7 +232,7 @@ bool InstCombinerImpl::isDesirableIntType(unsigned BitWidth) const {
 /// type because i1 is a fundamental type in IR, and there are many specialized
 /// optimizations for i1 types. Common/desirable widths are equally treated as
 /// legal to convert to, in order to open up more combining opportunities.
-bool InstCombinerImpl::shouldChangeType(unsigned FromWidth,
+bool SeaInstCombinerImpl::shouldChangeType(unsigned FromWidth,
                                         unsigned ToWidth) const {
   bool FromLegal = FromWidth == 1 || DL.isLegalInteger(FromWidth);
   bool ToLegal = ToWidth == 1 || DL.isLegalInteger(ToWidth);
@@ -256,7 +260,7 @@ bool InstCombinerImpl::shouldChangeType(unsigned FromWidth,
 /// to a larger illegal type. i1 is always treated as a legal type because it is
 /// a fundamental type in IR, and there are many specialized optimizations for
 /// i1 types.
-bool InstCombinerImpl::shouldChangeType(Type *From, Type *To) const {
+bool SeaInstCombinerImpl::shouldChangeType(Type *From, Type *To) const {
   // TODO: This could be extended to allow vectors. Datalayout changes might be
   // needed to properly support that.
   if (!From->isIntegerTy() || !To->isIntegerTy())
@@ -325,7 +329,7 @@ static void ClearSubclassDataAfterReassociation(BinaryOperator &I) {
 /// (op (cast (op X, C2)), C1) --> (cast (op X, op (C1, C2)))
 /// (op (cast (op X, C2)), C1) --> (op (cast X), op (C1, C2))
 static bool simplifyAssocCastAssoc(BinaryOperator *BinOp1,
-                                   InstCombinerImpl &IC) {
+                                   SeaInstCombinerImpl &IC) {
   auto *Cast = dyn_cast<CastInst>(BinOp1->getOperand(0));
   if (!Cast || !Cast->hasOneUse())
     return false;
@@ -365,7 +369,7 @@ static bool simplifyAssocCastAssoc(BinaryOperator *BinOp1,
 
 // Simplifies IntToPtr/PtrToInt RoundTrip Cast To BitCast.
 // inttoptr ( ptrtoint (x) ) --> x
-Value *InstCombinerImpl::simplifyIntToPtrRoundTripCast(Value *Val) {
+Value *SeaInstCombinerImpl::simplifyIntToPtrRoundTripCast(Value *Val) {
   auto *IntToPtr = dyn_cast<IntToPtrInst>(Val);
   if (IntToPtr && DL.getPointerTypeSizeInBits(IntToPtr->getDestTy()) ==
                       DL.getTypeSizeInBits(IntToPtr->getSrcTy())) {
@@ -403,7 +407,7 @@ Value *InstCombinerImpl::simplifyIntToPtrRoundTripCast(Value *Val) {
 ///  5. Transform: "A op (B op C)" ==> "B op (C op A)" if "C op A" simplifies.
 ///  6. Transform: "(A op C1) op (B op C2)" ==> "(A op B) op (C1 op C2)"
 ///     if C1 and C2 are constants.
-bool InstCombinerImpl::SimplifyAssociativeOrCommutative(BinaryOperator &I) {
+bool SeaInstCombinerImpl::SimplifyAssociativeOrCommutative(BinaryOperator &I) {
   Instruction::BinaryOps Opcode = I.getOpcode();
   bool Changed = false;
 
@@ -632,7 +636,7 @@ getBinOpsForFactorization(Instruction::BinaryOps TopOpcode, BinaryOperator *Op,
 
 /// This tries to simplify binary operations by factorizing out common terms
 /// (e. g. "(A*B)+(A*C)" -> "A*(B+C)").
-Value *InstCombinerImpl::tryFactorization(BinaryOperator &I,
+Value *SeaInstCombinerImpl::tryFactorization(BinaryOperator &I,
                                           Instruction::BinaryOps InnerOpcode,
                                           Value *A, Value *B, Value *C,
                                           Value *D) {
@@ -738,7 +742,7 @@ Value *InstCombinerImpl::tryFactorization(BinaryOperator &I,
 /// (eg "(A*B)+(A*C)" -> "A*(B+C)") or expanding out if this results in
 /// simplifications (eg: "A & (B | C) -> (A&B) | (A&C)" if this is a win).
 /// Returns the simplified value, or null if it didn't simplify.
-Value *InstCombinerImpl::SimplifyUsingDistributiveLaws(BinaryOperator &I) {
+Value *SeaInstCombinerImpl::SimplifyUsingDistributiveLaws(BinaryOperator &I) {
   Value *LHS = I.getOperand(0), *RHS = I.getOperand(1);
   BinaryOperator *Op0 = dyn_cast<BinaryOperator>(LHS);
   BinaryOperator *Op1 = dyn_cast<BinaryOperator>(RHS);
@@ -856,7 +860,7 @@ Value *InstCombinerImpl::SimplifyUsingDistributiveLaws(BinaryOperator &I) {
   return SimplifySelectsFeedingBinaryOp(I, LHS, RHS);
 }
 
-Value *InstCombinerImpl::SimplifySelectsFeedingBinaryOp(BinaryOperator &I,
+Value *SeaInstCombinerImpl::SimplifySelectsFeedingBinaryOp(BinaryOperator &I,
                                                         Value *LHS,
                                                         Value *RHS) {
   Value *A, *B, *C, *D, *E, *F;
@@ -910,7 +914,7 @@ Value *InstCombinerImpl::SimplifySelectsFeedingBinaryOp(BinaryOperator &I,
 
 /// Freely adapt every user of V as-if V was changed to !V.
 /// WARNING: only if canFreelyInvertAllUsersOf() said this can be done.
-void InstCombinerImpl::freelyInvertAllUsersOf(Value *I) {
+void SeaInstCombinerImpl::freelyInvertAllUsersOf(Value *I) {
   for (User *U : I->users()) {
     switch (cast<Instruction>(U)->getOpcode()) {
     case Instruction::Select: {
@@ -934,7 +938,7 @@ void InstCombinerImpl::freelyInvertAllUsersOf(Value *I) {
 
 /// Given a 'sub' instruction, return the RHS of the instruction if the LHS is a
 /// constant zero (which is the 'negate' form).
-Value *InstCombinerImpl::dyn_castNegVal(Value *V) const {
+Value *SeaInstCombinerImpl::dyn_castNegVal(Value *V) const {
   Value *NegV;
   if (match(V, m_Neg(m_Value(NegV))))
     return NegV;
@@ -974,7 +978,7 @@ Value *InstCombinerImpl::dyn_castNegVal(Value *V) const {
 /// A binop with a constant operand and a sign-extended boolean operand may be
 /// converted into a select of constants by applying the binary operation to
 /// the constant with the two possible values of the extended boolean (0 or -1).
-Instruction *InstCombinerImpl::foldBinopOfSextBoolToSelect(BinaryOperator &BO) {
+Instruction *SeaInstCombinerImpl::foldBinopOfSextBoolToSelect(BinaryOperator &BO) {
   // TODO: Handle non-commutative binop (constant is operand 0).
   // TODO: Handle zext.
   // TODO: Peek through 'not' of cast.
@@ -1050,7 +1054,7 @@ static Value *foldOperationIntoSelectOperand(Instruction &I, Value *SO,
   return NewBO;
 }
 
-Instruction *InstCombinerImpl::FoldOpIntoSelect(Instruction &Op, SelectInst *SI,
+Instruction *SeaInstCombinerImpl::FoldOpIntoSelect(Instruction &Op, SelectInst *SI,
                                                 bool FoldWithMultiUse) {
   // Don't modify shared select instructions unless set FoldWithMultiUse
   if (!SI->hasOneUse() && !FoldWithMultiUse)
@@ -1149,7 +1153,7 @@ static Value *foldOperationIntoPhiValue(BinaryOperator *I, Value *InV,
   return RI;
 }
 
-Instruction *InstCombinerImpl::foldOpIntoPhi(Instruction &I, PHINode *PN) {
+Instruction *SeaInstCombinerImpl::foldOpIntoPhi(Instruction &I, PHINode *PN) {
   unsigned NumPHIValues = PN->getNumIncomingValues();
   if (NumPHIValues == 0)
     return nullptr;
@@ -1307,7 +1311,7 @@ Instruction *InstCombinerImpl::foldOpIntoPhi(Instruction &I, PHINode *PN) {
   return replaceInstUsesWith(I, NewPN);
 }
 
-Instruction *InstCombinerImpl::foldBinopWithPhiOperands(BinaryOperator &BO) {
+Instruction *SeaInstCombinerImpl::foldBinopWithPhiOperands(BinaryOperator &BO) {
   // TODO: This should be similar to the incoming values check in foldOpIntoPhi:
   //       we are guarding against replicating the binop in >1 predecessor.
   //       This could miss matching a phi with 2 constant incoming values.
@@ -1373,7 +1377,7 @@ Instruction *InstCombinerImpl::foldBinopWithPhiOperands(BinaryOperator &BO) {
   return NewPhi;
 }
 
-Instruction *InstCombinerImpl::foldBinOpIntoSelectOrPhi(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::foldBinOpIntoSelectOrPhi(BinaryOperator &I) {
   if (!isa<Constant>(I.getOperand(1)))
     return nullptr;
 
@@ -1402,7 +1406,7 @@ static Type *findElementAtOffset(PointerType *PtrTy, int64_t IntOffset,
   APInt Offset(DL.getIndexTypeSizeInBits(PtrTy), IntOffset);
   SmallVector<APInt> Indices = DL.getGEPIndicesForOffset(Ty, Offset);
   if (!Offset.isZero())
-    return nullptr;
+      return nullptr;
 
   for (const APInt &Index : Indices)
     NewIndices.push_back(ConstantInt::get(PtrTy->getContext(), Index));
@@ -1421,7 +1425,7 @@ static bool shouldMergeGEPs(GEPOperator &GEP, GEPOperator &Src) {
 
 /// Return a value X such that Val = X * Scale, or null if none.
 /// If the multiplication is known not to overflow, then NoSignedWrap is set.
-Value *InstCombinerImpl::Descale(Value *Val, APInt Scale, bool &NoSignedWrap) {
+Value *SeaInstCombinerImpl::Descale(Value *Val, APInt Scale, bool &NoSignedWrap) {
   assert(isa<IntegerType>(Val->getType()) && "Can only descale integers!");
   assert(cast<IntegerType>(Val->getType())->getBitWidth() ==
          Scale.getBitWidth() && "Scale not compatible with value!");
@@ -1661,7 +1665,7 @@ Value *InstCombinerImpl::Descale(Value *Val, APInt Scale, bool &NoSignedWrap) {
   } while (true);
 }
 
-Instruction *InstCombinerImpl::foldVectorBinop(BinaryOperator &Inst) {
+Instruction *SeaInstCombinerImpl::foldVectorBinop(BinaryOperator &Inst) {
   if (!isa<VectorType>(Inst.getType()))
     return nullptr;
 
@@ -1880,7 +1884,7 @@ Instruction *InstCombinerImpl::foldVectorBinop(BinaryOperator &Inst) {
 /// Try to narrow the width of a binop if at least 1 operand is an extend of
 /// of a value. This requires a potentially expensive known bits check to make
 /// sure the narrow op does not overflow.
-Instruction *InstCombinerImpl::narrowMathIfNoOverflow(BinaryOperator &BO) {
+Instruction *SeaInstCombinerImpl::narrowMathIfNoOverflow(BinaryOperator &BO) {
   // We need at least one extended operand.
   Value *Op0 = BO.getOperand(0), *Op1 = BO.getOperand(1);
 
@@ -1968,7 +1972,7 @@ static Instruction *foldSelectGEP(GetElementPtrInst &GEP,
   return SelectInst::Create(Cond, NewTrueC, NewFalseC, "", nullptr, Sel);
 }
 
-Instruction *InstCombinerImpl::visitGEPOfGEP(GetElementPtrInst &GEP,
+Instruction *SeaInstCombinerImpl::visitGEPOfGEP(GetElementPtrInst &GEP,
                                              GEPOperator *Src) {
   // Combine Indices - If the source pointer to this getelementptr instruction
   // is a getelementptr instruction with matching element type, combine the
@@ -2157,7 +2161,7 @@ Instruction *InstCombinerImpl::visitGEPOfGEP(GetElementPtrInst &GEP,
 }
 
 // Note that we may have also stripped an address space cast in between.
-Instruction *InstCombinerImpl::visitGEPOfBitcast(BitCastInst *BCI,
+Instruction *SeaInstCombinerImpl::visitGEPOfBitcast(BitCastInst *BCI,
                                                  GetElementPtrInst &GEP) {
   // With opaque pointers, there is no pointer element type we can use to
   // adjust the GEP type.
@@ -2261,7 +2265,7 @@ Instruction *InstCombinerImpl::visitGEPOfBitcast(BitCastInst *BCI,
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::visitGetElementPtrInst(GetElementPtrInst &GEP) {
+Instruction *SeaInstCombinerImpl::visitGetElementPtrInst(GetElementPtrInst &GEP) {
   Value *PtrOp = GEP.getOperand(0);
   SmallVector<Value *, 8> Indices(GEP.indices());
   Type *GEPType = GEP.getType();
@@ -2832,7 +2836,7 @@ static bool isAllocSiteRemovable(Instruction *AI,
   return true;
 }
 
-Instruction *InstCombinerImpl::visitAllocSite(Instruction &MI) {
+Instruction *SeaInstCombinerImpl::visitAllocSite(Instruction &MI) {
   assert(isa<AllocaInst>(MI) || isRemovableAlloc(&cast<CallBase>(MI), &TLI));
 
   // If we have a malloc call which is only used in any amount of comparisons to
@@ -3035,7 +3039,7 @@ static Instruction *tryToMoveFreeBeforeNullTest(CallInst &FI,
   return &FI;
 }
 
-Instruction *InstCombinerImpl::visitFree(CallInst &FI, Value *Op) {
+Instruction *SeaInstCombinerImpl::visitFree(CallInst &FI, Value *Op) {
   // free undef -> unreachable.
   if (isa<UndefValue>(Op)) {
     // Leave a marker since we can't modify the CFG here.
@@ -3081,7 +3085,7 @@ static bool isMustTailCall(Value *V) {
   return false;
 }
 
-Instruction *InstCombinerImpl::visitReturnInst(ReturnInst &RI) {
+Instruction *SeaInstCombinerImpl::visitReturnInst(ReturnInst &RI) {
   if (RI.getNumOperands() == 0) // ret void
     return nullptr;
 
@@ -3105,7 +3109,7 @@ Instruction *InstCombinerImpl::visitReturnInst(ReturnInst &RI) {
 }
 
 // WARNING: keep in sync with SimplifyCFGOpt::simplifyUnreachable()!
-Instruction *InstCombinerImpl::visitUnreachableInst(UnreachableInst &I) {
+Instruction *SeaInstCombinerImpl::visitUnreachableInst(UnreachableInst &I) {
   // Try to remove the previous instruction if it must lead to unreachable.
   // This includes instructions like stores and "llvm.assume" that may not get
   // removed by simple dead code elimination.
@@ -3132,7 +3136,7 @@ Instruction *InstCombinerImpl::visitUnreachableInst(UnreachableInst &I) {
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::visitUnconditionalBranchInst(BranchInst &BI) {
+Instruction *SeaInstCombinerImpl::visitUnconditionalBranchInst(BranchInst &BI) {
   assert(BI.isUnconditional() && "Only for unconditional branches.");
 
   // If this store is the second-to-last instruction in the basic block
@@ -3161,7 +3165,7 @@ Instruction *InstCombinerImpl::visitUnconditionalBranchInst(BranchInst &BI) {
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::visitBranchInst(BranchInst &BI) {
+Instruction *SeaInstCombinerImpl::visitBranchInst(BranchInst &BI) {
   if (BI.isUnconditional())
     return visitUnconditionalBranchInst(BI);
 
@@ -3197,7 +3201,7 @@ Instruction *InstCombinerImpl::visitBranchInst(BranchInst &BI) {
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::visitSwitchInst(SwitchInst &SI) {
+Instruction *SeaInstCombinerImpl::visitSwitchInst(SwitchInst &SI) {
   Value *Cond = SI.getCondition();
   Value *Op0;
   ConstantInt *AddRHS;
@@ -3247,7 +3251,7 @@ Instruction *InstCombinerImpl::visitSwitchInst(SwitchInst &SI) {
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::visitExtractValueInst(ExtractValueInst &EV) {
+Instruction *SeaInstCombinerImpl::visitExtractValueInst(ExtractValueInst &EV) {
   Value *Agg = EV.getAggregateOperand();
 
   if (!EV.hasIndices())
@@ -3350,15 +3354,15 @@ Instruction *InstCombinerImpl::visitExtractValueInst(ExtractValueInst &EV) {
         CmpInst::Predicate Pred;
         APInt NewRHSC, Offset;
         NWR.getEquivalentICmp(Pred, NewRHSC, Offset);
-        auto *OpTy = WO->getRHS()->getType();
+          auto *OpTy = WO->getRHS()->getType();
         auto *NewLHS = WO->getLHS();
         if (Offset != 0)
           NewLHS = Builder.CreateAdd(NewLHS, ConstantInt::get(OpTy, Offset));
         return new ICmpInst(ICmpInst::getInversePredicate(Pred), NewLHS,
-                            ConstantInt::get(OpTy, NewRHSC));
+                              ConstantInt::get(OpTy, NewRHSC));
+        }
       }
     }
-  }
   if (LoadInst *L = dyn_cast<LoadInst>(Agg))
     // If the (non-volatile) load only has one use, we can rewrite this to a
     // load from a GEP. This reduces the size of the load. If a load is used
@@ -3433,7 +3437,7 @@ static bool shorter_filter(const Value *LHS, const Value *RHS) {
     cast<ArrayType>(RHS->getType())->getNumElements();
 }
 
-Instruction *InstCombinerImpl::visitLandingPadInst(LandingPadInst &LI) {
+Instruction *SeaInstCombinerImpl::visitLandingPadInst(LandingPadInst &LI) {
   // The logic here should be correct for any real-world personality function.
   // However if that turns out not to be true, the offending logic can always
   // be conditioned on the personality function, like the catch-all logic is.
@@ -3743,7 +3747,7 @@ Instruction *InstCombinerImpl::visitLandingPadInst(LandingPadInst &LI) {
 }
 
 Value *
-InstCombinerImpl::pushFreezeToPreventPoisonFromPropagating(FreezeInst &OrigFI) {
+SeaInstCombinerImpl::pushFreezeToPreventPoisonFromPropagating(FreezeInst &OrigFI) {
   // Try to push freeze through instructions that propagate but don't produce
   // poison as far as possible.  If an operand of freeze follows three
   // conditions 1) one-use, 2) does not produce poison, and 3) has all but one
@@ -3801,7 +3805,7 @@ InstCombinerImpl::pushFreezeToPreventPoisonFromPropagating(FreezeInst &OrigFI) {
   return OrigOp;
 }
 
-Instruction *InstCombinerImpl::foldFreezeIntoRecurrence(FreezeInst &FI,
+Instruction *SeaInstCombinerImpl::foldFreezeIntoRecurrence(FreezeInst &FI,
                                                         PHINode *PN) {
   // Detect whether this is a recurrence with a start value and some number of
   // backedge values. We'll check whether we can push the freeze through the
@@ -3869,7 +3873,7 @@ Instruction *InstCombinerImpl::foldFreezeIntoRecurrence(FreezeInst &FI,
   return replaceInstUsesWith(FI, PN);
 }
 
-bool InstCombinerImpl::freezeOtherUses(FreezeInst &FI) {
+bool SeaInstCombinerImpl::freezeOtherUses(FreezeInst &FI) {
   Value *Op = FI.getOperand(0);
 
   if (isa<Constant>(Op) || Op->hasOneUse())
@@ -3912,7 +3916,7 @@ bool InstCombinerImpl::freezeOtherUses(FreezeInst &FI) {
   return Changed;
 }
 
-Instruction *InstCombinerImpl::visitFreeze(FreezeInst &I) {
+Instruction *SeaInstCombinerImpl::visitFreeze(FreezeInst &I) {
   Value *Op0 = I.getOperand(0);
 
   if (Value *V = simplifyFreezeInst(Op0, SQ.getWithInstruction(&I)))
@@ -4138,7 +4142,7 @@ static bool TryToSinkInstruction(Instruction *I, BasicBlock *DestBlock,
   return true;
 }
 
-bool InstCombinerImpl::run() {
+bool SeaInstCombinerImpl::run() {
   while (!Worklist.isEmpty()) {
     // Walk deferred instructions in reverse order, and push them to the
     // worklist, which means they'll end up popped from the worklist in-order.
@@ -4260,18 +4264,18 @@ bool InstCombinerImpl::run() {
     auto OptBB = getOptionalSinkBlockForInst(I);
     if (OptBB) {
       auto *UserParent = *OptBB;
-      // Okay, the CFG is simple enough, try to sink this instruction.
+            // Okay, the CFG is simple enough, try to sink this instruction.
       if (TryToSinkInstruction(I, UserParent, TLI)) {
-        LLVM_DEBUG(dbgs() << "IC: Sink: " << *I << '\n');
-        MadeIRChange = true;
+              LLVM_DEBUG(dbgs() << "IC: Sink: " << *I << '\n');
+              MadeIRChange = true;
         // We'll add uses of the sunk instruction below, but since
         // sinking can expose opportunities for it's *operands* add
         // them to the worklist
-        for (Use &U : I->operands())
-          if (Instruction *OpI = dyn_cast<Instruction>(U.get()))
-            Worklist.push(OpI);
-      }
-    }
+              for (Use &U : I->operands())
+                if (Instruction *OpI = dyn_cast<Instruction>(U.get()))
+                  Worklist.push(OpI);
+            }
+          }
 
     // Now that we have an instruction, try combining it to simplify it.
     Builder.SetInsertPoint(I);
@@ -4524,7 +4528,9 @@ static bool combineInstructionsOverFunction(
     Function &F, InstructionWorklist &Worklist, AliasAnalysis *AA,
     AssumptionCache &AC, TargetLibraryInfo &TLI, TargetTransformInfo &TTI,
     DominatorTree &DT, OptimizationRemarkEmitter &ORE, BlockFrequencyInfo *BFI,
-    ProfileSummaryInfo *PSI, unsigned MaxIterations, LoopInfo *LI) {
+    ProfileSummaryInfo *PSI, unsigned MaxIterations,
+    bool AvoidBv, bool AvoidUnsignedICmp, bool AvoidIntToPtr, bool AvoidAliasing,
+    bool AvoidDisequalities, LoopInfo *LI) {
   auto &DL = F.getParent()->getDataLayout();
   MaxIterations = std::min(MaxIterations, LimitMaxIterations.getValue());
 
@@ -4568,7 +4574,10 @@ static bool combineInstructionsOverFunction(
 
     MadeIRChange |= prepareICWorklistFromFunction(F, DL, &TLI, Worklist);
 
-    InstCombinerImpl IC(Worklist, Builder, F.hasMinSize(), AA, AC, TLI, TTI, DT,
+    SeaInstCombinerImpl IC(Worklist, Builder, F.hasMinSize(), 
+                        AvoidBv, AvoidUnsignedICmp, AvoidIntToPtr, AvoidAliasing,
+                        AvoidDisequalities,
+                        AA, AC, TLI, TTI, DT,
                         ORE, BFI, PSI, DL, LI);
     IC.MaxArraySizeForCombine = MaxArraySize;
 
@@ -4581,12 +4590,29 @@ static bool combineInstructionsOverFunction(
   return MadeIRChange;
 }
 
-InstCombinePass::InstCombinePass() : MaxIterations(LimitMaxIterations) {}
+SeaInstCombinePass::SeaInstCombinePass(
+				       bool AvoidBv,
+				       bool AvoidUnsignedICmp,
+				       bool AvoidIntToPtr,
+				       bool AvoidAliasing,
+				       bool AvoidDisequalities)
+  : MaxIterations(LimitMaxIterations),
+    AvoidBv(AvoidBv), AvoidUnsignedICmp(AvoidUnsignedICmp),
+    AvoidIntToPtr(AvoidIntToPtr), AvoidAliasing(AvoidAliasing),
+    AvoidDisequalities(AvoidDisequalities) {}
 
-InstCombinePass::InstCombinePass(unsigned MaxIterations)
-    : MaxIterations(MaxIterations) {}
+SeaInstCombinePass::SeaInstCombinePass(unsigned MaxIterations,
+				       bool AvoidBv,
+				       bool AvoidUnsignedICmp,
+				       bool AvoidIntToPtr,
+				       bool AvoidAliasing,
+				       bool AvoidDisequalities)
+  : MaxIterations(MaxIterations),
+    AvoidBv(AvoidBv), AvoidUnsignedICmp(AvoidUnsignedICmp),
+    AvoidIntToPtr(AvoidIntToPtr), AvoidAliasing(AvoidAliasing),
+    AvoidDisequalities(AvoidDisequalities) {}
 
-PreservedAnalyses InstCombinePass::run(Function &F,
+PreservedAnalyses SeaInstCombinePass::run(Function &F,
                                        FunctionAnalysisManager &AM) {
   auto &AC = AM.getResult<AssumptionAnalysis>(F);
   auto &DT = AM.getResult<DominatorTreeAnalysis>(F);
@@ -4603,8 +4629,10 @@ PreservedAnalyses InstCombinePass::run(Function &F,
   auto *BFI = (PSI && PSI->hasProfileSummary()) ?
       &AM.getResult<BlockFrequencyAnalysis>(F) : nullptr;
 
-  if (!combineInstructionsOverFunction(F, Worklist, AA, AC, TLI, TTI, DT, ORE,
-                                       BFI, PSI, MaxIterations, LI))
+  if (!combineInstructionsOverFunction(F, Worklist, AA, AC, TLI, TTI, DT, ORE, BFI,
+                                       PSI, MaxIterations,
+                                       AvoidBv, AvoidUnsignedICmp, AvoidIntToPtr,
+                                       AvoidAliasing, AvoidDisequalities, LI))
     // No changes, all analyses are preserved.
     return PreservedAnalyses::all();
 
@@ -4614,7 +4642,7 @@ PreservedAnalyses InstCombinePass::run(Function &F,
   return PA;
 }
 
-void InstructionCombiningPass::getAnalysisUsage(AnalysisUsage &AU) const {
+void SeaInstructionCombiningPass::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesCFG();
   AU.addRequired<AAResultsWrapperPass>();
   AU.addRequired<AssumptionCacheTracker>();
@@ -4630,7 +4658,7 @@ void InstructionCombiningPass::getAnalysisUsage(AnalysisUsage &AU) const {
   LazyBlockFrequencyInfoPass::getLazyBFIAnalysisUsage(AU);
 }
 
-bool InstructionCombiningPass::runOnFunction(Function &F) {
+bool SeaInstructionCombiningPass::runOnFunction(Function &F) {
   if (skipFunction(F))
     return false;
 
@@ -4652,23 +4680,44 @@ bool InstructionCombiningPass::runOnFunction(Function &F) {
       &getAnalysis<LazyBlockFrequencyInfoPass>().getBFI() :
       nullptr;
 
-  return combineInstructionsOverFunction(F, Worklist, AA, AC, TLI, TTI, DT, ORE,
-                                         BFI, PSI, MaxIterations, LI);
+  return combineInstructionsOverFunction(F, Worklist, AA, AC, TLI, TTI, DT, ORE, BFI,
+                                         PSI, MaxIterations,
+                                         AvoidBv, AvoidUnsignedICmp, AvoidIntToPtr,
+                                         AvoidAliasing, AvoidDisequalities, LI);
 }
 
-char InstructionCombiningPass::ID = 0;
+char SeaInstructionCombiningPass::ID = 0;
 
-InstructionCombiningPass::InstructionCombiningPass()
-    : FunctionPass(ID), MaxIterations(InstCombineDefaultMaxIterations) {
-  initializeInstructionCombiningPassPass(*PassRegistry::getPassRegistry());
+SeaInstructionCombiningPass::SeaInstructionCombiningPass(
+							 bool AvoidBv,
+							 bool AvoidUnsignedICmp,
+							 bool AvoidIntToPtr,
+							 bool AvoidAliasing,
+							 bool AvoidDisequalities)
+  : FunctionPass(ID),     
+    MaxIterations(InstCombineDefaultMaxIterations),
+    AvoidBv(AvoidBv), AvoidUnsignedICmp(AvoidUnsignedICmp),
+    AvoidIntToPtr(AvoidIntToPtr), AvoidAliasing(AvoidAliasing),
+    AvoidDisequalities(AvoidDisequalities) {
+  initializeSeaInstructionCombiningPassPass(*PassRegistry::getPassRegistry());
 }
 
-InstructionCombiningPass::InstructionCombiningPass(unsigned MaxIterations)
-    : FunctionPass(ID), MaxIterations(MaxIterations) {
-  initializeInstructionCombiningPassPass(*PassRegistry::getPassRegistry());
+SeaInstructionCombiningPass::SeaInstructionCombiningPass(
+							 unsigned MaxIterations,
+							 bool AvoidBv,
+							 bool AvoidUnsignedICmp,
+							 bool AvoidIntToPtr,
+							 bool AvoidAliasing,
+							 bool AvoidDisequalities)
+    : FunctionPass(ID), 
+      MaxIterations(MaxIterations),
+      AvoidBv(AvoidBv), AvoidUnsignedICmp(AvoidUnsignedICmp),
+      AvoidIntToPtr(AvoidIntToPtr), AvoidAliasing(AvoidAliasing),
+      AvoidDisequalities(AvoidDisequalities){
+  initializeSeaInstructionCombiningPassPass(*PassRegistry::getPassRegistry());
 }
 
-INITIALIZE_PASS_BEGIN(InstructionCombiningPass, "instcombine",
+INITIALIZE_PASS_BEGIN(SeaInstructionCombiningPass, "sea-instcombine",
                       "Combine redundant instructions", false, false)
 INITIALIZE_PASS_DEPENDENCY(AssumptionCacheTracker)
 INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfoWrapperPass)
@@ -4679,26 +4728,35 @@ INITIALIZE_PASS_DEPENDENCY(GlobalsAAWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(OptimizationRemarkEmitterWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(LazyBlockFrequencyInfoPass)
 INITIALIZE_PASS_DEPENDENCY(ProfileSummaryInfoWrapperPass)
-INITIALIZE_PASS_END(InstructionCombiningPass, "instcombine",
+INITIALIZE_PASS_END(SeaInstructionCombiningPass, "sea-instcombine",
                     "Combine redundant instructions", false, false)
 
 // Initialization Routines
-void llvm::initializeInstCombine(PassRegistry &Registry) {
-  initializeInstructionCombiningPassPass(Registry);
+void llvm_seahorn::initializeInstCombine(PassRegistry &Registry) {
+  initializeSeaInstructionCombiningPassPass(Registry);
 }
 
-void LLVMInitializeInstCombine(LLVMPassRegistryRef R) {
-  initializeInstructionCombiningPassPass(*unwrap(R));
+FunctionPass *createSeaInstructionCombiningPass() {
+  const bool AvoidBv = true;
+  const bool AvoidUnsignedICmp = true;
+  const bool AvoidIntToPtr = true;
+  const bool AvoidAliasing = true;
+  const bool AvoidDisequalities = false;
+  return new SeaInstructionCombiningPass(
+					 AvoidBv, AvoidUnsignedICmp,
+					 AvoidIntToPtr,
+					 AvoidAliasing, AvoidDisequalities);
 }
 
-FunctionPass *llvm::createInstructionCombiningPass() {
-  return new InstructionCombiningPass();
-}
-
-FunctionPass *llvm::createInstructionCombiningPass(unsigned MaxIterations) {
-  return new InstructionCombiningPass(MaxIterations);
-}
-
-void LLVMAddInstructionCombiningPass(LLVMPassManagerRef PM) {
-  unwrap(PM)->add(createInstructionCombiningPass());
+FunctionPass *createSeaInstructionCombiningPass(
+						unsigned MaxIterations,
+						bool AvoidBv,
+						bool AvoidUnsignedICmp,
+						bool AvoidIntToPtr,
+						bool AvoidAliasing,
+						bool AvoidDisequalities) {
+  return new SeaInstructionCombiningPass(MaxIterations,
+					 AvoidBv, AvoidUnsignedICmp,
+					 AvoidIntToPtr,
+					 AvoidAliasing, AvoidDisequalities);
 }
