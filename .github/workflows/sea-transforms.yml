@@ -35,7 +35,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y "llvm-$V-dev" "llvm-$V-tools" "clang-$V" ninja-build cmake
-          pip install --user lit   # llvm-lit test driver
+          python3 -m pip install --user lit   # llvm-lit test driver
 
       - name: Work around missing libPolly.a (Ubuntu llvm packaging)
         # llvm-*-dev's cmake exports reference libPolly.a but don't ship it; the
