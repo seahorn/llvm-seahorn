@@ -43,7 +43,11 @@ enum OutputKind {
   OK_OutputBitcode,
   OK_OutputThinLTOBitcode,
 };
-enum VerifierKind { VK_NoVerifier, VK_VerifyOut, VK_VerifyEachPass };
+enum VerifierKind {
+  VK_NoVerifier,
+  VK_VerifyInAndOut,
+  VK_VerifyEachPass
+};
 enum PGOKind {
   NoPGO,
   InstrGen,
@@ -67,7 +71,7 @@ void printPasses(raw_ostream &OS);
 bool runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
                      TargetLibraryInfoImpl *TLII, ToolOutputFile *Out,
                      ToolOutputFile *ThinLinkOut, ToolOutputFile *OptRemarkFile,
-                     StringRef PassPipeline,
+                     StringRef PassPipeline, ArrayRef<StringRef> PassInfos,
                      ArrayRef<PassPlugin> PassPlugins, opt_tool::OutputKind OK,
                      opt_tool::VerifierKind VK,
                      bool ShouldPreserveAssemblyUseListOrder,
