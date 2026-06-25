@@ -142,7 +142,7 @@ tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution &SE,
                       << " with invalid cost.\n");
     return LoopUnrollResult::Unmodified;
   }
-  unsigned LoopSize = *LoopSizeIC.value();
+  unsigned LoopSize = *LoopSizeIC.getValue();
 
   // Find the smallest exact trip count for any exit. This is an upper bound
   // on the loop trip count, but an exit at an earlier iteration is still
@@ -197,7 +197,8 @@ tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution &SE,
   // fully unroll the loop.
   bool UseUpperBound = false;
   bool IsCountSetExplicitly = computeUnrollCount(
-      L, TTI, DT, LI, SE, EphValues, &ORE, TripCount, MaxTripCount, MaxOrZero,
+      L, TTI, DT, LI, &AC, SE, EphValues, &ORE, TripCount, MaxTripCount,
+      MaxOrZero,
       TripMultiple, LoopSize, UP, PP, UseUpperBound);
   if (!UP.Count) {
     LLVM_DEBUG(dbgs() << "  Not unrolling loop without known unroll count\n");
@@ -215,7 +216,8 @@ tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI, ScalarEvolution &SE,
              << " iterations";
     });
 
-    if (peelLoop(L, PP.PeelCount, LI, &SE, DT, &AC, PreserveLCSSA)) {
+    ValueToValueMapTy VMap;
+    if (peelLoop(L, PP.PeelCount, LI, &SE, DT, &AC, PreserveLCSSA, VMap)) {
       simplifyLoopAfterUnroll(L, true, LI, &SE, &DT, &AC, &TTI);
       // If the loop was peeled, we already "used up" the profile information
       // we had, so we don't want to unroll or peel again.
