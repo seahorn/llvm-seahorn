@@ -538,7 +538,7 @@ int main(int argc, char **argv) {
   initializeJMCInstrumenterPass(Registry);
 
   initializeSeaIndVarSimplifyLegacyPassPass(Registry);
-  // initializeSeaInstructionCombiningPassPass(Registry); // dropped (LLVM16/loops-only)
+  initializeSeaInstructionCombiningPassPass(Registry);
   initializeSeaLoopUnrollPass(Registry);
 
 

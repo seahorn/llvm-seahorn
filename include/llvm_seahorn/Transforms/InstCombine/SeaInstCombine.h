@@ -42,10 +42,10 @@ public:
   static StringRef name() { return "SeaInstCombinePass"; }
 
   explicit SeaInstCombinePass(
-			      bool AvoidBv = true,
-			      bool AvoidUnsignedICmp = true,
-			      bool AvoidIntToPtr = true,
-			      bool AvoidAliasing = true,
+			      bool AvoidBv = false,  // minimal port: LLVM16 behavior
+			      bool AvoidUnsignedICmp = false,  // minimal port: LLVM16 behavior
+			      bool AvoidIntToPtr = false,  // minimal port: LLVM16 behavior
+			      bool AvoidAliasing = false,  // minimal port: LLVM16 behavior
 			      bool AvoidDisequalities = false);
   explicit SeaInstCombinePass(unsigned MaxIterations,
 			      bool AvoidBv,
@@ -75,10 +75,10 @@ public:
   static char ID; // Pass identification, replacement for typeid
 
   explicit SeaInstructionCombiningPass(
-				       bool AvoidBv = true,
-				       bool AvoidUnsignedICmp = true,
-				       bool AvoidIntToPtr = true,
-				       bool AvoidAliasing = true,
+				       bool AvoidBv = false,  // minimal port: LLVM16 behavior
+				       bool AvoidUnsignedICmp = false,  // minimal port: LLVM16 behavior
+				       bool AvoidIntToPtr = false,  // minimal port: LLVM16 behavior
+				       bool AvoidAliasing = false,  // minimal port: LLVM16 behavior
 				       bool AvoidDisequalities = false);
   explicit SeaInstructionCombiningPass(
 				       unsigned MaxIterations,

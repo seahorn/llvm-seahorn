@@ -34,9 +34,10 @@
 #include <utility>
 
 using namespace llvm;
+using namespace llvm_seahorn;
 using namespace PatternMatch;
 
-#define DEBUG_TYPE "instcombine"
+#define DEBUG_TYPE "sea-instcombine"
 
 namespace {
 
@@ -846,7 +847,7 @@ static Instruction *foldNoWrapAdd(BinaryOperator &Add,
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::foldAddWithConstant(BinaryOperator &Add) {
+Instruction *SeaInstCombinerImpl::foldAddWithConstant(BinaryOperator &Add) {
   Value *Op0 = Add.getOperand(0), *Op1 = Add.getOperand(1);
   Type *Ty = Add.getType();
   Constant *Op1C;
@@ -866,7 +867,7 @@ Instruction *InstCombinerImpl::foldAddWithConstant(BinaryOperator &Add) {
   Value *Y;
 
   // add (sub X, Y), -1 --> add (not Y), X
-  if (match(Op0, m_OneUse(m_Sub(m_Value(X), m_Value(Y)))) &&
+  if (!AvoidBv && match(Op0, m_OneUse(m_Sub(m_Value(X), m_Value(Y)))) &&
       match(Op1, m_AllOnes()))
     return BinaryOperator::CreateAdd(Builder.CreateNot(Y), X);
 
@@ -905,7 +906,7 @@ Instruction *InstCombinerImpl::foldAddWithConstant(BinaryOperator &Add) {
   if (match(Op0, m_Or(m_Value(), m_APInt(C2))) && *C2 == -*C)
     return BinaryOperator::CreateXor(Op0, ConstantInt::get(Add.getType(), *C2));
 
-  if (C->isSignMask()) {
+  if (!AvoidBv && C->isSignMask()) {
     // If wrapping is not allowed, then the addition must set the sign bit:
     // X + (signmask) --> X | signmask
     if (Add.hasNoSignedWrap() || Add.hasNoUnsignedWrap())
@@ -1053,7 +1054,7 @@ static bool MulWillOverflow(APInt &C0, APInt &C1, bool IsSigned) {
 
 // Simplifies X % C0 + (( X / C0 ) % C1) * C0 to X % (C0 * C1), where (C0 * C1)
 // does not overflow.
-Value *InstCombinerImpl::SimplifyAddWithRemainder(BinaryOperator &I) {
+Value *SeaInstCombinerImpl::SimplifyAddWithRemainder(BinaryOperator &I) {
   Value *LHS = I.getOperand(0), *RHS = I.getOperand(1);
   Value *X, *MulOpV;
   APInt C0, MulOpC;
@@ -1158,9 +1159,9 @@ static Instruction *foldAddToAshr(BinaryOperator &Add) {
       X, ConstantInt::get(Add.getType(), DivC->exactLogBase2()));
 }
 
-Instruction *InstCombinerImpl::
+Instruction *SeaInstCombinerImpl::
     canonicalizeCondSignextOfHighBitExtractToSignextHighBitExtract(
-        BinaryOperator &I) {
+    BinaryOperator &I) {
   assert((I.getOpcode() == Instruction::Add ||
           I.getOpcode() == Instruction::Or ||
           I.getOpcode() == Instruction::Sub) &&
@@ -1335,7 +1336,7 @@ static Instruction *foldBoxMultiply(BinaryOperator &I) {
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::visitAdd(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::visitAdd(BinaryOperator &I) {
   if (Value *V = simplifyAddInst(I.getOperand(0), I.getOperand(1),
                                  I.hasNoSignedWrap(), I.hasNoUnsignedWrap(),
                                  SQ.getWithInstruction(&I)))
@@ -1372,7 +1373,7 @@ Instruction *InstCombinerImpl::visitAdd(BinaryOperator &I) {
     return BinaryOperator::CreateXor(LHS, RHS);
 
   // X + X --> X << 1
-  if (LHS == RHS) {
+  if (!AvoidBv && LHS == RHS) {
     auto *Shl = BinaryOperator::CreateShl(LHS, ConstantInt::get(Ty, 1));
     Shl->setHasNoSignedWrap(I.hasNoSignedWrap());
     Shl->setHasNoUnsignedWrap(I.hasNoUnsignedWrap());
@@ -1405,11 +1406,11 @@ Instruction *InstCombinerImpl::visitAdd(BinaryOperator &I) {
     return BinaryOperator::CreateSub(A, B);
 
   // (A + RHS) + RHS --> A + (RHS << 1)
-  if (match(LHS, m_OneUse(m_c_Add(m_Value(A), m_Specific(RHS)))))
+  if (!AvoidBv && match(LHS, m_OneUse(m_c_Add(m_Value(A), m_Specific(RHS)))))
     return BinaryOperator::CreateAdd(A, Builder.CreateShl(RHS, 1, "reass.add"));
 
   // LHS + (A + LHS) --> A + (LHS << 1)
-  if (match(RHS, m_OneUse(m_c_Add(m_Value(A), m_Specific(LHS)))))
+  if (!AvoidBv && match(RHS, m_OneUse(m_c_Add(m_Value(A), m_Specific(LHS)))))
     return BinaryOperator::CreateAdd(A, Builder.CreateShl(LHS, 1, "reass.add"));
 
   {
@@ -1452,7 +1453,7 @@ Instruction *InstCombinerImpl::visitAdd(BinaryOperator &I) {
     return new ZExtInst(B, LHS->getType());
 
   // A+B --> A|B iff A and B have no bits set in common.
-  if (haveNoCommonBitsSet(LHS, RHS, DL, &AC, &I, &DT))
+  if (!AvoidBv && haveNoCommonBitsSet(LHS, RHS, DL, &AC, &I, &DT))
     return BinaryOperator::CreateOr(LHS, RHS);
 
   if (Instruction *Ext = narrowMathIfNoOverflow(I))
@@ -1640,7 +1641,7 @@ static Instruction *factorizeFAddFSub(BinaryOperator &I,
                 : BinaryOperator::CreateFDivFMF(XY, Z, &I);
 }
 
-Instruction *InstCombinerImpl::visitFAdd(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::visitFAdd(BinaryOperator &I) {
   if (Value *V = simplifyFAddInst(I.getOperand(0), I.getOperand(1),
                                   I.getFastMathFlags(),
                                   SQ.getWithInstruction(&I)))
@@ -1792,8 +1793,8 @@ Instruction *InstCombinerImpl::visitFAdd(BinaryOperator &I) {
 /// Optimize pointer differences into the same array into a size.  Consider:
 ///  &A[10] - &A[0]: we should compile this to "10".  LHS/RHS are the pointer
 /// operands to the ptrtoint instructions for the LHS/RHS of the subtract.
-Value *InstCombinerImpl::OptimizePointerDifference(Value *LHS, Value *RHS,
-                                                   Type *Ty, bool IsNUW) {
+Value *SeaInstCombinerImpl::OptimizePointerDifference(Value *LHS, Value *RHS,
+                                               Type *Ty, bool IsNUW) {
   // If LHS is a gep based on RHS or RHS is a gep based on LHS, we can optimize
   // this.
   bool Swapped = false;
@@ -1812,7 +1813,7 @@ Value *InstCombinerImpl::OptimizePointerDifference(Value *LHS, Value *RHS,
     } else if (auto *RHSGEP = dyn_cast<GEPOperator>(RHS)) {
       // (gep X, ...) - (gep X, ...)
       if (LHSGEP->getOperand(0)->stripPointerCasts() ==
-          RHSGEP->getOperand(0)->stripPointerCasts()) {
+            RHSGEP->getOperand(0)->stripPointerCasts()) {
         GEP1 = LHSGEP;
         GEP2 = RHSGEP;
       }
@@ -1849,9 +1850,9 @@ Value *InstCombinerImpl::OptimizePointerDifference(Value *LHS, Value *RHS,
   // If this is a single inbounds GEP and the original sub was nuw,
   // then the final multiplication is also nuw.
   if (auto *I = dyn_cast<Instruction>(Result))
-    if (IsNUW && !GEP2 && !Swapped && GEP1->isInBounds() &&
-        I->getOpcode() == Instruction::Mul)
-      I->setHasNoUnsignedWrap();
+  if (IsNUW && !GEP2 && !Swapped && GEP1->isInBounds() &&
+      I->getOpcode() == Instruction::Mul)
+    I->setHasNoUnsignedWrap();
 
   // If we have a 2nd GEP of the same base pointer, subtract the offsets.
   // If both GEPs are inbounds, then the subtract does not have signed overflow.
@@ -1914,7 +1915,7 @@ static Instruction *foldSubOfMinMax(BinaryOperator &I,
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::visitSub(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::visitSub(BinaryOperator &I) {
   if (Value *V = simplifySubInst(I.getOperand(0), I.getOperand(1),
                                  I.hasNoSignedWrap(), I.hasNoUnsignedWrap(),
                                  SQ.getWithInstruction(&I)))
@@ -2003,7 +2004,7 @@ Instruction *InstCombinerImpl::visitSub(BinaryOperator &I) {
     return BinaryOperator::CreateXor(Op0, Op1);
 
   // Replace (-1 - A) with (~A).
-  if (match(Op0, m_AllOnes()))
+  if (!AvoidBv && match(Op0, m_AllOnes()))
     return BinaryOperator::CreateNot(Op1);
 
   // (X + -1) - Y --> ~Y + X
@@ -2452,7 +2453,7 @@ static Instruction *hoistFNegAboveFMulFDiv(Instruction &I,
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::visitFNeg(UnaryOperator &I) {
+Instruction *SeaInstCombinerImpl::visitFNeg(UnaryOperator &I) {
   Value *Op = I.getOperand(0);
 
   if (Value *V = simplifyFNegInst(Op, I.getFastMathFlags(),
@@ -2528,7 +2529,7 @@ Instruction *InstCombinerImpl::visitFNeg(UnaryOperator &I) {
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::visitFSub(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::visitFSub(BinaryOperator &I) {
   if (Value *V = simplifyFSubInst(I.getOperand(0), I.getOperand(1),
                                   I.getFastMathFlags(),
                                   getSimplifyQuery().getWithInstruction(&I)))
