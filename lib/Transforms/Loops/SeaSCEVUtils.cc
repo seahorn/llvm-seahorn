@@ -1,3 +1,4 @@
+#include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm_seahorn/Loops/SeaSCEVUtils.h"
 
 #include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
