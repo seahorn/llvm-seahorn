@@ -35,7 +35,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y "llvm-$V-dev" "llvm-$V-tools" "clang-$V" ninja-build cmake
-          python3 -m pip install --user lit   # llvm-lit test driver
+          # lit test driver + filecheck (pip port of LLVM FileCheck): the latter
+          # avoids depending on an apt FileCheck-$V binary (not packaged for every
+          # LLVM line, e.g. 16 on jammy) and is the checker the corpus targets.
+          python3 -m pip install --user lit filecheck
 
       - name: Work around missing libPolly.a (Ubuntu llvm packaging)
         # llvm-*-dev's cmake exports reference libPolly.a but don't ship it; the
@@ -58,5 +61,5 @@ jobs:
           # seaopt must be an absolute path: lit runs each test from its own
           # Output/ dir, so a relative ./build path would not resolve.
           export SEAOPT="$GITHUB_WORKSPACE/build/bin/seaopt"
-          export OPT="opt-$V" FILECHECK="FileCheck-$V"
+          export OPT="opt-$V" FILECHECK="filecheck"   # pip filecheck on PATH (~/.local/bin)
           lit -v test/sea_transforms
