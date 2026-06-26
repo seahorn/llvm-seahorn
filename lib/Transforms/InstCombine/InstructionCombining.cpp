@@ -4676,6 +4676,15 @@ static bool combineInstructionsOverFunction(
   return MadeIRChange;
 }
 
+// Default ctor: reads the Avoid* knobs from the CLI flags so the new-PM
+// `-passes=sea-instcombine` reproduces SeaHorn behavior by default, matching
+// the legacy `-sea-instcombine` pass (and stays controllable via the flags).
+SeaInstCombinePass::SeaInstCombinePass()
+  : MaxIterations(LimitMaxIterations),
+    AvoidBv(AvoidBvFlag), AvoidUnsignedICmp(AvoidUnsignedICmpFlag),
+    AvoidIntToPtr(AvoidIntToPtrFlag), AvoidAliasing(AvoidAliasingFlag),
+    AvoidDisequalities(AvoidDisequalitiesFlag) {}
+
 SeaInstCombinePass::SeaInstCombinePass(
 				       bool AvoidBv,
 				       bool AvoidUnsignedICmp,

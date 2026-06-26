@@ -38,6 +38,7 @@
 #include "llvm/Transforms/Instrumentation/AddressSanitizer.h"
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
 #include "llvm/Transforms/Utils/Debugify.h"
+#include "llvm_seahorn/Transforms/InstCombine/SeaInstCombine.h"
 
 using namespace llvm;
 using namespace opt_tool;
@@ -386,6 +387,14 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
         AddressSanitizerOptions Opts;
         if (Name == "asan-pipeline") {
           MPM.addPass(AddressSanitizerPass(Opts));
+          return true;
+        }
+        // SeaHorn's InstCombine as a new-PM function pass. The default ctor
+        // reads the seaopt-instcombine-avoid-* flags; AA comes from the
+        // pipeline's AAManager, so no -tbaa -basic-aa scheduling is needed.
+        if (Name == "sea-instcombine") {
+          MPM.addPass(createModuleToFunctionPassAdaptor(
+              llvm_seahorn::SeaInstCombinePass()));
           return true;
         }
         return false;

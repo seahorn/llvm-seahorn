@@ -41,12 +41,16 @@ class SeaInstCombinePass : public PassInfoMixin<SeaInstCombinePass> {
 public:
   static StringRef name() { return "SeaInstCombinePass"; }
 
+  // Default ctor: reads the seaopt-instcombine-avoid-* CLI flags so the new-PM
+  // `-passes=sea-instcombine` matches the legacy `-sea-instcombine` default
+  // (SeaHorn behavior ON; pass the avoid-*=0 flags for stock LLVM behavior).
+  SeaInstCombinePass();
   explicit SeaInstCombinePass(
-			      bool AvoidBv = false,  // minimal port: LLVM16 behavior
-			      bool AvoidUnsignedICmp = false,  // minimal port: LLVM16 behavior
-			      bool AvoidIntToPtr = false,  // minimal port: LLVM16 behavior
-			      bool AvoidAliasing = false,  // minimal port: LLVM16 behavior
-			      bool AvoidDisequalities = false);
+			      bool AvoidBv,
+			      bool AvoidUnsignedICmp,
+			      bool AvoidIntToPtr,
+			      bool AvoidAliasing,
+			      bool AvoidDisequalities);
   explicit SeaInstCombinePass(unsigned MaxIterations,
 			      bool AvoidBv,
 			      bool AvoidUnsignedICmp,
