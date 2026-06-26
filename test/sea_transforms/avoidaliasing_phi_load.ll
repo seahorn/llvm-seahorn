@@ -3,27 +3,26 @@
 ; Gated at InstCombinePHI.cpp (`isSafeAndProfitableToSinkLoad` returns false
 ; when AvoidAliasing is set).
 ;
-; Validated on LLVM 14:
-;   stock opt -instcombine: merges to  %v.in = phi i32* [...] ; %v = load i32, i32* %v.in
+; Behavior on LLVM 16 (opaque pointers):
+;   stock opt -passes=instcombine: merges to  %v.in = phi ptr [...] ; %v = load i32, ptr %v.in
 ;   seaopt -sea-instcombine: keeps two separate loads + an i32 phi
 ;
 ; This also exercises pointer construction: the suppressed transform builds a
-; pointer-typed phi + a new load. On LLVM 15 (opaque pointers) that merged form
-; is `phi ptr`; a port regression here therefore also flags opaque-pointer drift.
-; Typed-pointer syntax (i32*) is used so the test runs on both LLVM 14 and 15.
+; pointer-typed phi + a new load (`phi ptr` under opaque pointers); a port
+; regression here therefore also flags opaque-pointer drift.
 ;
 ; RUN: %seaopt -sea-instcombine -S %s | %FileCheck %s
 ; RUN: %seaopt -sea-instcombine -S %s | %opt -passes=verify -disable-output
 ; RUN: %opt -passes=instcombine -S %s | %FileCheck --check-prefix=STOCK %s
 
-define i32 @phi_load(i1 %c, i32* %p, i32* %q) {
+define i32 @phi_load(i1 %c, ptr %p, ptr %q) {
 entry:
   br i1 %c, label %t, label %f
 t:
-  %lt = load i32, i32* %p
+  %lt = load i32, ptr %p
   br label %m
 f:
-  %lf = load i32, i32* %q
+  %lf = load i32, ptr %q
   br label %m
 m:
   %v = phi i32 [ %lt, %t ], [ %lf, %f ]
@@ -32,9 +31,9 @@ m:
 ; CHECK-LABEL: @phi_load
 ; both loads must survive (merging would leave only one), and the result phi
 ; stays an i32 phi rather than a pointer phi:
-; CHECK-DAG: load i32, i32* %p
-; CHECK-DAG: load i32, i32* %q
+; CHECK-DAG: load i32, ptr %p
+; CHECK-DAG: load i32, ptr %q
 ; CHECK: phi i32 [
 ;
 ; non-vacuity: stock instcombine sinks the loads, creating a pointer-typed phi
-; STOCK: phi i32*
+; STOCK: phi ptr

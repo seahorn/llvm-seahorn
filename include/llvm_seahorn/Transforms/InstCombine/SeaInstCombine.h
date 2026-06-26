@@ -74,12 +74,16 @@ class SeaInstructionCombiningPass : public FunctionPass {
 public:
   static char ID; // Pass identification, replacement for typeid
 
+  // Default ctor used by INITIALIZE_PASS for the legacy `-sea-instcombine`
+  // flag; reads the Avoid* values from the seaopt-instcombine-avoid-* CLI
+  // flags (which default to SeaHorn behavior, see InstructionCombining.cpp).
+  SeaInstructionCombiningPass();
   explicit SeaInstructionCombiningPass(
-				       bool AvoidBv = false,  // minimal port: LLVM16 behavior
-				       bool AvoidUnsignedICmp = false,  // minimal port: LLVM16 behavior
-				       bool AvoidIntToPtr = false,  // minimal port: LLVM16 behavior
-				       bool AvoidAliasing = false,  // minimal port: LLVM16 behavior
-				       bool AvoidDisequalities = false);
+				       bool AvoidBv,
+				       bool AvoidUnsignedICmp,
+				       bool AvoidIntToPtr,
+				       bool AvoidAliasing,
+				       bool AvoidDisequalities);
   explicit SeaInstructionCombiningPass(
 				       unsigned MaxIterations,
 				       bool AvoidBv,

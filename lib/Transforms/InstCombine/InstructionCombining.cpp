@@ -170,6 +170,28 @@ static cl::opt<unsigned> MaxArraySize(
 static cl::opt<unsigned> ShouldLowerDbgDeclare("seaopt-instcombine-lower-dbg-declare",
                                                cl::Hidden, cl::init(true));
 
+// SEAHORN: the Avoid* knobs gate the transforms that hurt SeaHorn's verifier
+// back-end (bit-vector folds, unsigned icmps, int<->ptr casts, alias-based
+// load forwarding, disequality folds). They default to the dev14/dev15
+// behavior (the first four ON, disequalities OFF) so a bare `-sea-instcombine`
+// reproduces SeaHorn's transform behavior. Pass `=0` to recover stock LLVM
+// InstCombine (e.g. the sea_instcombine regression corpus runs with all OFF).
+static cl::opt<bool> AvoidBvFlag(
+    "seaopt-instcombine-avoid-bv", cl::init(true),
+    cl::desc("Suppress InstCombine folds that introduce bit-vector reasoning"));
+static cl::opt<bool> AvoidUnsignedICmpFlag(
+    "seaopt-instcombine-avoid-unsigned-icmp", cl::init(true),
+    cl::desc("Suppress InstCombine folds that introduce unsigned comparisons"));
+static cl::opt<bool> AvoidIntToPtrFlag(
+    "seaopt-instcombine-avoid-int-to-ptr", cl::init(true),
+    cl::desc("Suppress InstCombine folds that introduce int<->ptr casts"));
+static cl::opt<bool> AvoidAliasingFlag(
+    "seaopt-instcombine-avoid-aliasing", cl::init(true),
+    cl::desc("Suppress InstCombine alias-based load forwarding"));
+static cl::opt<bool> AvoidDisequalitiesFlag(
+    "seaopt-instcombine-avoid-disequalities", cl::init(false),
+    cl::desc("Suppress InstCombine folds that introduce disequalities"));
+
 #if 0 /* SEAHORN: base llvm::InstCombiner methods are provided by libLLVM */
 std::optional<Instruction *>
 InstCombiner::targetInstCombineIntrinsic(IntrinsicInst &II) {
@@ -4766,6 +4788,19 @@ SeaInstructionCombiningPass::SeaInstructionCombiningPass(
   initializeSeaInstructionCombiningPassPass(*PassRegistry::getPassRegistry());
 }
 
+// Default ctor: the legacy `-sea-instcombine` flag is registered with
+// INITIALIZE_PASS, whose callDefaultCtor constructs the pass with no args.
+// Read the Avoid* knobs from the CLI flags so `-sea-instcombine` reproduces
+// SeaHorn behavior by default and stays controllable (e.g. =0 for stock LLVM).
+SeaInstructionCombiningPass::SeaInstructionCombiningPass()
+  : FunctionPass(ID),
+    MaxIterations(InstCombineDefaultMaxIterations),
+    AvoidBv(AvoidBvFlag), AvoidUnsignedICmp(AvoidUnsignedICmpFlag),
+    AvoidIntToPtr(AvoidIntToPtrFlag), AvoidAliasing(AvoidAliasingFlag),
+    AvoidDisequalities(AvoidDisequalitiesFlag) {
+  initializeSeaInstructionCombiningPassPass(*PassRegistry::getPassRegistry());
+}
+
 SeaInstructionCombiningPass::SeaInstructionCombiningPass(
 							 unsigned MaxIterations,
 							 bool AvoidBv,
@@ -4801,15 +4836,11 @@ void llvm_seahorn::initializeInstCombine(PassRegistry &Registry) {
 }
 
 FunctionPass *createSeaInstructionCombiningPass() {
-  const bool AvoidBv = false; // minimal port: LLVM16 behavior
-  const bool AvoidUnsignedICmp = false; // minimal port: LLVM16 behavior
-  const bool AvoidIntToPtr = false; // minimal port: LLVM16 behavior
-  const bool AvoidAliasing = false; // minimal port: LLVM16 behavior
-  const bool AvoidDisequalities = false;
+  // CLI-controllable (default: SeaHorn behavior, see the flag decls above).
   return new SeaInstructionCombiningPass(
-					 AvoidBv, AvoidUnsignedICmp,
-					 AvoidIntToPtr,
-					 AvoidAliasing, AvoidDisequalities);
+					 AvoidBvFlag, AvoidUnsignedICmpFlag,
+					 AvoidIntToPtrFlag,
+					 AvoidAliasingFlag, AvoidDisequalitiesFlag);
 }
 
 FunctionPass *createSeaInstructionCombiningPass(
