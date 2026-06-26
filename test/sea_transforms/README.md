@@ -89,6 +89,19 @@ define internal void @f.loop(` + `CHECK: call i32 @verifier.nondet`). The
 `%sea-loop-extract-driver` lit substitution comes from
 `SEA_LOOP_EXTRACT_DRIVER`.
 
+## Fake latch exit
+
+`fake_latch_exit.ll` exercises `sea-fake-latch-exit` (new-PM function pass): a
+loop whose latch ends in an *unconditional* branch gets a fake always-taken exit
+edge -- `latch: br label %h` becomes `latch: br i1 true, label %h, label
+%fake_latch_exit` with a fresh `unreachable` block. SeaHorn-only, so there is no
+`STOCK:` line; it is driven directly via `-passes='function(sea-fake-latch-exit)'`.
+
+It is also wired into the sea `-O` pipeline behind the hidden, default-off flag
+`-seaopt-fake-latch-exit` (mirroring dev15's always-false `sea-never-true`
+guard), appended last so the `br i1 true` is not folded away by an earlier
+simplifycfg/instcombine.
+
 ## Running
 
 The corpus runs under `llvm-lit` (this is what CI uses). Tool paths come from

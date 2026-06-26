@@ -39,6 +39,7 @@
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
 #include "llvm/Transforms/Utils/Debugify.h"
 #include "llvm_seahorn/Transforms/InstCombine/SeaInstCombine.h"
+#include "llvm_seahorn/Transforms/Scalar/SeaFakeLatchExit.h"
 
 using namespace llvm;
 using namespace opt_tool;
@@ -288,6 +289,16 @@ static void registerEPCallbacks(PassBuilder &PB) {
 #include "llvm/Support/Extension.def"
 #endif
 
+// SEAHORN: optionally append sea-fake-latch-exit at the end of the sea -O
+// pipeline. Off by default, mirroring dev15 (where it sat behind the
+// always-false `sea-never-true` guard): the fake `br i1 true` exit is only
+// meaningful as the very last step, since simplifycfg/instcombine fold it away.
+static cl::opt<bool>
+    SeaFakeLatchExitInO("seaopt-fake-latch-exit", cl::Hidden, cl::init(false),
+                        cl::desc("Append sea-fake-latch-exit to the sea -O "
+                                 "pipeline (gives unconditional-latch loops a "
+                                 "fake always-taken exit edge)"));
+
 // SEAHORN: replace every standalone `instcombine` pass token in a printed
 // pipeline string with `sea-instcombine`, leaving `aggressive-instcombine`
 // (and any other `*-instcombine`) untouched. Pass tokens are delimited by
@@ -452,6 +463,10 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
           FPM.addPass(llvm_seahorn::SeaInstCombinePass());
           return true;
         }
+        if (Name == "sea-fake-latch-exit") {
+          FPM.addPass(llvm_seahorn::SeaFakeLatchExitPass());
+          return true;
+        }
         return false;
       });
 
@@ -541,6 +556,10 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
       });
       OS.flush();
       EffectivePipeline = seaSwapInstCombine(Printed);
+      // Optionally give unconditional-latch loops a fake exit, as the final
+      // step (later folds would otherwise undo the `br i1 true`).
+      if (SeaFakeLatchExitInO)
+        EffectivePipeline += ",function(sea-fake-latch-exit)";
     }
     if (auto Err = PB.parsePassPipeline(MPM, EffectivePipeline)) {
       errs() << Arg0 << ": " << toString(std::move(Err)) << "\n";
