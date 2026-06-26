@@ -71,6 +71,21 @@ design:
   LLVM 14 (see above), this is their coverage -- it catches crashes / malformed
   IR (e.g. opaque-pointer breakage during the port), not a specific rewrite.
 
+## Loop-extract (nondet)
+
+`tools/loop_extract.ll` exercises SeaHorn's loop extractor (`SeaLoopExtractor` /
+`replaceFnBodyWithND`) the way `seapp` does: via the `createSeaLoopExtractorPass()`
+library API, not through `seaopt`. It is driven by the standalone
+`sea_loop_extract_driver` (built from `tools/`), which runs the pass over the
+module, verifies the result, and prints the IR -- so a malformed-IR or
+opaque-pointer regression in `replaceFnBodyWithND` fails the run.
+
+The single loop is extracted into an internal, void-returning function whose
+body is replaced with non-deterministic `verifier.nondet.*` stubs (`CHECK:
+define internal void @f.loop(` + `CHECK: call i32 @verifier.nondet`). The
+`%sea-loop-extract-driver` lit substitution comes from
+`SEA_LOOP_EXTRACT_DRIVER`.
+
 ## Running
 
 The corpus runs under `llvm-lit` (this is what CI uses). Tool paths come from
