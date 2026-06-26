@@ -1,9 +1,48 @@
+#include "llvm_seahorn/Transforms/Scalar/SeaFakeLatchExit.h"
+
+#include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Constants.h"
 
 using namespace llvm;
+
+// Core transform, shared by the legacy LoopPass and the new-PM pass: if the
+// loop's latch ends in an unconditional branch, replace it with
+//   br i1 true, label %<orig-succ>, label %fake_latch_exit
+// where fake_latch_exit is a fresh block holding `unreachable`. Returns true if
+// the loop was changed.
+static bool insertFakeLatchExit(Loop *L) {
+  BasicBlock *latch = L->getLoopLatch();
+
+  // -- no latch
+  if (!latch)
+    return false;
+
+  BranchInst *bi = dyn_cast<BranchInst>(latch->getTerminator());
+  // -- latch already conditional
+  if (!bi || bi->isConditional())
+    return false;
+
+  assert(bi->isUnconditional());
+
+  // -- create dummy block with unreachable instruction
+  LLVMContext &ctx = latch->getParent()->getContext();
+  BasicBlock *dummy =
+      BasicBlock::Create(ctx, "fake_latch_exit", latch->getParent());
+  new UnreachableInst(ctx, dummy);
+
+  // -- br i1 true, label %<orig-succ>, label %fake_latch_exit
+  BranchInst *newBi = BranchInst::Create(bi->getSuccessor(0), dummy,
+                                         ConstantInt::getTrue(ctx), bi);
+  newBi->setDebugLoc(bi->getDebugLoc());
+  newBi->copyMetadata(*bi);
+  bi->eraseFromParent();
+
+  return true;
+}
 
 namespace
 {
@@ -11,42 +50,12 @@ namespace
   {
   public:
     static char ID;
-    
+
     FakeLatchExit () : LoopPass (ID) {}
 
     bool runOnLoop (Loop *L, LPPassManager &LPM) override
     {
-      LoopInfo *LI = &getAnalysis<LoopInfoWrapperPass> ().getLoopInfo();
-      (void)LI;
-      
-      BasicBlock *latch = L->getLoopLatch ();
-
-      // -- no latch
-      if (!latch) return false;
-
-      
-      BranchInst *bi = dyn_cast<BranchInst> (latch->getTerminator ());
-      // -- latch already conditional
-      if (!bi || bi->isConditional ()) return false;
-      
-      assert (bi->isUnconditional ());
-      
-      // -- create dummy block with unreachable instruction
-      LLVMContext &ctx = latch->getParent ()->getContext ();
-      BasicBlock *dummy = BasicBlock::Create (ctx, "fake_latch_exit",
-                                              latch->getParent ());
-      new UnreachableInst (ctx, dummy);
-      
-      
-      // -- br i1 true, label %latch, label %fake_latch_exit
-      BranchInst *newBi = BranchInst::Create (bi->getSuccessor (0),
-                                              dummy,
-                                              ConstantInt::getTrue (ctx), bi);
-      newBi->setDebugLoc (bi->getDebugLoc ());
-      newBi->copyMetadata(*bi);
-      bi->eraseFromParent ();
-      
-      return true;
+      return insertFakeLatchExit(L);
     }
 
     void getAnalysisUsage (AnalysisUsage &AU) const override
@@ -58,14 +67,27 @@ namespace
     }
   };
 
-  char FakeLatchExit::ID = 0; 
+  char FakeLatchExit::ID = 0;
 }
 
 namespace llvm_seahorn
 {
   llvm::Pass *createFakeLatchExitPass () {return new FakeLatchExit ();}
+
+  // New-PM entry point: apply the transform to every loop in the function.
+  // It mutates the CFG (new block + new latch terminator), so no analyses are
+  // preserved. getLoopsInPreorder() is materialized before any change, and the
+  // transform neither deletes loops nor invalidates Loop* objects, so iterating
+  // while transforming is safe.
+  PreservedAnalyses SeaFakeLatchExitPass::run(Function &F,
+                                              FunctionAnalysisManager &AM) {
+    auto &LI = AM.getResult<LoopAnalysis>(F);
+    bool Changed = false;
+    for (Loop *L : LI.getLoopsInPreorder())
+      Changed |= insertFakeLatchExit(L);
+    return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
+  }
 }
 
 static RegisterPass<FakeLatchExit>
 X("fake-latch-exit","Insert fake latch exits");
-
