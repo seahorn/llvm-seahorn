@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_LIB_TRANSFORMS_INSTCOMBINE_INSTCOMBINEINTERNAL_H
-#define LLVM_LIB_TRANSFORMS_INSTCOMBINE_INSTCOMBINEINTERNAL_H
+#ifndef LLVM_SEAHORN_TRANSFORMS_INSTCOMBINE_INSTCOMBINEINTERNAL_H
+#define LLVM_SEAHORN_TRANSFORMS_INSTCOMBINE_INSTCOMBINEINTERNAL_H
 
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/InstructionSimplify.h"
@@ -29,7 +29,7 @@
 #include "llvm/Transforms/Utils/Local.h"
 #include <cassert>
 
-#define DEBUG_TYPE "instcombine"
+#define DEBUG_TYPE "sea-instcombine"
 #include "llvm/Transforms/Utils/InstructionWorklist.h"
 
 using namespace llvm::PatternMatch;
@@ -43,7 +43,6 @@ static constexpr unsigned NegatorDefaultMaxDepth = ~0U;
 static constexpr unsigned NegatorMaxNodesSSO = 16;
 
 namespace llvm {
-
 class AAResults;
 class APInt;
 class AssumptionCache;
@@ -57,21 +56,37 @@ class OptimizationRemarkEmitter;
 class ProfileSummaryInfo;
 class TargetLibraryInfo;
 class User;
+} // namespace llvm
 
-class LLVM_LIBRARY_VISIBILITY InstCombinerImpl final
+namespace llvm_seahorn {
+
+  using namespace llvm;
+class LLVM_LIBRARY_VISIBILITY SeaInstCombinerImpl final
     : public InstCombiner,
-      public InstVisitor<InstCombinerImpl, Instruction *> {
+      public InstVisitor<SeaInstCombinerImpl, Instruction *> {
 public:
-  InstCombinerImpl(InstructionWorklist &Worklist, BuilderTy &Builder,
-                   bool MinimizeSize, AAResults *AA, AssumptionCache &AC,
+  SeaInstCombinerImpl(InstructionWorklist &Worklist, BuilderTy &Builder,
+                      bool MinimizeSize,
+#if 1 /* SEAHORN ADD */
+                      bool AvoidBv, bool AvoidUnsignedICmp, bool AvoidIntToPtr,
+                      bool AvoidAliasing, bool AvoidDisequalities,
+#endif
+                      AAResults *AA, AssumptionCache &AC,
                    TargetLibraryInfo &TLI, TargetTransformInfo &TTI,
                    DominatorTree &DT, OptimizationRemarkEmitter &ORE,
                    BlockFrequencyInfo *BFI, ProfileSummaryInfo *PSI,
                    const DataLayout &DL, LoopInfo *LI)
       : InstCombiner(Worklist, Builder, MinimizeSize, AA, AC, TLI, TTI, DT, ORE,
-                     BFI, PSI, DL, LI) {}
+                     BFI, PSI, DL, LI),
+#if 1 /* SEAHORN ADD */
+        AvoidBv(AvoidBv),
+        AvoidUnsignedICmp(AvoidUnsignedICmp), AvoidIntToPtr(AvoidIntToPtr),
+        AvoidAliasing(AvoidAliasing), AvoidDisequalities(AvoidDisequalities)
+#endif
+  {
+  }
 
-  virtual ~InstCombinerImpl() = default;
+  virtual ~SeaInstCombinerImpl() = default;
 
   /// Run the combiner over the entire worklist until it is empty.
   ///
@@ -150,6 +165,7 @@ public:
   Instruction *visitPHINode(PHINode &PN);
   Instruction *visitGetElementPtrInst(GetElementPtrInst &GEP);
   Instruction *visitGEPOfGEP(GetElementPtrInst &GEP, GEPOperator *Src);
+  Instruction *visitGEPOfBitcast(BitCastInst *BCI, GetElementPtrInst &GEP);
   Instruction *visitAllocaInst(AllocaInst &AI);
   Instruction *visitAllocSite(Instruction &FI);
   Instruction *visitFree(CallInst &FI, Value *FreedOp);
@@ -194,6 +210,20 @@ public:
                                  const Twine &Suffix = "");
 
 private:
+#if 1 /* SEAHORN ADD */
+  // Avoid transforming linear operations into nonlinear
+  bool AvoidBv;
+  // Avoid transforming from signed comparisons to unsigned ones
+  bool AvoidUnsignedICmp;
+  // Avoid generating IntToPtr instructions.
+  // /Accessible with IC.seaAvoidIntToPtr().
+  bool AvoidIntToPtr;
+  // Avoid transformations which introduce new aliasing.
+  bool AvoidAliasing;
+  // Avoid transforming inequalities to disequalities
+  bool AvoidDisequalities;
+#endif
+
   bool annotateAnyAllocSite(CallBase &Call, const TargetLibraryInfo *TLI);
   bool isDesirableIntType(unsigned BitWidth) const;
   bool shouldChangeType(unsigned FromBitWidth, unsigned ToBitWidth) const;
@@ -329,7 +359,8 @@ private:
   Instruction *optimizeBitCastFromPhi(CastInst &CI, PHINode *PN);
   Instruction *matchSAddSubSat(IntrinsicInst &MinMax1);
   Instruction *foldNot(BinaryOperator &I);
-  Instruction *foldBinOpOfDisplacedShifts(BinaryOperator &I);
+
+  void freelyInvertAllUsersOf(Value *V, Value *IgnoredUser = nullptr);
 
   /// Determine if a pair of casts can be replaced by a single cast.
   ///
@@ -376,7 +407,6 @@ private:
   Instruction *foldLShrOverflowBit(BinaryOperator &I);
   Instruction *foldExtractOfOverflowIntrinsic(ExtractValueInst &EV);
   Instruction *foldIntrinsicWithOverflowCommon(IntrinsicInst *II);
-  Instruction *foldIntrinsicIsFPClass(IntrinsicInst &II);
   Instruction *foldFPSignBitOps(BinaryOperator &I);
   Instruction *foldFDivConstantDivisor(BinaryOperator &I);
 
@@ -392,11 +422,11 @@ public:
   /// without having to rewrite the CFG from within InstCombine.
   void CreateNonTerminatorUnreachable(Instruction *InsertAt) {
     auto &Ctx = InsertAt->getContext();
-    auto *SI = new StoreInst(ConstantInt::getTrue(Ctx),
-                             PoisonValue::get(Type::getInt1PtrTy(Ctx)),
-                             /*isVolatile*/ false, Align(1));
-    InsertNewInstBefore(SI, *InsertAt);
+    new StoreInst(ConstantInt::getTrue(Ctx),
+                  PoisonValue::get(Type::getInt1PtrTy(Ctx)),
+                  InsertAt);
   }
+
 
   /// Combiner aware instruction erasure.
   ///
@@ -410,11 +440,12 @@ public:
 
     // Make sure that we reprocess all operands now that we reduced their
     // use counts.
-    SmallVector<Value *> Ops(I.operands());
+    for (Use &Operand : I.operands())
+      if (auto *Inst = dyn_cast<Instruction>(Operand))
+        Worklist.add(Inst);
+
     Worklist.remove(&I);
     I.eraseFromParent();
-    for (Value *Op : Ops)
-      Worklist.handleUseCountDecrement(Op);
     MadeIRChange = true;
     return nullptr; // Don't do anything with FI
   }
@@ -423,6 +454,15 @@ public:
       Instruction::BinaryOps BinaryOp, bool IsSigned,
       Value *LHS, Value *RHS, Instruction *CxtI) const;
 
+
+
+#if 1 /* ADD SEAHORN */
+  bool seaAvoidIntToPtr() const { return AvoidIntToPtr; }
+  bool seaAvoidBv() const { return AvoidBv; }
+  bool seaAvoidDisequalities() const { return AvoidDisequalities; }
+#endif 
+
+private:
   /// Performs a few simplifications for operators which are associative
   /// or commutative.
   bool SimplifyAssociativeOrCommutative(BinaryOperator &I);
@@ -447,18 +487,6 @@ public:
   // efficiently reorganized.
   Value *SimplifySelectsFeedingBinaryOp(BinaryOperator &I, Value *LHS,
                                         Value *RHS);
-
-  // (Binop1 (Binop2 (logic_shift X, C), C1), (logic_shift Y, C))
-  //    -> (logic_shift (Binop1 (Binop2 X, inv_logic_shift(C1, C)), Y), C)
-  // (Binop1 (Binop2 (logic_shift X, Amt), Mask), (logic_shift Y, Amt))
-  //    -> (BinOp (logic_shift (BinOp X, Y)), Mask)
-  Instruction *foldBinOpShiftWithShift(BinaryOperator &I);
-
-  /// Tries to simplify binops of select and cast of the select condition.
-  ///
-  /// (Binop (cast C), (select C, T, F))
-  ///    -> (select C, C0, C1)
-  Instruction *foldBinOpOfSelectAndCastOfSelectCondition(BinaryOperator &I);
 
   /// This tries to simplify binary operations by factorizing out common terms
   /// (e. g. "(A*B)+(A*C)" -> "A*(B+C)").
@@ -523,6 +551,7 @@ public:
   /// BB3: phi [BO, BB1], [(binop C1, C2), BB2]
   Instruction *foldBinopWithPhiOperands(BinaryOperator &BO);
 
+public:
   /// Given an instruction with a select as one operand and a constant as the
   /// other operand, try to fold the binary operator into the select arguments.
   /// This also works for Cast instructions, which obviously do not have a
@@ -559,7 +588,7 @@ public:
                            ICmpInst::Predicate Cond, Instruction &I);
   Instruction *foldSelectICmp(ICmpInst::Predicate Pred, SelectInst *SI,
                               Value *RHS, const ICmpInst &I);
-  bool foldAllocaCmp(AllocaInst *Alloca);
+  Instruction *foldAllocaCmp(ICmpInst &ICI, const AllocaInst *Alloca);
   Instruction *foldCmpLoadFromIndexedGlobal(LoadInst *LI,
                                             GetElementPtrInst *GEP,
                                             GlobalVariable *GV, CmpInst &ICI,
@@ -574,7 +603,6 @@ public:
   Instruction *foldICmpUsingKnownBits(ICmpInst &Cmp);
   Instruction *foldICmpWithDominatingICmp(ICmpInst &Cmp);
   Instruction *foldICmpWithConstant(ICmpInst &Cmp);
-  Instruction *foldICmpUsingBoolRange(ICmpInst &I);
   Instruction *foldICmpInstWithConstant(ICmpInst &Cmp);
   Instruction *foldICmpInstWithConstantNotInt(ICmpInst &Cmp);
   Instruction *foldICmpInstWithConstantAllowUndef(ICmpInst &Cmp,
@@ -634,7 +662,6 @@ public:
   Instruction *foldICmpEqIntrinsicWithConstant(ICmpInst &ICI, IntrinsicInst *II,
                                                const APInt &C);
   Instruction *foldICmpBitCast(ICmpInst &Cmp);
-  Instruction *foldICmpWithTrunc(ICmpInst &Cmp);
 
   // Helpers of visitSelectInst().
   Instruction *foldSelectOfBools(SelectInst &SI);
@@ -646,11 +673,10 @@ public:
                             SelectPatternFlavor SPF2, Value *C);
   Instruction *foldSelectInstWithICmp(SelectInst &SI, ICmpInst *ICI);
   Instruction *foldSelectValueEquivalence(SelectInst &SI, ICmpInst &ICI);
-  bool replaceInInstruction(Value *V, Value *Old, Value *New,
-                            unsigned Depth = 0);
 
   Value *insertRangeTest(Value *V, const APInt &Lo, const APInt &Hi,
                          bool isSigned, bool Inside);
+  Instruction *PromoteCastOfAllocation(BitCastInst &CI, AllocaInst &AI);
   bool mergeStoreIntoSuccessor(StoreInst &SI);
 
   /// Given an initial instruction, check to see if it is the root of a
@@ -664,12 +690,10 @@ public:
 
   Value *EvaluateInDifferentType(Value *V, Type *Ty, bool isSigned);
 
-  bool tryToSinkInstruction(Instruction *I, BasicBlock *DestBlock);
-
-  bool removeInstructionsBeforeUnreachable(Instruction &I);
-  bool handleUnreachableFrom(Instruction *I);
-  bool handlePotentiallyDeadSuccessors(BasicBlock *BB, BasicBlock *LiveSucc);
-  void freelyInvertAllUsersOf(Value *V, Value *IgnoredUser = nullptr);
+  /// Returns a value X such that Val = X * Scale, or null if none.
+  ///
+  /// If the multiplication is known not to overflow then NoSignedWrap is set.
+  Value *Descale(Value *Val, APInt Scale, bool &NoSignedWrap);
 };
 
 class Negator final {
@@ -717,11 +741,11 @@ public:
   /// Attempt to negate \p Root. Retuns nullptr if negation can't be performed,
   /// otherwise returns negated value.
   [[nodiscard]] static Value *Negate(bool LHSIsZero, Value *Root,
-                                     InstCombinerImpl &IC);
+                                     SeaInstCombinerImpl &IC);
 };
 
-} // end namespace llvm
+} // end namespace llvm_seahorn.
 
 #undef DEBUG_TYPE
 
-#endif // LLVM_LIB_TRANSFORMS_INSTCOMBINE_INSTCOMBINEINTERNAL_H
+#endif
