@@ -2,7 +2,7 @@
 ; Test lib call simplification of __strcpy_chk calls with various values
 ; for src, dst, and slen.
 ;
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 target datalayout = "e-p:32:32:32-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:32:64-f32:32:32-f64:32:64-v64:64:64-v128:128:128-a0:0:64-f80:128:128"
 
@@ -79,8 +79,8 @@ define ptr @test_simplify4_tail() {
 define ptr @test_simplify5() {
 ; CHECK-LABEL: @test_simplify5(
 ; CHECK-NEXT:    [[LEN:%.*]] = call i32 @llvm.objectsize.i32.p0(ptr @a, i1 false, i1 false, i1 false)
-; CHECK-NEXT:    [[TMP1:%.*]] = call ptr @__memcpy_chk(ptr nonnull @a, ptr nonnull @.str, i32 12, i32 [[LEN]])
-; CHECK-NEXT:    ret ptr [[TMP1]]
+; CHECK-NEXT:    [[RET:%.*]] = call ptr @__memcpy_chk(ptr nonnull @a, ptr nonnull @.str, i32 12, i32 [[LEN]])
+; CHECK-NEXT:    ret ptr [[RET]]
 ;
 
   %len = call i32 @llvm.objectsize.i32.p0(ptr @a, i1 false, i1 false, i1 false)

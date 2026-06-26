@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 ; CHECK: and
 
 define i64 @foo(i64 %tmp, i64 %tmp2) {

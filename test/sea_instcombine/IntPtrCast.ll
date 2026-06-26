@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 target datalayout = "e-p:32:32"
 
 define ptr @test(ptr %P) {

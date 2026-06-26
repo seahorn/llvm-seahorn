@@ -1,4 +1,4 @@
-; RUN: %instcombine -mtriple=x86_64-apple-macosx -S %s | %FileCheck %s
+; RUN: %instcombine %s -mtriple=x86_64-apple-macosx -S | %FileCheck %s
 target triple = "x86_64-apple-macosx"
 
 define double @test1(double %a, double %b) nounwind {

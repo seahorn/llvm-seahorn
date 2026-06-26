@@ -3,7 +3,7 @@
 ; with noundef, nonnull, and dereferenceable only when maxlen is known to
 ; to be nonzero.
 ;
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 declare i64 @strnlen(ptr, i64)
 

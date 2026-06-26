@@ -2,7 +2,7 @@
 ; Verify that equality tests of strnlen calls against zero are folded
 ; correctly.
 ;
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 declare i64 @strnlen(ptr, i64)
 

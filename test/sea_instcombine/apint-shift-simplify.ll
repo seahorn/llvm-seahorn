@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 define i41 @test0(i41 %A, i41 %B, i41 %C) {
 	%X = shl i41 %A, %C

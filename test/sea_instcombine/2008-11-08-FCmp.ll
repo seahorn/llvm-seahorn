@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 ; PR3021
 
 ; When inst combining an FCMP with the LHS coming from a uitofp instruction, we

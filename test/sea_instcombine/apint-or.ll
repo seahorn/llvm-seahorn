@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 ; These tests are for Integer BitWidth <= 64 && BitWidth % 2 != 0.
 define i23 @test1(i23 %A) {
