@@ -15,6 +15,7 @@
 #include "NewPMDriver.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringSwitch.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/CGSCCPassManager.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
@@ -40,6 +41,19 @@
 #include "llvm/Transforms/Utils/Debugify.h"
 #include "llvm_seahorn/Transforms/InstCombine/SeaInstCombine.h"
 #include "llvm_seahorn/Transforms/Scalar/SeaFakeLatchExit.h"
+// Passes used to build SeaHorn's own -O pipeline (option C: construct the
+// pipeline with the new pass-creation API rather than patching default<O#>).
+#include "llvm/Passes/OptimizationLevel.h"
+#include "llvm/Transforms/Scalar/ADCE.h"
+#include "llvm/Transforms/Scalar/EarlyCSE.h"
+#include "llvm/Transforms/Scalar/GVN.h"
+#include "llvm/Transforms/Scalar/LoopPassManager.h"
+#include "llvm/Transforms/Scalar/LoopRotation.h"
+#include "llvm/Transforms/Scalar/Reassociate.h"
+#include "llvm/Transforms/Scalar/SROA.h"
+#include "llvm/Transforms/Scalar/SimplifyCFG.h"
+#include "llvm/Transforms/Utils/LoopSimplify.h"
+#include "llvm/Transforms/Utils/Mem2Reg.h"
 
 using namespace llvm;
 using namespace opt_tool;
@@ -299,35 +313,67 @@ static cl::opt<bool>
                                  "pipeline (gives unconditional-latch loops a "
                                  "fake always-taken exit edge)"));
 
-// SEAHORN: replace every standalone `instcombine` pass token in a printed
-// pipeline string with `sea-instcombine`, leaving `aggressive-instcombine`
-// (and any other `*-instcombine`) untouched. Pass tokens are delimited by
-// '(', ',' and ')'; a trailing `<...>` parameter block (if LLVM ever prints
-// one for instcombine) is dropped, since SeaInstCombine uses its own defaults.
-// This is how the faithful sea -O pipeline swaps instcombine without forking
-// LLVM's pipeline: print default<O#>, run this, reparse. See runPassPipeline.
-static std::string seaSwapInstCombine(StringRef P) {
-  static constexpr StringRef Tok = "instcombine";
-  std::string Out;
-  Out.reserve(P.size() + 32);
-  for (size_t i = 0, e = P.size(); i < e;) {
-    bool AtBoundary = (i == 0) || P[i - 1] == '(' || P[i - 1] == ',';
-    if (AtBoundary && P.substr(i).startswith(Tok)) {
-      size_t j = i + Tok.size();
-      char Next = (j < e) ? P[j] : '\0';
-      if (Next == ',' || Next == ')' || Next == '\0' || Next == '<') {
-        Out += "sea-instcombine";
-        i = j;
-        if (Next == '<') { // drop stock params; SeaInstCombine has its own
-          size_t Close = P.find('>', i);
-          i = (Close == StringRef::npos) ? e : Close + 1;
-        }
-        continue;
-      }
-    }
-    Out += P[i++];
+// SEAHORN: build SeaHorn's own -O pipeline with the new pass-creation API,
+// using SeaInstCombinePass in place of stock InstCombinePass.
+//
+// LLVM's new PM offers no hook to replace a pass inside default<O#> -- the
+// optimization pipeline is hardcoded in PassBuilderPipelines.cpp, and the only
+// sanctioned customizations are extension-point callbacks (add-only) or building
+// your own pipeline (see the "Using the New Pass Manager" docs). So, like
+// dev15's forked PassManagerBuilder did for the legacy PM, SeaHorn constructs a
+// curated pipeline here. It is intentionally NOT a byte-exact default<O2> clone;
+// `-passes=default<O2>` remains the untouched stock escape hatch. Loop
+// unrolling is deliberately light -- SeaHorn drives that via -sea-loop-unroll.
+static void buildSeaPipeline(ModulePassManager &MPM, OptimizationLevel Level) {
+  const bool Opt = Level != OptimizationLevel::O0;
+  FunctionPassManager FPM;
+
+  // Promote to SSA so SeaInstCombine sees real values.
+  FPM.addPass(PromotePass());
+  if (Opt)
+    FPM.addPass(SROAPass(SROAOptions::ModifyCFG));
+  FPM.addPass(EarlyCSEPass(/*UseMemorySSA=*/Opt));
+  FPM.addPass(llvm_seahorn::SeaInstCombinePass());
+  FPM.addPass(SimplifyCFGPass());
+
+  if (Opt) {
+    FPM.addPass(ReassociatePass());
+    // Canonicalize loops (loop-simplify + LCSSA) before the loop pass, then a
+    // light rotate; deeper loop work is left to -sea-loop-unroll.
+    FPM.addPass(LoopSimplifyPass());
+    FPM.addPass(LCSSAPass());
+    LoopPassManager LPM;
+    LPM.addPass(LoopRotatePass());
+    FPM.addPass(createFunctionToLoopPassAdaptor(std::move(LPM)));
+    FPM.addPass(GVNPass());
+    FPM.addPass(llvm_seahorn::SeaInstCombinePass());
+    FPM.addPass(ADCEPass());
+    FPM.addPass(SimplifyCFGPass());
+    FPM.addPass(llvm_seahorn::SeaInstCombinePass());
   }
-  return Out;
+
+  MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
+
+  // Optional: give unconditional-latch loops a fake exit, as the very last step
+  // (an earlier simplifycfg/instcombine would fold the `br i1 true` away).
+  if (SeaFakeLatchExitInO) {
+    FunctionPassManager Late;
+    Late.addPass(llvm_seahorn::SeaFakeLatchExitPass());
+    MPM.addPass(createModuleToFunctionPassAdaptor(std::move(Late)));
+  }
+}
+
+// Map seaopt's "default<O#>" pipeline string (built in opt.cpp for -O#) to an
+// OptimizationLevel for buildSeaPipeline.
+static std::optional<OptimizationLevel> seaParseOptLevel(StringRef P) {
+  return llvm::StringSwitch<std::optional<OptimizationLevel>>(P)
+      .Case("default<O0>", OptimizationLevel::O0)
+      .Case("default<O1>", OptimizationLevel::O1)
+      .Case("default<O2>", OptimizationLevel::O2)
+      .Case("default<O3>", OptimizationLevel::O3)
+      .Case("default<Os>", OptimizationLevel::Os)
+      .Case("default<Oz>", OptimizationLevel::Oz)
+      .Default(std::nullopt);
 }
 
 bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
@@ -417,17 +463,7 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
   // to false above so we shouldn't necessarily need to check whether or not the
   // option has been enabled.
   PTO.LoopUnrolling = !DisableLoopUnrolling;
-  // SEAHORN: the sea -O customization below prints the default<O#> pipeline to a
-  // string (to swap instcombine -> sea-instcombine). PassBuilder only fills the
-  // class->pass-name map that printPipeline needs when population is requested
-  // (shouldPopulateClassToPassNames(), gated on -print-pipeline-passes etc.).
-  // Enable it for this PassBuilder's construction, then restore so we don't
-  // actually trigger the -print-pipeline-passes print-and-exit path below.
-  const bool SavedPrintPipelinePasses = PrintPipelinePasses;
-  if (SeaCustomizeOPipeline)
-    PrintPipelinePasses = true;
   PassBuilder PB(TM, PTO, P, &PIC);
-  PrintPipelinePasses = SavedPrintPipelinePasses;
   registerEPCallbacks(PB);
 
   // For any loaded plugins, let them register pass builder callbacks.
@@ -534,34 +570,18 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
   if (!PassPipeline.empty()) {
     assert(Passes.empty() &&
            "PassPipeline and Passes should not both contain passes");
-    std::string EffectivePipeline(PassPipeline);
     if (SeaCustomizeOPipeline) {
-      // Faithful sea -O pipeline: this is the new-PM equivalent of dev15's
-      // forked PassManagerBuilder, which reconstructed the whole -O pipeline
-      // with createSeaInstructionCombiningPass() in place of the stock
-      // createInstructionCombiningPass(). The new PM has no hook to swap a pass
-      // inside default<O#>, so instead build it, print it as a pipeline string
-      // (staying in sync with LLVM's real pipeline), swap instcombine ->
-      // sea-instcombine, and reparse. AA comes from the AAManager as usual.
-      ModulePassManager Base;
-      if (auto Err = PB.parsePassPipeline(Base, PassPipeline)) {
-        errs() << Arg0 << ": " << toString(std::move(Err)) << "\n";
+      // seaopt's -O# builds SeaHorn's own new-PM pipeline (sea-instcombine in
+      // place of stock instcombine) -- see buildSeaPipeline. opt.cpp passes the
+      // requested level as the "default<O#>" string.
+      auto Level = seaParseOptLevel(PassPipeline);
+      if (!Level) {
+        errs() << Arg0 << ": sea -O pipeline: unexpected level '" << PassPipeline
+               << "'\n";
         return false;
       }
-      std::string Printed;
-      raw_string_ostream OS(Printed);
-      Base.printPipeline(OS, [&PIC](StringRef ClassName) {
-        auto PassName = PIC.getPassNameForClassName(ClassName);
-        return PassName.empty() ? ClassName : PassName;
-      });
-      OS.flush();
-      EffectivePipeline = seaSwapInstCombine(Printed);
-      // Optionally give unconditional-latch loops a fake exit, as the final
-      // step (later folds would otherwise undo the `br i1 true`).
-      if (SeaFakeLatchExitInO)
-        EffectivePipeline += ",function(sea-fake-latch-exit)";
-    }
-    if (auto Err = PB.parsePassPipeline(MPM, EffectivePipeline)) {
+      buildSeaPipeline(MPM, *Level);
+    } else if (auto Err = PB.parsePassPipeline(MPM, PassPipeline)) {
       errs() << Arg0 << ": " << toString(std::move(Err)) << "\n";
       return false;
     }

@@ -59,20 +59,25 @@ design:
 
 ## Pipeline test
 
-`pipeline_o2.ll` runs the full SeaHorn `-O2` pipeline. On LLVM 16 `seaopt -O#`
-runs under the new PM: it builds LLVM's `default<O#>`, then swaps stock
-`instcombine` for `sea-instcombine` (the only pass dev15's forked
-`PassManagerBuilder` swapped too -- the `-O` loop passes are stock; the sea loop
-passes run via their own flags). `seaopt -passes='default<O2>'` is the escape
-hatch that runs the unmodified stock pipeline.
+`pipeline_o2.ll` runs SeaHorn's `-O` pipeline. On LLVM 16 `seaopt -O#` runs under
+the new PM via `buildSeaPipeline` (NewPMDriver.cpp): SeaHorn constructs its own
+curated pipeline with the new pass-creation API (`addPass(SeaInstCombinePass())`),
+using `sea-instcombine` in place of stock `instcombine`. This is the new-PM
+analog of dev15's forked `PassManagerBuilder`; the new PM has no hook to replace
+a pass inside `default<O#>` (it's hardcoded in `PassBuilderPipelines.cpp` --
+sanctioned customization is extension-point callbacks (add-only) or building your
+own pipeline). It is intentionally NOT a byte-exact `default<O2>` clone; loop
+unrolling is light (SeaHorn drives that via `-sea-loop-unroll`).
+`seaopt -passes='default<O2>'` is the escape hatch that runs unmodified stock O2.
 
 - **Behavioral**: `urem`-by-pow2 survives `seaopt -O2` but stock `opt -O2` folds
   it to `and` -- proving the pipeline uses SeaHorn's InstCombine rather than
   stock InstCombine (a wiring regression the single-pass tests miss).
-- **Smoke/verify**: a loop function exercises the full `-O2` pipeline (stock loop
-  passes + sea-instcombine), and the verifier RUN line asserts the output is
-  well-formed -- it catches crashes / malformed IR (e.g. opaque-pointer breakage
-  during the port), not a specific rewrite.
+- **Smoke/verify**: a loop function exercises the curated `-O2` pipeline
+  (mem2reg/SROA, early-cse, sea-instcombine, simplifycfg, loop-rotate, gvn, adce),
+  and the verifier RUN line asserts the output is well-formed -- it catches
+  crashes / malformed IR (e.g. opaque-pointer breakage during the port), not a
+  specific rewrite.
 
 ## Loop-extract (nondet)
 
