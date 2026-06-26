@@ -7,9 +7,8 @@
 //===----------------------------------------------------------------------===//
 /// \file
 ///
-/// This file provides the primary interface to the instcombine pass. This pass
-/// is suitable for use in the new pass manager. For a pass that works with the
-/// legacy pass manager, use \c createSeaInstructionCombiningPass().
+/// This file provides the primary interface to SeaHorn's instcombine pass.
+/// It is a new-PM pass, registered in seaopt as `-passes=sea-instcombine`.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -41,12 +40,16 @@ class SeaInstCombinePass : public PassInfoMixin<SeaInstCombinePass> {
 public:
   static StringRef name() { return "SeaInstCombinePass"; }
 
+  // Default ctor: reads the seaopt-instcombine-avoid-* CLI flags so the new-PM
+  // `-passes=sea-instcombine` matches the legacy `-sea-instcombine` default
+  // (SeaHorn behavior ON; pass the avoid-*=0 flags for stock LLVM behavior).
+  SeaInstCombinePass();
   explicit SeaInstCombinePass(
-			      bool AvoidBv = true,
-			      bool AvoidUnsignedICmp = true,
-			      bool AvoidIntToPtr = true,
-			      bool AvoidAliasing = true,
-			      bool AvoidDisequalities = false);
+			      bool AvoidBv,
+			      bool AvoidUnsignedICmp,
+			      bool AvoidIntToPtr,
+			      bool AvoidAliasing,
+			      bool AvoidDisequalities);
   explicit SeaInstCombinePass(unsigned MaxIterations,
 			      bool AvoidBv,
 			      bool AvoidUnsignedICmp,
@@ -57,61 +60,5 @@ public:
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
 };
 
-/// The legacy pass manager's instcombine pass.
-///
-/// This is a basic whole-function wrapper around the instcombine utility. It
-/// will try to combine all instructions in the function.
-class SeaInstructionCombiningPass : public FunctionPass {
-  InstructionWorklist Worklist;
-
-  const unsigned MaxIterations;
-  const bool AvoidBv;
-  const bool AvoidUnsignedICmp;
-  const bool AvoidIntToPtr;
-  const bool AvoidAliasing;
-  const bool AvoidDisequalities;
-
-public:
-  static char ID; // Pass identification, replacement for typeid
-
-  explicit SeaInstructionCombiningPass(
-				       bool AvoidBv = true,
-				       bool AvoidUnsignedICmp = true,
-				       bool AvoidIntToPtr = true,
-				       bool AvoidAliasing = true,
-				       bool AvoidDisequalities = false);
-  explicit SeaInstructionCombiningPass(
-				       unsigned MaxIterations,
-				       bool AvoidBv,
-				       bool AvoidUnsignedICmp,
-				       bool AvoidIntToPtr,
-				       bool AvoidAliasing,
-				       bool AvoidDisequalities);
-
-  void getAnalysisUsage(AnalysisUsage &AU) const override;
-  bool runOnFunction(Function &F) override;
-};
-
-//===----------------------------------------------------------------------===//
-//
-// InstructionCombining - Combine instructions to form fewer, simple
-// instructions. This pass does not modify the CFG, and has a tendency to make
-// instructions dead, so a subsequent DCE pass is useful.
-//
-// This pass combines things like:
-//    %Y = add int 1, %X
-//    %Z = add int 1, %Y
-// into:
-//    %Z = add int 2, %X
-//
-void initializeInstCombine(llvm::PassRegistry &Registry);
 }
-
-llvm::FunctionPass *createSeaInstructionCombiningPass();
-llvm::FunctionPass *createSeaInstructionCombiningPass(unsigned MaxIterations,
-						      bool AvoidBv,
-						      bool AvoidUnsignedICmp,
-						      bool AvoidIntToPtr,
-						      bool AvoidAliasing,
-						      bool AvoidDisequalities);
 #endif

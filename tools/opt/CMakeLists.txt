@@ -11,7 +11,6 @@ set(LLVM_LINK_COMPONENTS
   CodeGen
   Core
   Coroutines
-  Extensions
   IPO
   IRReader
   InstCombine
