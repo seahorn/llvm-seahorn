@@ -1,65 +1,74 @@
-name: sea-transforms
+name: sea-tests
 
-# Guards the SeaHorn-specific transform behavior on both LLVM lines.
-# The source differs per branch, so the LLVM version tracks the branch:
-#   dev14 -> LLVM 14,  dev15 -> LLVM 15.
-# This file must exist on each branch for Actions to run it there; it is carried
-# over automatically when dev15 is branched from dev14.
+# Guards the SeaHorn-specific transform behavior on the dev16 (LLVM 16) line.
+# The source differs per branch, so the LLVM version tracks the branch; this is
+# the dev16 copy (dev14/dev15 carry their own LLVM-14/15 versions of this file).
+#
+# Two corpora run against one seaopt build:
+#   - test/sea_transforms : SeaHorn transform behavior (Avoid* instcombine,
+#     sea-loop-unroll, the sea -O2 pipeline, loop-extract, fake-latch-exit).
+#   - test/sea_instcombine: LLVM 16's own InstCombine regression tests retargeted
+#     at -passes=sea-instcombine with the Avoid* knobs OFF, to prove
+#     sea-instcombine == stock LLVM 16 InstCombine.
 on:
   push:
-    branches: [dev14, dev15]
+    branches: [dev16, dev16-loops]
   pull_request:
-    branches: [dev14, dev15]
+    branches: [dev16, dev16-loops]
 
 jobs:
   test:
-    runs-on: ubuntu-22.04
+    # LLVM 16 is in apt on noble (24.04); jammy (22.04) only ships up to 15.
+    runs-on: ubuntu-24.04
+    env:
+      V: "16"
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select LLVM version for this branch
-        id: llvm
-        run: |
-          # base_ref is set for PRs (target branch); ref_name for pushes.
-          BR="${GITHUB_BASE_REF:-$GITHUB_REF_NAME}"
-          case "$BR" in
-            dev15) V=15 ;;
-            *)     V=14 ;;
-          esac
-          echo "version=$V" >> "$GITHUB_OUTPUT"
-          echo "Building against LLVM $V (branch $BR)"
-
-      - name: Install LLVM + tooling
-        env:
-          V: ${{ steps.llvm.outputs.version }}
+      - name: Install LLVM 16 + tooling
         run: |
           sudo apt-get update
-          sudo apt-get install -y "llvm-$V-dev" "llvm-$V-tools" "clang-$V" ninja-build cmake
-          # lit test driver + filecheck (pip port of LLVM FileCheck): the latter
-          # avoids depending on an apt FileCheck-$V binary (not packaged for every
-          # LLVM line, e.g. 16 on jammy) and is the checker the corpus targets.
-          python3 -m pip install --user lit filecheck
+          # llvm-16-tools ships the real FileCheck (/usr/lib/llvm-16/bin/FileCheck),
+          # which the sea_instcombine corpus needs (CHECK-DAG, --check-prefixes,
+          # --match-full-lines, ...); libzstd-dev satisfies LLVM 16's zstd link.
+          sudo apt-get install -y \
+            "llvm-$V" "llvm-$V-dev" "llvm-$V-tools" "clang-$V" \
+            ninja-build cmake libzstd-dev
+          python3 -m pip install --user --break-system-packages lit
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Work around missing libPolly.a (Ubuntu llvm packaging)
-        # llvm-*-dev's cmake exports reference libPolly.a but don't ship it; the
-        # `Extensions` link component drags it in. Drop it for this build.
+        # Defensive: if a future edit re-adds the `Extensions` link component
+        # (which drags in libPolly.a, not shipped by llvm-*-dev), drop it. A
+        # no-op on the current CMakeLists, which doesn't use Extensions.
         run: sed -i '/^  Extensions$/d' tools/opt/CMakeLists.txt
 
-      - name: Build seaopt
-        env:
-          V: ${{ steps.llvm.outputs.version }}
+      - name: Build seaopt + loop-extract driver
         run: |
           cmake -B build -G Ninja \
             -DLLVM_DIR="$(llvm-config-$V --cmakedir)" \
+            -DCMAKE_C_COMPILER="clang-$V" \
+            -DCMAKE_CXX_COMPILER="clang++-$V" \
             -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --target seaopt -j"$(nproc)"
+          cmake --build build --target seaopt sea_loop_extract_driver -j"$(nproc)"
 
-      - name: Run sea-transforms corpus (llvm-lit)
-        env:
-          V: ${{ steps.llvm.outputs.version }}
+      - name: Run sea_transforms corpus
         run: |
-          # seaopt must be an absolute path: lit runs each test from its own
-          # Output/ dir, so a relative ./build path would not resolve.
+          # lit runs each test from its own Output/ dir, so tool paths must be
+          # absolute.
           export SEAOPT="$GITHUB_WORKSPACE/build/bin/seaopt"
-          export OPT="opt-$V" FILECHECK="filecheck"   # pip filecheck on PATH (~/.local/bin)
+          export SEA_LOOP_EXTRACT_DRIVER="$GITHUB_WORKSPACE/build/bin/sea_loop_extract_driver"
+          export OPT="/usr/lib/llvm-$V/bin/opt"
+          export FILECHECK="/usr/lib/llvm-$V/bin/FileCheck"
           lit -v test/sea_transforms
+
+      - name: Run sea_instcombine corpus (sea-instcombine == stock LLVM 16)
+        run: |
+          SEAOPT="$GITHUB_WORKSPACE/build/bin/seaopt"
+          # Avoid* OFF so SeaInstCombine reproduces stock LLVM 16 InstCombine; the
+          # new PM supplies AA from AAManager, so no -tbaa -basic-aa needed.
+          export INSTCOMBINE="$SEAOPT -passes=sea-instcombine \
+            -seaopt-instcombine-avoid-bv=0 -seaopt-instcombine-avoid-unsigned-icmp=0 \
+            -seaopt-instcombine-avoid-int-to-ptr=0 -seaopt-instcombine-avoid-aliasing=0"
+          export FILECHECK="/usr/lib/llvm-$V/bin/FileCheck"
+          lit -v test/sea_instcombine
