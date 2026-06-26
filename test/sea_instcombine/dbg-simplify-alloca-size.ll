@@ -1,4 +1,4 @@
-; RUN: %instcombine -S --passes=instcombine %s | %FileCheck %s
+; RUN: %instcombine -S %s | %FileCheck %s
 
 ; https://github.com/llvm/llvm-project/issues/56807
 declare void @foo(ptr %pixels)
