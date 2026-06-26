@@ -59,17 +59,20 @@ design:
 
 ## Pipeline test
 
-`pipeline_o2.ll` runs the full SeaHorn `-O2` pipeline (new PM, via
-`runPassPipeline`), which engages sea-instcombine *and* the sea loop passes:
+`pipeline_o2.ll` runs the full SeaHorn `-O2` pipeline. On LLVM 16 `seaopt -O#`
+runs under the new PM: it builds LLVM's `default<O#>`, then swaps stock
+`instcombine` for `sea-instcombine` (the only pass dev15's forked
+`PassManagerBuilder` swapped too -- the `-O` loop passes are stock; the sea loop
+passes run via their own flags). `seaopt -passes='default<O2>'` is the escape
+hatch that runs the unmodified stock pipeline.
 
 - **Behavioral**: `urem`-by-pow2 survives `seaopt -O2` but stock `opt -O2` folds
   it to `and` -- proving the pipeline uses SeaHorn's InstCombine rather than
   stock InstCombine (a wiring regression the single-pass tests miss).
-- **Smoke/verify**: a loop function drives sea-loop-rotate / sea-indvars /
-  sea-loop-unroll under `-O2`, and the verifier RUN line asserts the output is
-  well-formed. Since those passes have no assertable behavioral divergence on
-  LLVM 14 (see above), this is their coverage -- it catches crashes / malformed
-  IR (e.g. opaque-pointer breakage during the port), not a specific rewrite.
+- **Smoke/verify**: a loop function exercises the full `-O2` pipeline (stock loop
+  passes + sea-instcombine), and the verifier RUN line asserts the output is
+  well-formed -- it catches crashes / malformed IR (e.g. opaque-pointer breakage
+  during the port), not a specific rewrite.
 
 ## Loop-extract (nondet)
 

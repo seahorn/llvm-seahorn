@@ -570,8 +570,14 @@ int main(int argc, char **argv) {
   // If `-enable-new-pm` is specified and there are no codegen passes, use NPM.
   // e.g. `-enable-new-pm -sroa` will use NPM.
   // but `-enable-new-pm -codegenprepare` will still revert to legacy PM.
+  // SEAHORN: the `-O#` flags also use the new PM (their legacy PassManagerBuilder
+  // pipeline is gone in LLVM 16); they build a sea-customized default<O#>. `-O#`
+  // is mutually exclusive with -passes=/--foo-pass below, so this never steals
+  // legacy-only passes (e.g. -sea-loop-unroll, used without -O#).
+  const bool AnyOptLevel = OptLevelO0 || OptLevelO1 || OptLevelO2 ||
+                           OptLevelO3 || OptLevelOs || OptLevelOz;
   const bool UseNPM = (EnableNewPassManager && !shouldForceLegacyPM()) ||
-                      PassPipeline.getNumOccurrences() > 0;
+                      PassPipeline.getNumOccurrences() > 0 || AnyOptLevel;
 
   if (!UseNPM && PluginList.size()) {
     errs() << argv[0] << ": " << PassPlugins.ArgStr
@@ -801,7 +807,8 @@ int main(int argc, char **argv) {
                            Passes, PluginList, OK, VK, PreserveAssemblyUseListOrder,
                            PreserveBitcodeUseListOrder, EmitSummaryIndex,
                            EmitModuleHash, EnableDebugify,
-                           VerifyDebugInfoPreserve)
+                           VerifyDebugInfoPreserve,
+                           /*SeaCustomizeOPipeline=*/NumOLevel > 0)
                ? 0
                : 1;
   }

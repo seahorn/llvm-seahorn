@@ -288,6 +288,37 @@ static void registerEPCallbacks(PassBuilder &PB) {
 #include "llvm/Support/Extension.def"
 #endif
 
+// SEAHORN: replace every standalone `instcombine` pass token in a printed
+// pipeline string with `sea-instcombine`, leaving `aggressive-instcombine`
+// (and any other `*-instcombine`) untouched. Pass tokens are delimited by
+// '(', ',' and ')'; a trailing `<...>` parameter block (if LLVM ever prints
+// one for instcombine) is dropped, since SeaInstCombine uses its own defaults.
+// This is how the faithful sea -O pipeline swaps instcombine without forking
+// LLVM's pipeline: print default<O#>, run this, reparse. See runPassPipeline.
+static std::string seaSwapInstCombine(StringRef P) {
+  static constexpr StringRef Tok = "instcombine";
+  std::string Out;
+  Out.reserve(P.size() + 32);
+  for (size_t i = 0, e = P.size(); i < e;) {
+    bool AtBoundary = (i == 0) || P[i - 1] == '(' || P[i - 1] == ',';
+    if (AtBoundary && P.substr(i).startswith(Tok)) {
+      size_t j = i + Tok.size();
+      char Next = (j < e) ? P[j] : '\0';
+      if (Next == ',' || Next == ')' || Next == '\0' || Next == '<') {
+        Out += "sea-instcombine";
+        i = j;
+        if (Next == '<') { // drop stock params; SeaInstCombine has its own
+          size_t Close = P.find('>', i);
+          i = (Close == StringRef::npos) ? e : Close + 1;
+        }
+        continue;
+      }
+    }
+    Out += P[i++];
+  }
+  return Out;
+}
+
 bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
                            TargetLibraryInfoImpl *TLII, ToolOutputFile *Out,
                            ToolOutputFile *ThinLTOLinkOut,
@@ -298,7 +329,8 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
                            bool ShouldPreserveAssemblyUseListOrder,
                            bool ShouldPreserveBitcodeUseListOrder,
                            bool EmitSummaryIndex, bool EmitModuleHash,
-                           bool EnableDebugify, bool VerifyDIPreserve) {
+                           bool EnableDebugify, bool VerifyDIPreserve,
+                           bool SeaCustomizeOPipeline) {
   bool VerifyEachPass = VK == VK_VerifyEachPass;
 
   std::optional<PGOOptions> P;
@@ -374,7 +406,17 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
   // to false above so we shouldn't necessarily need to check whether or not the
   // option has been enabled.
   PTO.LoopUnrolling = !DisableLoopUnrolling;
+  // SEAHORN: the sea -O customization below prints the default<O#> pipeline to a
+  // string (to swap instcombine -> sea-instcombine). PassBuilder only fills the
+  // class->pass-name map that printPipeline needs when population is requested
+  // (shouldPopulateClassToPassNames(), gated on -print-pipeline-passes etc.).
+  // Enable it for this PassBuilder's construction, then restore so we don't
+  // actually trigger the -print-pipeline-passes print-and-exit path below.
+  const bool SavedPrintPipelinePasses = PrintPipelinePasses;
+  if (SeaCustomizeOPipeline)
+    PrintPipelinePasses = true;
   PassBuilder PB(TM, PTO, P, &PIC);
+  PrintPipelinePasses = SavedPrintPipelinePasses;
   registerEPCallbacks(PB);
 
   // For any loaded plugins, let them register pass builder callbacks.
@@ -395,6 +437,19 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
         if (Name == "sea-instcombine") {
           MPM.addPass(createModuleToFunctionPassAdaptor(
               llvm_seahorn::SeaInstCombinePass()));
+          return true;
+        }
+        return false;
+      });
+
+  // Same pass, registered at the function level so it can nest inside
+  // `function(...)` -- this is where instcombine lives in the -O pipelines, so
+  // the sea -O customization (below) needs sea-instcombine to parse there.
+  PB.registerPipelineParsingCallback(
+      [](StringRef Name, FunctionPassManager &FPM,
+         ArrayRef<PassBuilder::PipelineElement>) {
+        if (Name == "sea-instcombine") {
+          FPM.addPass(llvm_seahorn::SeaInstCombinePass());
           return true;
         }
         return false;
@@ -464,7 +519,30 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
   if (!PassPipeline.empty()) {
     assert(Passes.empty() &&
            "PassPipeline and Passes should not both contain passes");
-    if (auto Err = PB.parsePassPipeline(MPM, PassPipeline)) {
+    std::string EffectivePipeline(PassPipeline);
+    if (SeaCustomizeOPipeline) {
+      // Faithful sea -O pipeline: this is the new-PM equivalent of dev15's
+      // forked PassManagerBuilder, which reconstructed the whole -O pipeline
+      // with createSeaInstructionCombiningPass() in place of the stock
+      // createInstructionCombiningPass(). The new PM has no hook to swap a pass
+      // inside default<O#>, so instead build it, print it as a pipeline string
+      // (staying in sync with LLVM's real pipeline), swap instcombine ->
+      // sea-instcombine, and reparse. AA comes from the AAManager as usual.
+      ModulePassManager Base;
+      if (auto Err = PB.parsePassPipeline(Base, PassPipeline)) {
+        errs() << Arg0 << ": " << toString(std::move(Err)) << "\n";
+        return false;
+      }
+      std::string Printed;
+      raw_string_ostream OS(Printed);
+      Base.printPipeline(OS, [&PIC](StringRef ClassName) {
+        auto PassName = PIC.getPassNameForClassName(ClassName);
+        return PassName.empty() ? ClassName : PassName;
+      });
+      OS.flush();
+      EffectivePipeline = seaSwapInstCombine(Printed);
+    }
+    if (auto Err = PB.parsePassPipeline(MPM, EffectivePipeline)) {
       errs() << Arg0 << ": " << toString(std::move(Err)) << "\n";
       return false;
     }
