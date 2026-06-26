@@ -5,10 +5,10 @@
 ; Masking with 255 makes the sign bit known-zero on both operands.
 ; Validated on LLVM 14:
 ;   stock opt -instcombine: %c = icmp ult i32 %a, %b
-;   seaopt -sea-instcombine: %c = icmp slt i32 %a, %b   (kept)
+;   seaopt -passes=sea-instcombine: %c = icmp slt i32 %a, %b   (kept)
 ;
-; RUN: %seaopt -sea-instcombine -S %s | %FileCheck %s
-; RUN: %seaopt -sea-instcombine -S %s | %opt -passes=verify -disable-output
+; RUN: %seaopt -passes=sea-instcombine -S %s | %FileCheck %s
+; RUN: %seaopt -passes=sea-instcombine -S %s | %opt -passes=verify -disable-output
 ; RUN: %opt -passes=instcombine -S %s | %FileCheck --check-prefix=STOCK %s
 
 define i1 @sicmp_to_uicmp(i32 %x, i32 %y) {

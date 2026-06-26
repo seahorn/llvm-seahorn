@@ -3,28 +3,31 @@
 These tests pin the *intended* behavior of the SeaHorn-specific passes. Each
 test is built so that a **stock** LLVM pass performs a transformation SeaHorn
 wants to suppress (or skips one SeaHorn wants to force), and asserts that the
-corresponding `seaopt -sea-*` pass does the SeaHorn thing instead. The stock
-`opt` result is the oracle.
+corresponding `seaopt` pass does the SeaHorn thing instead. The stock `opt`
+result is the oracle.
 
 ## InstCombine Avoid* flags
 
-In `seaopt` the flags are hardcoded **on**
-(`AvoidBv = AvoidUnsignedICmp = AvoidIntToPtr = AvoidAliasing = true`, see
-`InstructionCombining.cpp` ~line 4542), so there is no run-time off switch.
-Validated against a `seaopt` built from `dev14` on LLVM 14:
+SeaHorn's InstCombine runs as a new-PM pass: `seaopt -passes=sea-instcombine`.
+The Avoid* knobs default **on** (`AvoidBv`, `AvoidUnsignedICmp`,
+`AvoidIntToPtr`, `AvoidAliasing`; `AvoidDisequalities` off) but are
+CLI-controllable via `-seaopt-instcombine-avoid-*` flags -- e.g.
+`-seaopt-instcombine-avoid-bv=0` recovers stock LLVM behavior. (That `=0`
+escape hatch is how `test/sea_instcombine` reuses the LLVM 16 corpus to check
+stock equivalence.) Behavior below validated on LLVM 16:
 
-| File | Flag | stock instcombine | `seaopt -sea-instcombine` keeps |
+| File | Flag | stock instcombine | `seaopt -passes=sea-instcombine` keeps |
 |------|------|-------------------|----------------|
 | `avoidbv_urem_pow2.ll`      | AvoidBv            | `and i32 %x, 7`              | `urem i32 %x, 8` |
 | `avoidbv_add_disjoint.ll`   | AvoidBv            | `or i32 %a, %b`             | `add nuw nsw i32 %a, %b` |
 | `avoidunsignedicmp_slt.ll`  | AvoidUnsignedICmp | `icmp ult`                  | `icmp slt` |
-| `avoidaliasing_phi_load.ll` | AvoidAliasing     | `phi i32*` + single `load`  | two `load`s + `phi i32` |
+| `avoidaliasing_phi_load.ll` | AvoidAliasing     | `phi ptr` + single `load`   | two `load`s + `phi i32` |
 
 `avoidaliasing_phi_load.ll` doubles as the opaque-pointer canary: the suppressed
 transform (`FoldPHIArgLoadIntoPHI`) builds a pointer-typed phi + a new load, so
-it exercises the pointer-construction paths LLVM 15's opaque pointers change.
-On LLVM 15 the merged form is `phi ptr`; the test forbids both `phi i32*` and
-`phi ptr`, so it works unchanged on either toolchain.
+it exercises the pointer-construction paths. On LLVM 16 (opaque pointers) the
+merged stock form is `phi ptr`; the test asserts the SeaHorn output keeps two
+`load`s and an `i32` phi, and the `STOCK:` line requires the `phi ptr`.
 
 `AvoidIntToPtr` is intentionally **not** covered: in dev14 the flag is set and
 has an accessor (`seaAvoidIntToPtr()`) but is never read anywhere. Confirm or
@@ -56,17 +59,53 @@ design:
 
 ## Pipeline test
 
-`pipeline_o2.ll` runs the full SeaHorn `-O2` pipeline (`PassManagerBuilder`),
-which engages sea-instcombine *and* the sea loop passes:
+`pipeline_o2.ll` runs SeaHorn's `-O` pipeline. On LLVM 16 `seaopt -O#` runs under
+the new PM via `buildSeaPipeline` (NewPMDriver.cpp): SeaHorn constructs its own
+curated pipeline with the new pass-creation API (`addPass(SeaInstCombinePass())`),
+using `sea-instcombine` in place of stock `instcombine`. This is the new-PM
+analog of dev15's forked `PassManagerBuilder`; the new PM has no hook to replace
+a pass inside `default<O#>` (it's hardcoded in `PassBuilderPipelines.cpp` --
+sanctioned customization is extension-point callbacks (add-only) or building your
+own pipeline). It is intentionally NOT a byte-exact `default<O2>` clone; loop
+unrolling is light (SeaHorn drives that via `-sea-loop-unroll`).
+`seaopt -passes='default<O2>'` is the escape hatch that runs unmodified stock O2.
 
 - **Behavioral**: `urem`-by-pow2 survives `seaopt -O2` but stock `opt -O2` folds
-  it to `and` -- proving the pipeline uses `createSeaInstructionCombiningPass`
-  rather than stock InstCombine (a wiring regression the single-pass tests miss).
-- **Smoke/verify**: a loop function drives sea-loop-rotate / sea-indvars /
-  sea-loop-unroll under `-O2`, and the verifier RUN line asserts the output is
-  well-formed. Since those passes have no assertable behavioral divergence on
-  LLVM 14 (see above), this is their coverage -- it catches crashes / malformed
-  IR (e.g. opaque-pointer breakage during the port), not a specific rewrite.
+  it to `and` -- proving the pipeline uses SeaHorn's InstCombine rather than
+  stock InstCombine (a wiring regression the single-pass tests miss).
+- **Smoke/verify**: a loop function exercises the curated `-O2` pipeline
+  (mem2reg/SROA, early-cse, sea-instcombine, simplifycfg, loop-rotate, gvn, adce),
+  and the verifier RUN line asserts the output is well-formed -- it catches
+  crashes / malformed IR (e.g. opaque-pointer breakage during the port), not a
+  specific rewrite.
+
+## Loop-extract (nondet)
+
+`tools/loop_extract.ll` exercises SeaHorn's loop extractor (`SeaLoopExtractor` /
+`replaceFnBodyWithND`) the way `seapp` does: via the `createSeaLoopExtractorPass()`
+library API, not through `seaopt`. It is driven by the standalone
+`sea_loop_extract_driver` (built from `tools/`), which runs the pass over the
+module, verifies the result, and prints the IR -- so a malformed-IR or
+opaque-pointer regression in `replaceFnBodyWithND` fails the run.
+
+The single loop is extracted into an internal, void-returning function whose
+body is replaced with non-deterministic `verifier.nondet.*` stubs (`CHECK:
+define internal void @f.loop(` + `CHECK: call i32 @verifier.nondet`). The
+`%sea-loop-extract-driver` lit substitution comes from
+`SEA_LOOP_EXTRACT_DRIVER`.
+
+## Fake latch exit
+
+`fake_latch_exit.ll` exercises `sea-fake-latch-exit` (new-PM function pass): a
+loop whose latch ends in an *unconditional* branch gets a fake always-taken exit
+edge -- `latch: br label %h` becomes `latch: br i1 true, label %h, label
+%fake_latch_exit` with a fresh `unreachable` block. SeaHorn-only, so there is no
+`STOCK:` line; it is driven directly via `-passes='function(sea-fake-latch-exit)'`.
+
+It is also wired into the sea `-O` pipeline behind the hidden, default-off flag
+`-seaopt-fake-latch-exit` (mirroring dev15's always-false `sea-never-true`
+guard), appended last so the `br i1 true` is not folded away by an earlier
+simplifycfg/instcombine.
 
 ## Running
 
@@ -74,11 +113,8 @@ The corpus runs under `llvm-lit` (this is what CI uses). Tool paths come from
 the environment, so the same tests run against any build:
 
 ```sh
-# LLVM 14 baseline (proven green)
-SEAOPT=/path/to/seaopt OPT=opt-14 FILECHECK=FileCheck-14 lit -v test/sea_transforms
-
-# LLVM 15 (dev15 build under test)
-SEAOPT=./build/bin/seaopt OPT=opt-15 FILECHECK=FileCheck-15 lit -v test/sea_transforms
+# LLVM 16 (dev16 build under test)
+SEAOPT=./build/bin/seaopt OPT=opt-16 FILECHECK=FileCheck lit -v test/sea_transforms
 ```
 
 Each test (see its `RUN:` lines) does three things:

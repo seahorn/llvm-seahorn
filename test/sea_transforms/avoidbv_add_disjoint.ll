@@ -4,10 +4,10 @@
 ; %a occupies bits [0:1], %b occupies bits [2:3] -> disjoint.
 ; Validated on LLVM 14:
 ;   stock opt -instcombine: %r = or i32 %a, %b
-;   seaopt -sea-instcombine: %r = add nuw nsw i32 %a, %b   (kept)
+;   seaopt -passes=sea-instcombine: %r = add nuw nsw i32 %a, %b   (kept)
 ;
-; RUN: %seaopt -sea-instcombine -S %s | %FileCheck %s
-; RUN: %seaopt -sea-instcombine -S %s | %opt -passes=verify -disable-output
+; RUN: %seaopt -passes=sea-instcombine -S %s | %FileCheck %s
+; RUN: %seaopt -passes=sea-instcombine -S %s | %opt -passes=verify -disable-output
 ; RUN: %opt -passes=instcombine -S %s | %FileCheck --check-prefix=STOCK %s
 
 define i32 @add_disjoint(i32 %x, i32 %y) {

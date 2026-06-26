@@ -3,10 +3,10 @@
 ;
 ; Validated on LLVM 14:
 ;   stock opt -instcombine: %r = and i32 %x, 7
-;   seaopt -sea-instcombine: %r = urem i32 %x, 8   (kept)
+;   seaopt -passes=sea-instcombine: %r = urem i32 %x, 8   (kept)
 ;
-; RUN: %seaopt -sea-instcombine -S %s | %FileCheck %s
-; RUN: %seaopt -sea-instcombine -S %s | %opt -passes=verify -disable-output
+; RUN: %seaopt -passes=sea-instcombine -S %s | %FileCheck %s
+; RUN: %seaopt -passes=sea-instcombine -S %s | %opt -passes=verify -disable-output
 ; RUN: %opt -passes=instcombine -S %s | %FileCheck --check-prefix=STOCK %s
 
 define i32 @urem_pow2(i32 %x) {
