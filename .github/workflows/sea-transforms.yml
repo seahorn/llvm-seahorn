@@ -1,6 +1,6 @@
 name: sea-tests
 
-# Guards the SeaHorn-specific transform behavior on the dev16 (LLVM 16) line.
+# Guards the SeaHorn-specific transform behavior on the dev17 (LLVM 17) line.
 # The source differs per branch, so the LLVM version tracks the branch; this is
 # the dev16 copy (dev14/dev15 carry their own LLVM-14/15 versions of this file).
 #
@@ -9,19 +9,19 @@ name: sea-tests
 #     sea-loop-unroll, the sea -O2 pipeline, loop-extract, fake-latch-exit).
 #   - test/sea_instcombine: LLVM 16's own InstCombine regression tests retargeted
 #     at -passes=sea-instcombine with the Avoid* knobs OFF, to prove
-#     sea-instcombine == stock LLVM 16 InstCombine.
+#     sea-instcombine == stock LLVM 17 InstCombine.
 on:
   push:
-    branches: [dev16, dev16-loops]
+    branches: [dev17]
   pull_request:
-    branches: [dev16, dev16-loops]
+    branches: [dev17]
 
 jobs:
   test:
     # LLVM 16 is in apt on noble (24.04); jammy (22.04) only ships up to 15.
     runs-on: ubuntu-24.04
     env:
-      V: "16"
+      V: "17"
     steps:
       - uses: actions/checkout@v4
 
@@ -62,10 +62,10 @@ jobs:
           export FILECHECK="/usr/lib/llvm-$V/bin/FileCheck"
           lit -v test/sea_transforms
 
-      - name: Run sea_instcombine corpus (sea-instcombine == stock LLVM 16)
+      - name: Run sea_instcombine corpus (sea-instcombine == stock LLVM 17)
         run: |
           SEAOPT="$GITHUB_WORKSPACE/build/bin/seaopt"
-          # Avoid* OFF so SeaInstCombine reproduces stock LLVM 16 InstCombine; the
+          # Avoid* OFF so SeaInstCombine reproduces stock LLVM 17 InstCombine; the
           # new PM supplies AA from AAManager, so no -tbaa -basic-aa needed.
           export INSTCOMBINE="$SEAOPT -passes=sea-instcombine \
             -seaopt-instcombine-avoid-bv=0 -seaopt-instcombine-avoid-unsigned-icmp=0 \
