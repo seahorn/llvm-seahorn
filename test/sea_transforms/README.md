@@ -3,28 +3,31 @@
 These tests pin the *intended* behavior of the SeaHorn-specific passes. Each
 test is built so that a **stock** LLVM pass performs a transformation SeaHorn
 wants to suppress (or skips one SeaHorn wants to force), and asserts that the
-corresponding `seaopt -sea-*` pass does the SeaHorn thing instead. The stock
-`opt` result is the oracle.
+corresponding `seaopt` pass does the SeaHorn thing instead. The stock `opt`
+result is the oracle.
 
 ## InstCombine Avoid* flags
 
-In `seaopt` the flags are hardcoded **on**
-(`AvoidBv = AvoidUnsignedICmp = AvoidIntToPtr = AvoidAliasing = true`, see
-`InstructionCombining.cpp` ~line 4542), so there is no run-time off switch.
-Validated against a `seaopt` built from `dev14` on LLVM 14:
+SeaHorn's InstCombine runs as a new-PM pass: `seaopt -passes=sea-instcombine`.
+The Avoid* knobs default **on** (`AvoidBv`, `AvoidUnsignedICmp`,
+`AvoidIntToPtr`, `AvoidAliasing`; `AvoidDisequalities` off) but are
+CLI-controllable via `-seaopt-instcombine-avoid-*` flags -- e.g.
+`-seaopt-instcombine-avoid-bv=0` recovers stock LLVM behavior. (That `=0`
+escape hatch is how `test/sea_instcombine` reuses the LLVM 16 corpus to check
+stock equivalence.) Behavior below validated on LLVM 16:
 
-| File | Flag | stock instcombine | `seaopt -sea-instcombine` keeps |
+| File | Flag | stock instcombine | `seaopt -passes=sea-instcombine` keeps |
 |------|------|-------------------|----------------|
 | `avoidbv_urem_pow2.ll`      | AvoidBv            | `and i32 %x, 7`              | `urem i32 %x, 8` |
 | `avoidbv_add_disjoint.ll`   | AvoidBv            | `or i32 %a, %b`             | `add nuw nsw i32 %a, %b` |
 | `avoidunsignedicmp_slt.ll`  | AvoidUnsignedICmp | `icmp ult`                  | `icmp slt` |
-| `avoidaliasing_phi_load.ll` | AvoidAliasing     | `phi i32*` + single `load`  | two `load`s + `phi i32` |
+| `avoidaliasing_phi_load.ll` | AvoidAliasing     | `phi ptr` + single `load`   | two `load`s + `phi i32` |
 
 `avoidaliasing_phi_load.ll` doubles as the opaque-pointer canary: the suppressed
 transform (`FoldPHIArgLoadIntoPHI`) builds a pointer-typed phi + a new load, so
-it exercises the pointer-construction paths LLVM 15's opaque pointers change.
-On LLVM 15 the merged form is `phi ptr`; the test forbids both `phi i32*` and
-`phi ptr`, so it works unchanged on either toolchain.
+it exercises the pointer-construction paths. On LLVM 16 (opaque pointers) the
+merged stock form is `phi ptr`; the test asserts the SeaHorn output keeps two
+`load`s and an `i32` phi, and the `STOCK:` line requires the `phi ptr`.
 
 `AvoidIntToPtr` is intentionally **not** covered: in dev14 the flag is set and
 has an accessor (`seaAvoidIntToPtr()`) but is never read anywhere. Confirm or
@@ -56,12 +59,12 @@ design:
 
 ## Pipeline test
 
-`pipeline_o2.ll` runs the full SeaHorn `-O2` pipeline (`PassManagerBuilder`),
-which engages sea-instcombine *and* the sea loop passes:
+`pipeline_o2.ll` runs the full SeaHorn `-O2` pipeline (new PM, via
+`runPassPipeline`), which engages sea-instcombine *and* the sea loop passes:
 
 - **Behavioral**: `urem`-by-pow2 survives `seaopt -O2` but stock `opt -O2` folds
-  it to `and` -- proving the pipeline uses `createSeaInstructionCombiningPass`
-  rather than stock InstCombine (a wiring regression the single-pass tests miss).
+  it to `and` -- proving the pipeline uses SeaHorn's InstCombine rather than
+  stock InstCombine (a wiring regression the single-pass tests miss).
 - **Smoke/verify**: a loop function drives sea-loop-rotate / sea-indvars /
   sea-loop-unroll under `-O2`, and the verifier RUN line asserts the output is
   well-formed. Since those passes have no assertable behavioral divergence on
@@ -74,11 +77,8 @@ The corpus runs under `llvm-lit` (this is what CI uses). Tool paths come from
 the environment, so the same tests run against any build:
 
 ```sh
-# LLVM 14 baseline (proven green)
-SEAOPT=/path/to/seaopt OPT=opt-14 FILECHECK=FileCheck-14 lit -v test/sea_transforms
-
-# LLVM 15 (dev15 build under test)
-SEAOPT=./build/bin/seaopt OPT=opt-15 FILECHECK=FileCheck-15 lit -v test/sea_transforms
+# LLVM 16 (dev16 build under test)
+SEAOPT=./build/bin/seaopt OPT=opt-16 FILECHECK=FileCheck lit -v test/sea_transforms
 ```
 
 Each test (see its `RUN:` lines) does three things:

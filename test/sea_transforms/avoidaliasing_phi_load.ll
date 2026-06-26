@@ -5,14 +5,14 @@
 ;
 ; Behavior on LLVM 16 (opaque pointers):
 ;   stock opt -passes=instcombine: merges to  %v.in = phi ptr [...] ; %v = load i32, ptr %v.in
-;   seaopt -sea-instcombine: keeps two separate loads + an i32 phi
+;   seaopt -passes=sea-instcombine: keeps two separate loads + an i32 phi
 ;
 ; This also exercises pointer construction: the suppressed transform builds a
 ; pointer-typed phi + a new load (`phi ptr` under opaque pointers); a port
 ; regression here therefore also flags opaque-pointer drift.
 ;
-; RUN: %seaopt -sea-instcombine -S %s | %FileCheck %s
-; RUN: %seaopt -sea-instcombine -S %s | %opt -passes=verify -disable-output
+; RUN: %seaopt -passes=sea-instcombine -S %s | %FileCheck %s
+; RUN: %seaopt -passes=sea-instcombine -S %s | %opt -passes=verify -disable-output
 ; RUN: %opt -passes=instcombine -S %s | %FileCheck --check-prefix=STOCK %s
 
 define i32 @phi_load(i1 %c, ptr %p, ptr %q) {

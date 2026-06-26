@@ -506,7 +506,7 @@ int main(int argc, char **argv) {
   initializeIPO(Registry);
   initializeAnalysis(Registry);
   initializeTransformUtils(Registry);
-  initializeInstCombine(Registry);
+  // SeaInstCombine is new-PM only (-passes=sea-instcombine); no legacy init.
   // initializeAggressiveInstCombine(Registry); // dropped (LLVM16/loops-only)
   // initializeInstrumentation(Registry); // dropped (LLVM16/loops-only)
   initializeTarget(Registry);
@@ -538,7 +538,6 @@ int main(int argc, char **argv) {
   initializeJMCInstrumenterPass(Registry);
 
   initializeSeaIndVarSimplifyLegacyPassPass(Registry);
-  initializeSeaInstructionCombiningPassPass(Registry);
   initializeSeaLoopUnrollPass(Registry);
 
 
