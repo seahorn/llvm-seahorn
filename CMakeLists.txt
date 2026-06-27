@@ -14,7 +14,9 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR )
     "In-source builds are not allowed. Please clean your source tree and try again.")
 endif()
 
-find_package (LLVM 17 REQUIRED CONFIG)
+# LLVM 18 ships only as 18.1.x (no 18.0); the LLVMConfigVersion check requires
+# the minor, so request 18.1 rather than 18.
+find_package (LLVM 18.1 REQUIRED CONFIG)
 
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
