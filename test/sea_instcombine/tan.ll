@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 define float @mytan(float %x) {
   %call = call fast float @atanf(float %x)

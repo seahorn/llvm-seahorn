@@ -2,7 +2,7 @@
 ; Verify that strlen calls with conditional expressions involving constant
 ; string arguments with nonconstant offsets are folded as expected.
 ;
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 declare i64 @strlen(ptr)
 

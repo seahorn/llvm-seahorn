@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 ; Make sure to update the debug value after dead code elimination.
 ; CHECK: %call = call signext i8 @b(i32 6), !dbg !39

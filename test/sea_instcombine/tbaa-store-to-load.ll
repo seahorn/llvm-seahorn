@@ -1,4 +1,4 @@
-; RUN: %instcombine -S 2>&1 %s | %FileCheck %s
+; RUN: %instcombine -S %s 2>&1 | %FileCheck %s
 
 define i64 @f(ptr %p1, ptr %p2) {
 top:

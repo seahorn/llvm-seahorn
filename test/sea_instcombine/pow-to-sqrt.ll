@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 ; This is a check to assure the attributes of `pow` do
 ; not get passed to sqrt.
 

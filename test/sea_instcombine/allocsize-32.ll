@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 ;
 ; The idea is that we want to have sane semantics (e.g. not assertion failures)
 ; when given an allocsize function that takes a 64-bit argument in the face of

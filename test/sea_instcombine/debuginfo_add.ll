@@ -1,4 +1,4 @@
-; RUN: %instcombine -o - -S %s | %FileCheck %s
+; RUN: %instcombine %s -o - -S | %FileCheck %s
 ; typedef struct v *v_t;
 ; struct v {
 ;   unsigned long long p;

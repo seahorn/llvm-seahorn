@@ -1,7 +1,7 @@
 ; Test that the strcpy folder avoids simplifying a call to the function
 ; declared with an incompatible type.
 ;
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 ;
 ; This transformation requires the pointer size, as it assumes that size_t is
 ; the size of a pointer.

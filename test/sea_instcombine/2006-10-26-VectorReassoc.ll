@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 ; (V * C1) * C2 => V * (C1 * C2)
 ; Verify this doesn't fold when no fast-math-flags are specified

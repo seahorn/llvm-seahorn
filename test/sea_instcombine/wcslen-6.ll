@@ -4,7 +4,7 @@
 ; of the same size as wchar_t or bigger doesn't cause trouble and is folded
 ; as expected.
 ;
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 !llvm.module.flags = !{!0}
 !0 = !{i32 1, !"wchar_size", i32 4}
