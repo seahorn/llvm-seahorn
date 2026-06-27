@@ -1,5 +1,5 @@
 ; Ignore stderr, we expect warnings there
-; RUN: %instcombine 2> /dev/null -S %s | %FileCheck %s
+; RUN: %instcombine %s 2> /dev/null -S | %FileCheck %s
 
 ; CHECK-NOT: bitcast
 

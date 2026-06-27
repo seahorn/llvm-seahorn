@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 declare void @llvm.lifetime.start.p0(i64, ptr nocapture)
 declare void @llvm.lifetime.end.p0(i64, ptr nocapture)

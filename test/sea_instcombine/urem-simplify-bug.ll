@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 @.str = internal constant [5 x i8] c"foo\0A\00"
 @.str1 = internal constant [5 x i8] c"bar\0A\00"

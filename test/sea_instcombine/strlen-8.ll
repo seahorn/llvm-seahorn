@@ -5,7 +5,7 @@
 ; TODO: None of these cases is folded at the moment due to a limitation
 ; in LibCallSimplifier::optimizeStringLength.
 ;
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 declare i64 @strlen(ptr)
 

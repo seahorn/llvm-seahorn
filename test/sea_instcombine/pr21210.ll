@@ -1,4 +1,4 @@
-; RUN: %instcombine -mtriple=x86_64-unknown-linux-gnu -S %s | %FileCheck %s
+; RUN: %instcombine %s -mtriple=x86_64-unknown-linux-gnu -S | %FileCheck %s
 ; Checks that the select-icmp optimization is safe in two cases
 declare void @foo(i32)
 declare i32 @bar(i32)

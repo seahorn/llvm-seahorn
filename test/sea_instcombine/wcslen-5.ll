@@ -3,7 +3,7 @@
 ; string arguments with nonconstant offsets are folded as expected.  See
 ; strlen-4.ll for the corresponding strlen test.
 ;
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 declare i64 @wcslen(ptr)
 

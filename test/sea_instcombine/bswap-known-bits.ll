@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 ; Note: This is testing functionality in computeKnownBits.  I'd have rather
 ; used instsimplify, but the bit test folding is apparently only in instcombine.
 

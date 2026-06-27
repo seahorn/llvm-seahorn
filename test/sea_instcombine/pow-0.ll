@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 ; CHECK-LABEL: @zero(
 ; CHECK-NEXT:  ret double 1.000000e+00

@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 ; This test makes sure that we do not assume globals in address spaces other
 ; than 0 are able to be null.

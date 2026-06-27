@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 ; <rdar://problem/9815881>
 ; On OSX x86-32, fwrite and fputs aren't called fwrite and fputs.
 ; Make sure we use the correct names.
