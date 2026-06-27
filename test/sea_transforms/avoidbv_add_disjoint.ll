@@ -2,8 +2,8 @@
 ; Gated at InstCombineAddSub.cpp (`if (!AvoidBv && haveNoCommonBitsSet(...))`).
 ;
 ; %a occupies bits [0:1], %b occupies bits [2:3] -> disjoint.
-; Validated on LLVM 14:
-;   stock opt -instcombine: %r = or i32 %a, %b
+; Validated on LLVM 14/18 (LLVM 18 tags the fold with the new `disjoint` flag):
+;   stock opt -instcombine: %r = or disjoint i32 %a, %b
 ;   seaopt -passes=sea-instcombine: %r = add nuw nsw i32 %a, %b   (kept)
 ;
 ; RUN: %seaopt -passes=sea-instcombine -S %s | %FileCheck %s
@@ -21,4 +21,4 @@ define i32 @add_disjoint(i32 %x, i32 %y) {
 ; CHECK-NOT: = or
 ;
 ; non-vacuity: stock instcombine turns the disjoint add into an or
-; STOCK: = or i32
+; STOCK: = or {{(disjoint )?}}i32

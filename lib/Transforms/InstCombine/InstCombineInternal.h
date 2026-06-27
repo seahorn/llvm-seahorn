@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_LIB_TRANSFORMS_INSTCOMBINE_INSTCOMBINEINTERNAL_H
-#define LLVM_LIB_TRANSFORMS_INSTCOMBINE_INSTCOMBINEINTERNAL_H
+#ifndef LLVM_SEAHORN_TRANSFORMS_INSTCOMBINE_INSTCOMBINEINTERNAL_H
+#define LLVM_SEAHORN_TRANSFORMS_INSTCOMBINE_INSTCOMBINEINTERNAL_H
 
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/PostOrderIterator.h"
@@ -30,7 +30,7 @@
 #include "llvm/Transforms/Utils/Local.h"
 #include <cassert>
 
-#define DEBUG_TYPE "instcombine"
+#define DEBUG_TYPE "sea-instcombine"
 #include "llvm/Transforms/Utils/InstructionWorklist.h"
 
 using namespace llvm::PatternMatch;
@@ -44,7 +44,6 @@ static constexpr unsigned NegatorDefaultMaxDepth = ~0U;
 static constexpr unsigned NegatorMaxNodesSSO = 16;
 
 namespace llvm {
-
 class AAResults;
 class APInt;
 class AssumptionCache;
@@ -58,21 +57,37 @@ class OptimizationRemarkEmitter;
 class ProfileSummaryInfo;
 class TargetLibraryInfo;
 class User;
+} // namespace llvm
 
-class LLVM_LIBRARY_VISIBILITY InstCombinerImpl final
+namespace llvm_seahorn {
+
+  using namespace llvm;
+class LLVM_LIBRARY_VISIBILITY SeaInstCombinerImpl final
     : public InstCombiner,
-      public InstVisitor<InstCombinerImpl, Instruction *> {
+      public InstVisitor<SeaInstCombinerImpl, Instruction *> {
 public:
-  InstCombinerImpl(InstructionWorklist &Worklist, BuilderTy &Builder,
-                   bool MinimizeSize, AAResults *AA, AssumptionCache &AC,
+  SeaInstCombinerImpl(InstructionWorklist &Worklist, BuilderTy &Builder,
+                      bool MinimizeSize,
+#if 1 /* SEAHORN ADD */
+                      bool AvoidBv, bool AvoidUnsignedICmp, bool AvoidIntToPtr,
+                      bool AvoidAliasing, bool AvoidDisequalities,
+#endif
+                      AAResults *AA, AssumptionCache &AC,
                    TargetLibraryInfo &TLI, TargetTransformInfo &TTI,
                    DominatorTree &DT, OptimizationRemarkEmitter &ORE,
                    BlockFrequencyInfo *BFI, ProfileSummaryInfo *PSI,
                    const DataLayout &DL, LoopInfo *LI)
       : InstCombiner(Worklist, Builder, MinimizeSize, AA, AC, TLI, TTI, DT, ORE,
-                     BFI, PSI, DL, LI) {}
+                     BFI, PSI, DL, LI),
+#if 1 /* SEAHORN ADD */
+        AvoidBv(AvoidBv),
+        AvoidUnsignedICmp(AvoidUnsignedICmp), AvoidIntToPtr(AvoidIntToPtr),
+        AvoidAliasing(AvoidAliasing), AvoidDisequalities(AvoidDisequalities)
+#endif
+  {
+  }
 
-  virtual ~InstCombinerImpl() = default;
+  virtual ~SeaInstCombinerImpl() = default;
 
   /// Perform early cleanup and prepare the InstCombine worklist.
   bool prepareWorklist(Function &F,
@@ -237,6 +252,20 @@ public:
   }
 
 private:
+#if 1 /* SEAHORN ADD */
+  // Avoid transforming linear operations into nonlinear
+  bool AvoidBv;
+  // Avoid transforming from signed comparisons to unsigned ones
+  bool AvoidUnsignedICmp;
+  // Avoid generating IntToPtr instructions.
+  // /Accessible with IC.seaAvoidIntToPtr().
+  bool AvoidIntToPtr;
+  // Avoid transformations which introduce new aliasing.
+  bool AvoidAliasing;
+  // Avoid transforming inequalities to disequalities
+  bool AvoidDisequalities;
+#endif
+
   bool annotateAnyAllocSite(CallBase &Call, const TargetLibraryInfo *TLI);
   bool isDesirableIntType(unsigned BitWidth) const;
   bool shouldChangeType(unsigned FromBitWidth, unsigned ToBitWidth) const;
@@ -480,6 +509,15 @@ public:
       Instruction::BinaryOps BinaryOp, bool IsSigned,
       Value *LHS, Value *RHS, Instruction *CxtI) const;
 
+
+
+#if 1 /* ADD SEAHORN */
+  bool seaAvoidIntToPtr() const { return AvoidIntToPtr; }
+  bool seaAvoidBv() const { return AvoidBv; }
+  bool seaAvoidDisequalities() const { return AvoidDisequalities; }
+#endif 
+
+private:
   /// Performs a few simplifications for operators which are associative
   /// or commutative.
   bool SimplifyAssociativeOrCommutative(BinaryOperator &I);
@@ -585,6 +623,7 @@ public:
   /// BB3: phi [BO, BB1], [(binop C1, C2), BB2]
   Instruction *foldBinopWithPhiOperands(BinaryOperator &BO);
 
+public:
   /// Given an instruction with a select as one operand and a constant as the
   /// other operand, try to fold the binary operator into the select arguments.
   /// This also works for Cast instructions, which obviously do not have a
@@ -787,11 +826,11 @@ public:
   /// Attempt to negate \p Root. Retuns nullptr if negation can't be performed,
   /// otherwise returns negated value.
   [[nodiscard]] static Value *Negate(bool LHSIsZero, bool IsNSW, Value *Root,
-                                     InstCombinerImpl &IC);
+                                     SeaInstCombinerImpl &IC);
 };
 
-} // end namespace llvm
+} // end namespace llvm_seahorn.
 
 #undef DEBUG_TYPE
 
-#endif // LLVM_LIB_TRANSFORMS_INSTCOMBINE_INSTCOMBINEINTERNAL_H
+#endif

@@ -75,16 +75,17 @@
 #include <utility>
 #include <vector>
 
-#define DEBUG_TYPE "instcombine"
+#define DEBUG_TYPE "sea-instcombine"
 #include "llvm/Transforms/Utils/InstructionWorklist.h"
 
 using namespace llvm;
+using namespace llvm_seahorn;
 using namespace PatternMatch;
 
 STATISTIC(NumSimplified, "Number of library calls simplified");
 
 static cl::opt<unsigned> GuardWideningWindow(
-    "instcombine-guard-widening-window",
+    "seaopt-instcombine-guard-widening-window",
     cl::init(3),
     cl::desc("How wide an instruction window to bypass looking for "
              "another guard"));
@@ -112,7 +113,7 @@ static bool hasUndefSource(AnyMemTransferInst *MI) {
   return isa<AllocaInst>(Src) && Src->hasOneUse();
 }
 
-Instruction *InstCombinerImpl::SimplifyAnyMemTransfer(AnyMemTransferInst *MI) {
+Instruction *SeaInstCombinerImpl::SimplifyAnyMemTransfer(AnyMemTransferInst *MI) {
   Align DstAlign = getKnownAlignment(MI->getRawDest(), DL, MI, &AC, &DT);
   MaybeAlign CopyDstAlign = MI->getDestAlign();
   if (!CopyDstAlign || *CopyDstAlign < DstAlign) {
@@ -227,7 +228,7 @@ Instruction *InstCombinerImpl::SimplifyAnyMemTransfer(AnyMemTransferInst *MI) {
   return MI;
 }
 
-Instruction *InstCombinerImpl::SimplifyAnyMemSet(AnyMemSetInst *MI) {
+Instruction *SeaInstCombinerImpl::SimplifyAnyMemSet(AnyMemSetInst *MI) {
   const Align KnownAlignment =
       getKnownAlignment(MI->getDest(), DL, MI, &AC, &DT);
   MaybeAlign MemSetAlign = MI->getDestAlign();
@@ -303,7 +304,7 @@ Instruction *InstCombinerImpl::SimplifyAnyMemSet(AnyMemSetInst *MI) {
 
 // TODO, Obvious Missing Transforms:
 // * Narrow width by halfs excluding zero/undef lanes
-Value *InstCombinerImpl::simplifyMaskedLoad(IntrinsicInst &II) {
+Value *SeaInstCombinerImpl::simplifyMaskedLoad(IntrinsicInst &II) {
   Value *LoadPtr = II.getArgOperand(0);
   const Align Alignment =
       cast<ConstantInt>(II.getArgOperand(1))->getAlignValue();
@@ -333,7 +334,7 @@ Value *InstCombinerImpl::simplifyMaskedLoad(IntrinsicInst &II) {
 // TODO, Obvious Missing Transforms:
 // * Single constant active lane -> store
 // * Narrow width by halfs excluding zero/undef lanes
-Instruction *InstCombinerImpl::simplifyMaskedStore(IntrinsicInst &II) {
+Instruction *SeaInstCombinerImpl::simplifyMaskedStore(IntrinsicInst &II) {
   auto *ConstMask = dyn_cast<Constant>(II.getArgOperand(3));
   if (!ConstMask)
     return nullptr;
@@ -371,7 +372,7 @@ Instruction *InstCombinerImpl::simplifyMaskedStore(IntrinsicInst &II) {
 // * Adjacent vector addresses -> masked.load
 // * Narrow width by halfs excluding zero/undef lanes
 // * Vector incrementing address -> vector masked load
-Instruction *InstCombinerImpl::simplifyMaskedGather(IntrinsicInst &II) {
+Instruction *SeaInstCombinerImpl::simplifyMaskedGather(IntrinsicInst &II) {
   auto *ConstMask = dyn_cast<Constant>(II.getArgOperand(2));
   if (!ConstMask)
     return nullptr;
@@ -399,7 +400,7 @@ Instruction *InstCombinerImpl::simplifyMaskedGather(IntrinsicInst &II) {
 // * Adjacent vector addresses -> masked.store
 // * Narrow store width by halfs excluding zero/undef lanes
 // * Vector incrementing address -> vector masked store
-Instruction *InstCombinerImpl::simplifyMaskedScatter(IntrinsicInst &II) {
+Instruction *SeaInstCombinerImpl::simplifyMaskedScatter(IntrinsicInst &II) {
   auto *ConstMask = dyn_cast<Constant>(II.getArgOperand(3));
   if (!ConstMask)
     return nullptr;
@@ -462,7 +463,7 @@ Instruction *InstCombinerImpl::simplifyMaskedScatter(IntrinsicInst &II) {
 /// This is legal because it preserves the most recent information about
 /// the presence or absence of invariant.group.
 static Instruction *simplifyInvariantGroupIntrinsic(IntrinsicInst &II,
-                                                    InstCombinerImpl &IC) {
+                                                    SeaInstCombinerImpl &IC) {
   auto *Arg = II.getArgOperand(0);
   auto *StrippedArg = Arg->stripPointerCasts();
   auto *StrippedInvariantGroupsArg = StrippedArg;
@@ -491,7 +492,7 @@ static Instruction *simplifyInvariantGroupIntrinsic(IntrinsicInst &II,
   return cast<Instruction>(Result);
 }
 
-static Instruction *foldCttzCtlz(IntrinsicInst &II, InstCombinerImpl &IC) {
+static Instruction *foldCttzCtlz(IntrinsicInst &II, SeaInstCombinerImpl &IC) {
   assert((II.getIntrinsicID() == Intrinsic::cttz ||
           II.getIntrinsicID() == Intrinsic::ctlz) &&
          "Expected cttz or ctlz intrinsic");
@@ -629,7 +630,7 @@ static Instruction *foldCttzCtlz(IntrinsicInst &II, InstCombinerImpl &IC) {
   return nullptr;
 }
 
-static Instruction *foldCtpop(IntrinsicInst &II, InstCombinerImpl &IC) {
+static Instruction *foldCtpop(IntrinsicInst &II, SeaInstCombinerImpl &IC) {
   assert(II.getIntrinsicID() == Intrinsic::ctpop &&
          "Expected ctpop intrinsic");
   Type *Ty = II.getType();
@@ -770,7 +771,7 @@ static bool haveSameOperands(const IntrinsicInst &I, const IntrinsicInst &E,
 //   call @llvm.foo.end(i1 0)
 //   call @llvm.foo.end(i1 0) ; &I
 static bool
-removeTriviallyEmptyRange(IntrinsicInst &EndI, InstCombinerImpl &IC,
+removeTriviallyEmptyRange(IntrinsicInst &EndI, SeaInstCombinerImpl &IC,
                           std::function<bool(const IntrinsicInst &)> IsStart) {
   // We start from the end intrinsic and scan backwards, so that InstCombine
   // has already processed (and potentially removed) all the instructions
@@ -797,7 +798,7 @@ removeTriviallyEmptyRange(IntrinsicInst &EndI, InstCombinerImpl &IC,
   return false;
 }
 
-Instruction *InstCombinerImpl::visitVAEndInst(VAEndInst &I) {
+Instruction *SeaInstCombinerImpl::visitVAEndInst(VAEndInst &I) {
   removeTriviallyEmptyRange(I, *this, [](const IntrinsicInst &I) {
     return I.getIntrinsicID() == Intrinsic::vastart ||
            I.getIntrinsicID() == Intrinsic::vacopy;
@@ -827,7 +828,7 @@ static Instruction *createOverflowTuple(IntrinsicInst *II, Value *Result,
 }
 
 Instruction *
-InstCombinerImpl::foldIntrinsicWithOverflowCommon(IntrinsicInst *II) {
+SeaInstCombinerImpl::foldIntrinsicWithOverflowCommon(IntrinsicInst *II) {
   WithOverflowInst *WO = cast<WithOverflowInst>(II);
   Value *OperationResult = nullptr;
   Constant *OverflowResult = nullptr;
@@ -908,7 +909,7 @@ static FCmpInst::Predicate fpclassTestIsFCmp0(FPClassTest Mask,
   return FCmpInst::BAD_FCMP_PREDICATE;
 }
 
-Instruction *InstCombinerImpl::foldIntrinsicIsFPClass(IntrinsicInst &II) {
+Instruction *SeaInstCombinerImpl::foldIntrinsicIsFPClass(IntrinsicInst &II) {
   Value *Src0 = II.getArgOperand(0);
   Value *Src1 = II.getArgOperand(1);
   const ConstantInt *CMask = cast<ConstantInt>(Src1);
@@ -1130,7 +1131,7 @@ static Instruction *moveAddAfterMinMax(IntrinsicInst *II,
                   : BinaryOperator::CreateNUWAdd(NewMinMax, Add->getOperand(1));
 }
 /// Match a sadd_sat or ssub_sat which is using min/max to clamp the value.
-Instruction *InstCombinerImpl::matchSAddSubSat(IntrinsicInst &MinMax1) {
+Instruction *SeaInstCombinerImpl::matchSAddSubSat(IntrinsicInst &MinMax1) {
   Type *Ty = MinMax1.getType();
 
   // We are looking for a tree of:
@@ -1433,7 +1434,7 @@ static Instruction *foldBitOrderCrossLogicOp(Value *V,
 /// CallInst simplification. This mostly only handles folding of intrinsic
 /// instructions. For normal calls, it allows visitCallBase to do the heavy
 /// lifting.
-Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
+Instruction *SeaInstCombinerImpl::visitCallInst(CallInst &CI) {
   // Don't try to simplify calls without uses. It will not do anything useful,
   // but will result in the following folds being skipped.
   if (!CI.use_empty()) {
@@ -1685,7 +1686,7 @@ Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
       // TODO: Canonicalize neg after min/max if I1 is constant.
       if (match(I0, m_NSWNeg(m_Value(X))) && match(I1, m_NSWNeg(m_Value(Y))) &&
           (I0->hasOneUse() || I1->hasOneUse())) {
-        Intrinsic::ID InvID = getInverseMinMaxIntrinsic(IID);
+      Intrinsic::ID InvID = getInverseMinMaxIntrinsic(IID);
         Value *InvMaxMin = Builder.CreateBinaryIntrinsic(InvID, X, Y);
         return BinaryOperator::CreateNSWNeg(InvMaxMin);
       }
@@ -2744,8 +2745,8 @@ Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
 
         if (!CannotRemove)
           return eraseInstFromFunction(CI);
+        }
       }
-    }
 
     // Scan down this block to see if there is another stack restore in the
     // same block without an intervening call/alloca.
@@ -2759,20 +2760,20 @@ Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
         break;
 
       case ClassifyResult::StackRestore:
-        // If there is a stackrestore below this one, remove this one.
-        return eraseInstFromFunction(CI);
+          // If there is a stackrestore below this one, remove this one.
+            return eraseInstFromFunction(CI);
 
       case ClassifyResult::Alloca:
       case ClassifyResult::CallWithSideEffects:
         // If we found an alloca, a non-intrinsic call, or an intrinsic call
         // with side effects (such as llvm.stacksave and llvm.read_register),
         // we can't remove the stack restore.
-        CannotRemove = true;
-        break;
-      }
+            CannotRemove = true;
+            break;
+          }
       if (CannotRemove)
-        break;
-    }
+          break;
+        }
 
     // If the stack restore is in a return, resume, or unwind block and if there
     // are no allocas or calls between the restore and the return, nuke the
@@ -3161,21 +3162,21 @@ Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
     if (match(Arg, m_ZExtOrSExtOrSelf(m_Value(Vect)))) {
       if (auto *FTy = dyn_cast<FixedVectorType>(Vect->getType()))
         if (FTy->getElementType() == Builder.getInt1Ty()) {
-          Value *Res = Builder.CreateBitCast(
+        Value *Res = Builder.CreateBitCast(
               Vect, Builder.getIntNTy(FTy->getNumElements()));
-          if (IID == Intrinsic::vector_reduce_and) {
-            Res = Builder.CreateICmpEQ(
-                Res, ConstantInt::getAllOnesValue(Res->getType()));
-          } else {
-            assert(IID == Intrinsic::vector_reduce_or &&
-                   "Expected or reduction.");
-            Res = Builder.CreateIsNotNull(Res);
-          }
+        if (IID == Intrinsic::vector_reduce_and) {
+          Res = Builder.CreateICmpEQ(
+              Res, ConstantInt::getAllOnesValue(Res->getType()));
+        } else {
+          assert(IID == Intrinsic::vector_reduce_or &&
+                 "Expected or reduction.");
+          Res = Builder.CreateIsNotNull(Res);
+        }
           if (Arg != Vect)
             Res = Builder.CreateCast(cast<CastInst>(Arg)->getOpcode(), Res,
                                      II->getType());
-          return replaceInstUsesWith(CI, Res);
-        }
+        return replaceInstUsesWith(CI, Res);
+      }
     }
     [[fallthrough]];
   }
@@ -3398,7 +3399,7 @@ Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
 }
 
 // Fence instruction simplification
-Instruction *InstCombinerImpl::visitFenceInst(FenceInst &FI) {
+Instruction *SeaInstCombinerImpl::visitFenceInst(FenceInst &FI) {
   auto *NFI = dyn_cast<FenceInst>(FI.getNextNonDebugInstruction());
   // This check is solely here to handle arbitrary target-dependent syncscopes.
   // TODO: Can remove if does not matter in practice.
@@ -3426,16 +3427,16 @@ Instruction *InstCombinerImpl::visitFenceInst(FenceInst &FI) {
 }
 
 // InvokeInst simplification
-Instruction *InstCombinerImpl::visitInvokeInst(InvokeInst &II) {
+Instruction *SeaInstCombinerImpl::visitInvokeInst(InvokeInst &II) {
   return visitCallBase(II);
 }
 
 // CallBrInst simplification
-Instruction *InstCombinerImpl::visitCallBrInst(CallBrInst &CBI) {
+Instruction *SeaInstCombinerImpl::visitCallBrInst(CallBrInst &CBI) {
   return visitCallBase(CBI);
 }
 
-Instruction *InstCombinerImpl::tryOptimizeCall(CallInst *CI) {
+Instruction *SeaInstCombinerImpl::tryOptimizeCall(CallInst *CI) {
   if (!CI->getCalledFunction()) return nullptr;
 
   // Skip optimizing notail and musttail calls so
@@ -3536,7 +3537,7 @@ static IntrinsicInst *findInitTrampoline(Value *Callee) {
   return nullptr;
 }
 
-bool InstCombinerImpl::annotateAnyAllocSite(CallBase &Call,
+bool SeaInstCombinerImpl::annotateAnyAllocSite(CallBase &Call,
                                             const TargetLibraryInfo *TLI) {
   // Note: We only handle cases which can't be driven from generic attributes
   // here.  So, for example, nonnull and noalias (which are common properties
@@ -3562,7 +3563,7 @@ bool InstCombinerImpl::annotateAnyAllocSite(CallBase &Call,
     }
   }
 
-  // Add alignment attribute if alignment is a power of two constant.
+    // Add alignment attribute if alignment is a power of two constant.
   Value *Alignment = getAllocAlignment(&Call, TLI);
   if (!Alignment)
     return Changed;
@@ -3584,7 +3585,7 @@ bool InstCombinerImpl::annotateAnyAllocSite(CallBase &Call,
 }
 
 /// Improvements for call, callbr and invoke instructions.
-Instruction *InstCombinerImpl::visitCallBase(CallBase &Call) {
+Instruction *SeaInstCombinerImpl::visitCallBase(CallBase &Call) {
   bool Changed = annotateAnyAllocSite(Call, &TLI);
 
   // Mark any parameters that are known to be non-null with the nonnull
@@ -3842,7 +3843,7 @@ Instruction *InstCombinerImpl::visitCallBase(CallBase &Call) {
 /// If the callee is a constexpr cast of a function, attempt to move the cast to
 /// the arguments of the call/invoke.
 /// CallBrInst is not supported.
-bool InstCombinerImpl::transformConstExprCastCall(CallBase &Call) {
+bool SeaInstCombinerImpl::transformConstExprCastCall(CallBase &Call) {
   auto *Callee =
       dyn_cast<Function>(Call.getCalledOperand()->stripPointerCasts());
   if (!Callee)
@@ -4114,7 +4115,7 @@ bool InstCombinerImpl::transformConstExprCastCall(CallBase &Call) {
 /// Turn a call to a function created by init_trampoline / adjust_trampoline
 /// intrinsic pair into a direct call to the underlying function.
 Instruction *
-InstCombinerImpl::transformCallThroughTrampoline(CallBase &Call,
+SeaInstCombinerImpl::transformCallThroughTrampoline(CallBase &Call,
                                                  IntrinsicInst &Tramp) {
   FunctionType *FTy = Call.getFunctionType();
   AttributeList Attrs = Call.getAttributes();

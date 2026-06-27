@@ -43,10 +43,11 @@
 #include <cassert>
 #include <utility>
 
-#define DEBUG_TYPE "instcombine"
+#define DEBUG_TYPE "sea-instcombine"
 #include "llvm/Transforms/Utils/InstructionWorklist.h"
 
 using namespace llvm;
+using namespace llvm_seahorn;
 using namespace PatternMatch;
 
 
@@ -54,7 +55,7 @@ using namespace PatternMatch;
 /// constant of a binop.
 static Instruction *foldSelectBinOpIdentity(SelectInst &Sel,
                                             const TargetLibraryInfo &TLI,
-                                            InstCombinerImpl &IC) {
+                                            SeaInstCombinerImpl &IC) {
   // The select condition must be an equality compare with a constant operand.
   Value *X;
   Constant *C;
@@ -261,7 +262,7 @@ static unsigned getSelectFoldableOperands(BinaryOperator *I) {
 }
 
 /// We have (select c, TI, FI), and we know that TI and FI have the same opcode.
-Instruction *InstCombinerImpl::foldSelectOpOp(SelectInst &SI, Instruction *TI,
+Instruction *SeaInstCombinerImpl::foldSelectOpOp(SelectInst &SI, Instruction *TI,
                                               Instruction *FI) {
   // Don't break up min/max patterns. The hasOneUse checks below prevent that
   // for most cases, but vector min/max with bitcasts can be transformed. If the
@@ -501,7 +502,7 @@ static bool isSelect01(const APInt &C1I, const APInt &C2I) {
 
 /// Try to fold the select into one of the operands to allow further
 /// optimization.
-Instruction *InstCombinerImpl::foldSelectIntoOp(SelectInst &SI, Value *TrueVal,
+Instruction *SeaInstCombinerImpl::foldSelectIntoOp(SelectInst &SI, Value *TrueVal,
                                                 Value *FalseVal) {
   // See the comment above getSelectFoldableOperands for a description of the
   // transformation we are doing here.
@@ -839,7 +840,7 @@ static Instruction *foldSetClearBits(SelectInst &Sel,
 // is a vector consisting of 0 and undefs. If a constant compared with x
 // is a scalar undefined value or undefined vector then an expression
 // should be already folded into a constant.
-static Instruction *foldSelectZeroOrMul(SelectInst &SI, InstCombinerImpl &IC) {
+static Instruction *foldSelectZeroOrMul(SelectInst &SI, SeaInstCombinerImpl &IC) {
   auto *CondVal = SI.getCondition();
   auto *TrueVal = SI.getTrueValue();
   auto *FalseVal = SI.getFalseValue();
@@ -1172,7 +1173,7 @@ static Value *foldSelectCttzCtlz(ICmpInst *ICI, Value *TrueVal, Value *FalseVal,
 }
 
 static Value *canonicalizeSPF(ICmpInst &Cmp, Value *TrueVal, Value *FalseVal,
-                              InstCombinerImpl &IC) {
+                              SeaInstCombinerImpl &IC) {
   Value *LHS, *RHS;
   // TODO: What to do with pointer min/max patterns?
   if (!TrueVal->getType()->isIntOrIntVectorTy())
@@ -1222,7 +1223,7 @@ static Value *canonicalizeSPF(ICmpInst &Cmp, Value *TrueVal, Value *FalseVal,
   return nullptr;
 }
 
-bool InstCombinerImpl::replaceInInstruction(Value *V, Value *Old, Value *New,
+bool SeaInstCombinerImpl::replaceInInstruction(Value *V, Value *Old, Value *New,
                                             unsigned Depth) {
   // Conservatively limit replacement to two instructions upwards.
   if (Depth == 2)
@@ -1261,7 +1262,7 @@ bool InstCombinerImpl::replaceInInstruction(Value *V, Value *Old, Value *New,
 ///
 /// We can't replace %sel with %add unless we strip away the flags.
 /// TODO: Wrapping flags could be preserved in some cases with better analysis.
-Instruction *InstCombinerImpl::foldSelectValueEquivalence(SelectInst &Sel,
+Instruction *SeaInstCombinerImpl::foldSelectValueEquivalence(SelectInst &Sel,
                                                           ICmpInst &Cmp) {
   if (!Cmp.isEquality())
     return nullptr;
@@ -1354,7 +1355,7 @@ Instruction *InstCombinerImpl::foldSelectValueEquivalence(SelectInst &Sel,
 // Also ULT predicate can also be UGT iff C0 != -1 (+invert result)
 //      SLT predicate can also be SGT iff C2 != INT_MAX (+invert res.)
 static Value *canonicalizeClampLike(SelectInst &Sel0, ICmpInst &Cmp0,
-                                    InstCombiner::BuilderTy &Builder) {
+                                          InstCombiner::BuilderTy &Builder) {
   Value *X = Sel0.getTrueValue();
   Value *Sel1 = Sel0.getFalseValue();
 
@@ -1532,7 +1533,7 @@ static Value *canonicalizeClampLike(SelectInst &Sel0, ICmpInst &Cmp0,
 // and swap the hands of select.
 static Instruction *
 tryToReuseConstantFromSelectInComparison(SelectInst &Sel, ICmpInst &Cmp,
-                                         InstCombinerImpl &IC) {
+                                         SeaInstCombinerImpl &IC) {
   ICmpInst::Predicate Pred;
   Value *X;
   Constant *C0;
@@ -1677,7 +1678,7 @@ static Value *foldSelectInstWithICmpConst(SelectInst &SI, ICmpInst *ICI,
 }
 
 /// Visit a SelectInst that has an ICmpInst as its first operand.
-Instruction *InstCombinerImpl::foldSelectInstWithICmp(SelectInst &SI,
+Instruction *SeaInstCombinerImpl::foldSelectInstWithICmp(SelectInst &SI,
                                                       ICmpInst *ICI) {
   if (Instruction *NewSel = foldSelectValueEquivalence(SI, *ICI))
     return NewSel;
@@ -1855,7 +1856,7 @@ static bool canSelectOperandBeMappingIntoPredBlock(const Value *V,
 
 /// We have an SPF (e.g. a min or max) of an SPF of the form:
 ///   SPF2(SPF1(A, B), C)
-Instruction *InstCombinerImpl::foldSPFofSPF(Instruction *Inner,
+Instruction *SeaInstCombinerImpl::foldSPFofSPF(Instruction *Inner,
                                             SelectPatternFlavor SPF1, Value *A,
                                             Value *B, Instruction &Outer,
                                             SelectPatternFlavor SPF2,
@@ -2066,7 +2067,7 @@ foldOverflowingAddSubSelect(SelectInst &SI, InstCombiner::BuilderTy &Builder) {
   return CallInst::Create(F, {X, Y});
 }
 
-Instruction *InstCombinerImpl::foldSelectExtConst(SelectInst &Sel) {
+Instruction *SeaInstCombinerImpl::foldSelectExtConst(SelectInst &Sel) {
   Constant *C;
   if (!match(Sel.getTrueValue(), m_Constant(C)) &&
       !match(Sel.getFalseValue(), m_Constant(C)))
@@ -2151,7 +2152,7 @@ static Instruction *canonicalizeSelectToShuffle(SelectInst &SI) {
 /// other operations in IR and having all operands of a select be vector types
 /// is likely better for vector codegen.
 static Instruction *canonicalizeScalarSelectOfVecs(SelectInst &Sel,
-                                                   InstCombinerImpl &IC) {
+                                                   SeaInstCombinerImpl &IC) {
   auto *Ty = dyn_cast<VectorType>(Sel.getType());
   if (!Ty)
     return nullptr;
@@ -2408,7 +2409,7 @@ static Instruction *foldSelectToCopysign(SelectInst &Sel,
   return CallInst::Create(F, { MagArg, X });
 }
 
-Instruction *InstCombinerImpl::foldVectorSelect(SelectInst &Sel) {
+Instruction *SeaInstCombinerImpl::foldVectorSelect(SelectInst &Sel) {
   if (!isa<VectorType>(Sel.getType()))
     return nullptr;
 
@@ -2575,7 +2576,7 @@ static Instruction *foldSelectToPhi(SelectInst &Sel, const DominatorTree &DT,
 ///
 /// (x % n) < 0 ? (x % n) + n : (x % n)
 ///    -> x & (n - 1)
-static Instruction *foldSelectWithSRem(SelectInst &SI, InstCombinerImpl &IC,
+static Instruction *foldSelectWithSRem(SelectInst &SI, SeaInstCombinerImpl &IC,
                                        IRBuilderBase &Builder) {
   Value *CondVal = SI.getCondition();
   Value *TrueVal = SI.getTrueValue();
@@ -2650,7 +2651,7 @@ static Value *foldSelectWithFrozenICmp(SelectInst &Sel, InstCombiner::BuilderTy 
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::foldAndOrOfSelectUsingImpliedCond(Value *Op,
+Instruction *SeaInstCombinerImpl::foldAndOrOfSelectUsingImpliedCond(Value *Op,
                                                                  SelectInst &SI,
                                                                  bool IsAnd) {
   Value *CondVal = SI.getCondition();
@@ -2695,7 +2696,7 @@ Instruction *InstCombinerImpl::foldAndOrOfSelectUsingImpliedCond(Value *Op,
 // Canonicalize select with fcmp to fabs(). -0.0 makes this tricky. We need
 // fast-math-flags (nsz) or fsub with +0.0 (not fneg) for this to work.
 static Instruction *foldSelectWithFCmpToFabs(SelectInst &SI,
-                                             InstCombinerImpl &IC) {
+                                             SeaInstCombinerImpl &IC) {
   Value *CondVal = SI.getCondition();
 
   bool ChangedFMF = false;
@@ -2934,7 +2935,7 @@ static Instruction *foldNestedSelects(SelectInst &OuterSelVal,
                             !IsAndVariant ? SelInner : InnerSel.FalseVal);
 }
 
-Instruction *InstCombinerImpl::foldSelectOfBools(SelectInst &SI) {
+Instruction *SeaInstCombinerImpl::foldSelectOfBools(SelectInst &SI) {
   Value *CondVal = SI.getCondition();
   Value *TrueVal = SI.getTrueValue();
   Value *FalseVal = SI.getFalseValue();
@@ -3335,7 +3336,7 @@ static Instruction *foldBitCeil(SelectInst &SI, IRBuilderBase &Builder) {
                                 Masked);
 }
 
-bool InstCombinerImpl::fmulByZeroIsZero(Value *MulVal, FastMathFlags FMF,
+bool SeaInstCombinerImpl::fmulByZeroIsZero(Value *MulVal, FastMathFlags FMF,
                                         const Instruction *CtxI) const {
   KnownFPClass Known = computeKnownFPClass(MulVal, FMF, fcNegative, CtxI);
 
@@ -3343,7 +3344,7 @@ bool InstCombinerImpl::fmulByZeroIsZero(Value *MulVal, FastMathFlags FMF,
          (FMF.noSignedZeros() || Known.signBitIsZeroOrNaN());
 }
 
-static bool matchFMulByZeroIfResultEqZero(InstCombinerImpl &IC, Value *Cmp0,
+static bool matchFMulByZeroIfResultEqZero(SeaInstCombinerImpl &IC, Value *Cmp0,
                                           Value *Cmp1, Value *TrueVal,
                                           Value *FalseVal, Instruction &CtxI,
                                           bool SelectIsNSZ) {
@@ -3360,7 +3361,7 @@ static bool matchFMulByZeroIfResultEqZero(InstCombinerImpl &IC, Value *Cmp0,
   return false;
 }
 
-Instruction *InstCombinerImpl::visitSelectInst(SelectInst &SI) {
+Instruction *SeaInstCombinerImpl::visitSelectInst(SelectInst &SI) {
   Value *CondVal = SI.getCondition();
   Value *TrueVal = SI.getTrueValue();
   Value *FalseVal = SI.getFalseValue();
