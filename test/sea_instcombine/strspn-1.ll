@@ -1,6 +1,6 @@
 ; Test that the strspn library call simplifier works correctly.
 ;
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 @abcba = constant [6 x i8] c"abcba\00"
 @abc = constant [4 x i8] c"abc\00"

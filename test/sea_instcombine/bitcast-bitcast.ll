@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 ; Check all scalar / vector combinations for a pair of bitcasts.
 

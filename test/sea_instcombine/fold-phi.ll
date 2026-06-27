@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 ; CHECK: no_crash
 define float @no_crash(float %a, i1 %c1) nounwind {

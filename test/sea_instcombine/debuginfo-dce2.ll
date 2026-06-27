@@ -1,4 +1,4 @@
-; RUN: %instcombine -S -o - %s | %FileCheck %s
+; RUN: %instcombine -S %s -o - | %FileCheck %s
 
 ; In this example, the cast from ptr to ptr becomes trivially dead. We should
 ; salvage its debug info.

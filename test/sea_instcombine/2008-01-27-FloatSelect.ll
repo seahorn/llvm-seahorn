@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 ; CHECK: select
 
 define double @fold(i1 %a, double %b) {

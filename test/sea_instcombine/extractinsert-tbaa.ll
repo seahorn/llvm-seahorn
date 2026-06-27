@@ -1,4 +1,4 @@
-; RUN: %instcombine -S -o - %s | %FileCheck %s
+; RUN: %instcombine -S %s -o - | %FileCheck %s
 
 %Complex = type { double, double }
 

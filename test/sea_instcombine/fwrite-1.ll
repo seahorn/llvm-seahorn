@@ -1,6 +1,6 @@
 ; Test that the fwrite library call simplifier works correctly.
 ;
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 target datalayout = "e-p:64:64:64"
 

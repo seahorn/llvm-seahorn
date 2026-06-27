@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 ; PR45033: Don't try to insert a cast into a catchswich block.
 

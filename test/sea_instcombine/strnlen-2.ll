@@ -2,7 +2,7 @@
 ; Verify that strnlen calls with conditional expressions involving constant
 ; string arguments and constant bounds are folded correctly.
 ;
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 declare i64 @strnlen(ptr, i64)
 

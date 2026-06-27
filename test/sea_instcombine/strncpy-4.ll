@@ -3,7 +3,7 @@
 ; Test that strncpy(D, S, N) calls with the empty string S as a source
 ; are simplified for all values of N.
 ;
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 declare ptr @strncpy(ptr, ptr, i64)
 

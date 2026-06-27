@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 define zeroext i1 @_Z3fooPb(ptr nocapture %x) {
 entry:

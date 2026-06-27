@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 ;
 ; Check that SimplifyLibCalls do not (crash or) emit a library call if user
 ; has made a function alias with the same name.

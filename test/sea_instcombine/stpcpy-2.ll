@@ -1,5 +1,5 @@
 ; Test that the stpcpy library call simplifier works correctly.
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 ;
 ; This transformation requires the pointer size, as it assumes that size_t is
 ; the size of a pointer.

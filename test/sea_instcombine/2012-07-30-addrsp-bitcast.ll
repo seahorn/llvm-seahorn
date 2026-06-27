@@ -1,4 +1,4 @@
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 ; CHECK: addrspacecast
 
 @base = internal unnamed_addr addrspace(3) global [16 x i32] zeroinitializer, align 16

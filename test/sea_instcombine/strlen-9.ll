@@ -3,7 +3,7 @@
 ; Verify that strlen calls with unterminated constant arrays or with
 ; just past-the-end pointers to strings are not folded.
 ;
-; RUN: %instcombine -S %s | %FileCheck %s
+; RUN: %instcombine %s -S | %FileCheck %s
 
 declare i64 @strlen(ptr)
 
