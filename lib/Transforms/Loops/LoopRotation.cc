@@ -20,43 +20,32 @@
 #include "llvm/Analysis/MemorySSAUpdater.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
-#include "llvm/InitializePasses.h"
+#include "llvm_seahorn/InitializePasses.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/LoopRotationUtils.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
+#include "llvm_seahorn/Transforms/Scalar.h"
+#include <limits>
 #include <optional>
 using namespace llvm;
 
-#define DEBUG_TYPE "loop-rotate"
+#define DEBUG_TYPE "sea-loop-rotate"
 
 static cl::opt<unsigned> DefaultRotationThreshold(
-    "rotation-max-header-size", cl::init(16), cl::Hidden,
+    "sea-rotation-max-header-size",
+    cl::init(std::numeric_limits<unsigned>::max()), cl::Hidden,
     cl::desc("The default maximum header size for automatic loop rotation"));
 
 static cl::opt<bool> PrepareForLTOOption(
-    "rotation-prepare-for-lto", cl::init(false), cl::Hidden,
+    "sea-rotation-prepare-for-lto", cl::init(false), cl::Hidden,
     cl::desc("Run loop-rotation in the prepare-for-lto stage. This option "
              "should be used for testing only."));
 
+#if 0 /* SEAHORN DISABLE */
 LoopRotatePass::LoopRotatePass(bool EnableHeaderDuplication, bool PrepareForLTO)
     : EnableHeaderDuplication(EnableHeaderDuplication),
       PrepareForLTO(PrepareForLTO) {}
-
-void LoopRotatePass::printPipeline(
-    raw_ostream &OS, function_ref<StringRef(StringRef)> MapClassName2PassName) {
-  static_cast<PassInfoMixin<LoopRotatePass> *>(this)->printPipeline(
-      OS, MapClassName2PassName);
-  OS << "<";
-  if (!EnableHeaderDuplication)
-    OS << "no-";
-  OS << "header-duplication;";
-
-  if (!PrepareForLTO)
-    OS << "no-";
-  OS << "prepare-for-lto";
-  OS << ">";
-}
 
 PreservedAnalyses LoopRotatePass::run(Loop &L, LoopAnalysisManager &AM,
                                       LoopStandardAnalysisResults &AR,
@@ -90,18 +79,20 @@ PreservedAnalyses LoopRotatePass::run(Loop &L, LoopAnalysisManager &AM,
   return PA;
 }
 
+#endif
+
 namespace {
 
-class LoopRotateLegacyPass : public LoopPass {
+class SeaLoopRotateLegacyPass : public LoopPass {
   unsigned MaxHeaderSize;
   bool PrepareForLTO;
 
 public:
   static char ID; // Pass ID, replacement for typeid
-  LoopRotateLegacyPass(int SpecifiedMaxHeaderSize = -1,
+  SeaLoopRotateLegacyPass(int SpecifiedMaxHeaderSize = -1,
                        bool PrepareForLTO = false)
       : LoopPass(ID), PrepareForLTO(PrepareForLTO) {
-    initializeLoopRotateLegacyPassPass(*PassRegistry::getPassRegistry());
+    initializeSeaLoopRotateLegacyPassPass(*PassRegistry::getPassRegistry());
     if (SpecifiedMaxHeaderSize == -1)
       MaxHeaderSize = DefaultRotationThreshold;
     else
@@ -145,25 +136,26 @@ public:
                         ? DefaultRotationThreshold
                         : MaxHeaderSize;
 
+    Threshold = DefaultRotationThreshold;
     return LoopRotation(L, LI, TTI, AC, &DT, &SE, MSSAU ? &*MSSAU : nullptr, SQ,
-                        false, Threshold, false,
-                        PrepareForLTO || PrepareForLTOOption);
+                        false, Threshold, true /* IsUtilMode */,
+                        false /*PrepareForLTO || PrepareForLTOOption*/);
   }
 };
-} // end namespace
+} // namespace
 
-char LoopRotateLegacyPass::ID = 0;
-INITIALIZE_PASS_BEGIN(LoopRotateLegacyPass, "loop-rotate", "Rotate Loops",
+char SeaLoopRotateLegacyPass::ID = 0;
+INITIALIZE_PASS_BEGIN(SeaLoopRotateLegacyPass, "sea-loop-rotate", "Rotate Loops",
                       false, false)
 INITIALIZE_PASS_DEPENDENCY(AssumptionCacheTracker)
 INITIALIZE_PASS_DEPENDENCY(LoopPass)
 INITIALIZE_PASS_DEPENDENCY(TargetTransformInfoWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(MemorySSAWrapperPass)
-INITIALIZE_PASS_END(LoopRotateLegacyPass, "loop-rotate", "Rotate Loops", false,
-                    false)
+INITIALIZE_PASS_END(SeaLoopRotateLegacyPass, "sea-loop-rotate", "Rotate Loops",
+                    false, false)
 
-Pass *llvm::createLoopRotatePass(int MaxHeaderSize, bool PrepareForLTO) {
-  return new LoopRotateLegacyPass(MaxHeaderSize, PrepareForLTO);
+Pass *llvm_seahorn::createLoopRotatePass(int MaxHeaderSize, bool PrepareForLTO) {
+  return new SeaLoopRotateLegacyPass(MaxHeaderSize, PrepareForLTO);
 }
 
 // --- new pass manager wrapper (loop pass via FunctionToLoopPassAdaptor) ---
