@@ -23,13 +23,12 @@
 #include <optional>
 
 using namespace llvm;
-using namespace llvm_seahorn;
 using namespace llvm::PatternMatch;
 
-#define DEBUG_TYPE "sea-instcombine"
+#define DEBUG_TYPE "instcombine"
 
-static cl::opt<unsigned> MaxNumPhis(
-    "seaopt-instcombine-max-num-phis", cl::init(512),
+static cl::opt<unsigned>
+MaxNumPhis("instcombine-max-num-phis", cl::init(512),
            cl::desc("Maximum number phis to handle in intptr/ptrint folding"));
 
 STATISTIC(NumPHIsOfInsertValues,
@@ -41,7 +40,7 @@ STATISTIC(NumPHICSEs, "Number of PHI's that got CSE'd");
 /// The PHI arguments will be folded into a single operation with a PHI node
 /// as input. The debug location of the single operation will be the merged
 /// locations of the original PHI node arguments.
-void SeaInstCombinerImpl::PHIArgMergedDebugLoc(Instruction *Inst, PHINode &PN) {
+void InstCombinerImpl::PHIArgMergedDebugLoc(Instruction *Inst, PHINode &PN) {
   auto *FirstInst = cast<Instruction>(PN.getIncomingValue(0));
   Inst->setDebugLoc(FirstInst->getDebugLoc());
   // We do not expect a CallInst here, otherwise, N-way merging of DebugLoc
@@ -104,7 +103,7 @@ void SeaInstCombinerImpl::PHIArgMergedDebugLoc(Instruction *Inst, PHINode &PN) {
 //    ptr_val_inc = ...
 //    ...
 //
-bool SeaInstCombinerImpl::foldIntegerTypedPHI(PHINode &PN) {
+bool InstCombinerImpl::foldIntegerTypedPHI(PHINode &PN) {
   if (!PN.getType()->isIntegerTy())
     return false;
   if (!PN.hasOneUse())
@@ -207,7 +206,7 @@ bool SeaInstCombinerImpl::foldIntegerTypedPHI(PHINode &PN) {
                }))
       continue;
     MatchingPtrPHI = &PtrPHI;
-      break;
+    break;
   }
 
   if (MatchingPtrPHI) {
@@ -305,7 +304,7 @@ bool SeaInstCombinerImpl::foldIntegerTypedPHI(PHINode &PN) {
 
 // Remove RoundTrip IntToPtr/PtrToInt Cast on PHI-Operand and
 // fold Phi-operand to bitcast.
-Instruction *SeaInstCombinerImpl::foldPHIArgIntToPtrToPHI(PHINode &PN) {
+Instruction *InstCombinerImpl::foldPHIArgIntToPtrToPHI(PHINode &PN) {
   // convert ptr2int ( phi[ int2ptr(ptr2int(x))] ) --> ptr2int ( phi [ x ] )
   // Make sure all uses of phi are ptr2int.
   if (!all_of(PN.users(), [](User *U) { return isa<PtrToIntInst>(U); }))
@@ -317,7 +316,7 @@ Instruction *SeaInstCombinerImpl::foldPHIArgIntToPtrToPHI(PHINode &PN) {
   for (unsigned OpNum = 0; OpNum != PN.getNumIncomingValues(); ++OpNum) {
     if (auto *NewOp =
             simplifyIntToPtrRoundTripCast(PN.getIncomingValue(OpNum))) {
-      PN.setIncomingValue(OpNum, NewOp);
+      replaceOperand(PN, OpNum, NewOp);
       OperandWithRoundTripCast = true;
     }
   }
@@ -329,7 +328,7 @@ Instruction *SeaInstCombinerImpl::foldPHIArgIntToPtrToPHI(PHINode &PN) {
 /// If we have something like phi [insertvalue(a,b,0), insertvalue(c,d,0)],
 /// turn this into a phi[a,c] and phi[b,d] and a single insertvalue.
 Instruction *
-SeaInstCombinerImpl::foldPHIArgInsertValueInstructionIntoPHI(PHINode &PN) {
+InstCombinerImpl::foldPHIArgInsertValueInstructionIntoPHI(PHINode &PN) {
   auto *FirstIVI = cast<InsertValueInst>(PN.getIncomingValue(0));
 
   // Scan to see if all operands are `insertvalue`'s with the same indicies,
@@ -369,7 +368,7 @@ SeaInstCombinerImpl::foldPHIArgInsertValueInstructionIntoPHI(PHINode &PN) {
 /// If we have something like phi [extractvalue(a,0), extractvalue(b,0)],
 /// turn this into a phi[a,b] and a single extractvalue.
 Instruction *
-SeaInstCombinerImpl::foldPHIArgExtractValueInstructionIntoPHI(PHINode &PN) {
+InstCombinerImpl::foldPHIArgExtractValueInstructionIntoPHI(PHINode &PN) {
   auto *FirstEVI = cast<ExtractValueInst>(PN.getIncomingValue(0));
 
   // Scan to see if all operands are `extractvalue`'s with the same indicies,
@@ -405,7 +404,7 @@ SeaInstCombinerImpl::foldPHIArgExtractValueInstructionIntoPHI(PHINode &PN) {
 
 /// If we have something like phi [add (a,b), add(a,c)] and if a/b/c and the
 /// adds all have a single user, turn this into a phi and a single binop.
-Instruction *SeaInstCombinerImpl::foldPHIArgBinOpIntoPHI(PHINode &PN) {
+Instruction *InstCombinerImpl::foldPHIArgBinOpIntoPHI(PHINode &PN) {
   Instruction *FirstInst = cast<Instruction>(PN.getIncomingValue(0));
   assert(isa<BinaryOperator>(FirstInst) || isa<CmpInst>(FirstInst));
   unsigned Opc = FirstInst->getOpcode();
@@ -500,7 +499,7 @@ Instruction *SeaInstCombinerImpl::foldPHIArgBinOpIntoPHI(PHINode &PN) {
   return NewBinOp;
 }
 
-Instruction *SeaInstCombinerImpl::foldPHIArgGEPIntoPHI(PHINode &PN) {
+Instruction *InstCombinerImpl::foldPHIArgGEPIntoPHI(PHINode &PN) {
   GetElementPtrInst *FirstInst =cast<GetElementPtrInst>(PN.getIncomingValue(0));
 
   SmallVector<Value*, 16> FixedOperands(FirstInst->op_begin(),
@@ -619,19 +618,7 @@ Instruction *SeaInstCombinerImpl::foldPHIArgGEPIntoPHI(PHINode &PN) {
 /// Finally, it is safe, but not profitable, to sink a load targeting a
 /// non-address-taken alloca.  Doing so will cause us to not promote the alloca
 /// to a register.
-/// llvm-seahorn: If we sink load instructions, we may introduce aliasing. This
-/// means that its not profitable to sink a load whenever the AvoidAliasing flag
-/// is set. However, this method is static, so the AvoidAliasing flag is
-/// forwarded as an argument.
-static bool isSafeAndProfitableToSinkLoad(LoadInst *L, bool AvoidAliasing) {
-  // begin: llvm-seahorn
-  // The compiler will check if it is 'safe and profitable' to sink a load, when
-  // there is an opportunity to merge two or more load instructions. If we merge
-  // these nodes, they can alias.
-  if (AvoidAliasing)
-    return false;
-  // end: llvm-seahorn
-
+static bool isSafeAndProfitableToSinkLoad(LoadInst *L) {
   BasicBlock::iterator BBI = L->getIterator(), E = L->getParent()->end();
 
   for (++BBI; BBI != E; ++BBI)
@@ -675,7 +662,7 @@ static bool isSafeAndProfitableToSinkLoad(LoadInst *L, bool AvoidAliasing) {
   return true;
 }
 
-Instruction *SeaInstCombinerImpl::foldPHIArgLoadIntoPHI(PHINode &PN) {
+Instruction *InstCombinerImpl::foldPHIArgLoadIntoPHI(PHINode &PN) {
   LoadInst *FirstLI = cast<LoadInst>(PN.getIncomingValue(0));
 
   // Can't forward swifterror through a phi.
@@ -696,7 +683,7 @@ Instruction *SeaInstCombinerImpl::foldPHIArgLoadIntoPHI(PHINode &PN) {
   // We can't sink the load if the loaded value could be modified between the
   // load and the PHI.
   if (FirstLI->getParent() != PN.getIncomingBlock(0) ||
-      !isSafeAndProfitableToSinkLoad(FirstLI, AvoidAliasing))
+      !isSafeAndProfitableToSinkLoad(FirstLI))
     return nullptr;
 
   // If the PHI is of volatile loads and the load block has multiple
@@ -724,7 +711,7 @@ Instruction *SeaInstCombinerImpl::foldPHIArgLoadIntoPHI(PHINode &PN) {
 
     // We can't sink the load if the loaded value could be modified between
     // the load and the PHI.
-    if (LI->getParent() != InBB || !isSafeAndProfitableToSinkLoad(LI, AvoidAliasing))
+    if (LI->getParent() != InBB || !isSafeAndProfitableToSinkLoad(LI))
       return nullptr;
 
     LoadAlignment = std::min(LoadAlignment, LI->getAlign());
@@ -758,6 +745,7 @@ Instruction *SeaInstCombinerImpl::foldPHIArgLoadIntoPHI(PHINode &PN) {
     LLVMContext::MD_dereferenceable,
     LLVMContext::MD_dereferenceable_or_null,
     LLVMContext::MD_access_group,
+    LLVMContext::MD_noundef,
   };
 
   for (unsigned ID : KnownIDs)
@@ -798,7 +786,7 @@ Instruction *SeaInstCombinerImpl::foldPHIArgLoadIntoPHI(PHINode &PN) {
 /// TODO: This function could handle other cast types, but then it might
 /// require special-casing a cast from the 'i1' type. See the comment in
 /// FoldPHIArgOpIntoPHI() about pessimizing illegal integer types.
-Instruction *SeaInstCombinerImpl::foldPHIArgZextsIntoPHI(PHINode &Phi) {
+Instruction *InstCombinerImpl::foldPHIArgZextsIntoPHI(PHINode &Phi) {
   // We cannot create a new instruction after the PHI if the terminator is an
   // EHPad because there is no valid insertion point.
   if (Instruction *TI = Phi.getParent()->getTerminator())
@@ -872,7 +860,7 @@ Instruction *SeaInstCombinerImpl::foldPHIArgZextsIntoPHI(PHINode &Phi) {
 /// If all operands to a PHI node are the same "unary" operator and they all are
 /// only used by the PHI, PHI together their inputs, and do the operation once,
 /// to the result of the PHI.
-Instruction *SeaInstCombinerImpl::foldPHIArgOpIntoPHI(PHINode &PN) {
+Instruction *InstCombinerImpl::foldPHIArgOpIntoPHI(PHINode &PN) {
   // We cannot create a new instruction after the PHI if the terminator is an
   // EHPad because there is no valid insertion point.
   if (Instruction *TI = PN.getParent()->getTerminator())
@@ -923,7 +911,7 @@ Instruction *SeaInstCombinerImpl::foldPHIArgOpIntoPHI(PHINode &PN) {
       return nullptr;
     if (CastSrcTy) {
       if (I->getOperand(0)->getType() != CastSrcTy)
-        return nullptr;  // Cast operation must match.
+        return nullptr; // Cast operation must match.
     } else if (I->getOperand(1) != ConstantOp) {
       return nullptr;
     }
@@ -987,7 +975,7 @@ Instruction *SeaInstCombinerImpl::foldPHIArgOpIntoPHI(PHINode &PN) {
 
 /// Return true if this PHI node is only used by a PHI node cycle that is dead.
 static bool isDeadPHICycle(PHINode *PN,
-                         SmallPtrSetImpl<PHINode*> &PotentiallyDeadPHIs) {
+                           SmallPtrSetImpl<PHINode *> &PotentiallyDeadPHIs) {
   if (PN->use_empty()) return true;
   if (!PN->hasOneUse()) return false;
 
@@ -1104,7 +1092,7 @@ namespace llvm {
 /// TODO: The user of the trunc may be an bitcast to float/double/vector or an
 /// inttoptr.  We should produce new PHIs in the right type.
 ///
-Instruction *SeaInstCombinerImpl::SliceUpIllegalIntegerPHI(PHINode &FirstPhi) {
+Instruction *InstCombinerImpl::SliceUpIllegalIntegerPHI(PHINode &FirstPhi) {
   // PHIUsers - Keep track of all of the truncated values extracted from a set
   // of PHIs, along with their offset.  These are the things we want to rewrite.
   SmallVector<PHIUsageRecord, 16> PHIUsers;
@@ -1389,7 +1377,7 @@ static Value *simplifyUsingControlFlow(InstCombiner &Self, PHINode &PN,
 
 // PHINode simplification
 //
-Instruction *SeaInstCombinerImpl::visitPHINode(PHINode &PN) {
+Instruction *InstCombinerImpl::visitPHINode(PHINode &PN) {
   if (Value *V = simplifyInstruction(&PN, SQ.getWithInstruction(&PN)))
     return replaceInstUsesWith(PN, V);
 
@@ -1401,11 +1389,10 @@ Instruction *SeaInstCombinerImpl::visitPHINode(PHINode &PN) {
 
   // If all PHI operands are the same operation, pull them through the PHI,
   // reducing code size.
-  if (isa<Instruction>(PN.getIncomingValue(0)) &&
-      isa<Instruction>(PN.getIncomingValue(1)) &&
-      cast<Instruction>(PN.getIncomingValue(0))->getOpcode() ==
-          cast<Instruction>(PN.getIncomingValue(1))->getOpcode() &&
-      PN.getIncomingValue(0)->hasOneUser())
+  auto *Inst0 = dyn_cast<Instruction>(PN.getIncomingValue(0));
+  auto *Inst1 = dyn_cast<Instruction>(PN.getIncomingValue(1));
+  if (Inst0 && Inst1 && Inst0->getOpcode() == Inst1->getOpcode() &&
+      Inst0->hasOneUser())
     if (Instruction *Result = foldPHIArgOpIntoPHI(PN))
       return Result;
 
