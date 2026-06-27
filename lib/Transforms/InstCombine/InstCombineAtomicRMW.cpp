@@ -14,7 +14,6 @@
 #include "llvm/IR/Instructions.h"
 
 using namespace llvm;
-using namespace llvm_seahorn;
 
 namespace {
 /// Return true if and only if the given instruction does not modify the memory
@@ -101,7 +100,7 @@ bool isSaturating(AtomicRMWInst& RMWI) {
 }
 } // namespace
 
-Instruction *SeaInstCombinerImpl::visitAtomicRMWInst(AtomicRMWInst &RMWI) {
+Instruction *InstCombinerImpl::visitAtomicRMWInst(AtomicRMWInst &RMWI) {
 
   // Volatile RMWs perform a load and a store, we cannot replace this by just a
   // load or just a store. We chose not to canonicalize out of general paranoia

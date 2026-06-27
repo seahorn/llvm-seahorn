@@ -21,20 +21,16 @@
 #include <optional>
 
 using namespace llvm;
-using namespace llvm_seahorn;
 using namespace PatternMatch;
 
-#define DEBUG_TYPE "sea-instcombine"
+#define DEBUG_TYPE "instcombine"
 
 /// Given an expression that CanEvaluateTruncated or CanEvaluateSExtd returns
 /// true for, actually insert the code to evaluate the expression.
-Value *SeaInstCombinerImpl::EvaluateInDifferentType(Value *V, Type *Ty,
+Value *InstCombinerImpl::EvaluateInDifferentType(Value *V, Type *Ty,
                                                  bool isSigned) {
-  if (Constant *C = dyn_cast<Constant>(V)) {
-    C = ConstantExpr::getIntegerCast(C, Ty, isSigned /*Sext or ZExt*/);
-    // If we got a constantexpr back, try to simplify it with DL info.
-    return ConstantFoldConstant(C, DL, &TLI);
-  }
+  if (Constant *C = dyn_cast<Constant>(V))
+    return ConstantFoldIntegerCast(C, Ty, isSigned, DL);
 
   // Otherwise, it must be an instruction.
   Instruction *I = cast<Instruction>(V);
@@ -107,17 +103,27 @@ Value *SeaInstCombinerImpl::EvaluateInDifferentType(Value *V, Type *Ty,
       }
     }
     break;
+  case Instruction::ShuffleVector: {
+    auto *ScalarTy = cast<VectorType>(Ty)->getElementType();
+    auto *VTy = cast<VectorType>(I->getOperand(0)->getType());
+    auto *FixedTy = VectorType::get(ScalarTy, VTy->getElementCount());
+    Value *Op0 = EvaluateInDifferentType(I->getOperand(0), FixedTy, isSigned);
+    Value *Op1 = EvaluateInDifferentType(I->getOperand(1), FixedTy, isSigned);
+    Res = new ShuffleVectorInst(Op0, Op1,
+                                cast<ShuffleVectorInst>(I)->getShuffleMask());
+    break;
+  }
   default:
     // TODO: Can handle more cases here.
     llvm_unreachable("Unreachable!");
   }
 
   Res->takeName(I);
-  return InsertNewInstWith(Res, *I);
+  return InsertNewInstWith(Res, I->getIterator());
 }
 
 Instruction::CastOps
-SeaInstCombinerImpl::isEliminableCastPair(const CastInst *CI1,
+InstCombinerImpl::isEliminableCastPair(const CastInst *CI1,
                                        const CastInst *CI2) {
   Type *SrcTy = CI1->getSrcTy();
   Type *MidTy = CI1->getDestTy();
@@ -145,7 +151,7 @@ SeaInstCombinerImpl::isEliminableCastPair(const CastInst *CI1,
 }
 
 /// Implement the transforms common to all CastInst visitors.
-Instruction *SeaInstCombinerImpl::commonCastTransforms(CastInst &CI) {
+Instruction *InstCombinerImpl::commonCastTransforms(CastInst &CI) {
   Value *Src = CI.getOperand(0);
   Type *Ty = CI.getType();
 
@@ -218,7 +224,8 @@ Instruction *SeaInstCombinerImpl::commonCastTransforms(CastInst &CI) {
 /// free to be evaluated in that type. This is a helper for canEvaluate*.
 static bool canAlwaysEvaluateInType(Value *V, Type *Ty) {
   if (isa<Constant>(V))
-    return true;
+    return match(V, m_ImmConstant());
+
   Value *X;
   if ((match(V, m_ZExtOrSExt(m_Value(X))) || match(V, m_Trunc(m_Value(X)))) &&
       X->getType() == Ty)
@@ -230,7 +237,6 @@ static bool canAlwaysEvaluateInType(Value *V, Type *Ty) {
 /// Filter out values that we can not evaluate in the destination type for free.
 /// This is a helper for canEvaluate*.
 static bool canNotEvaluateInType(Value *V, Type *Ty) {
-  assert(!isa<Constant>(V) && "Constant should already be handled.");
   if (!isa<Instruction>(V))
     return true;
   // We don't extend or shrink something that has multiple uses --  doing so
@@ -252,7 +258,7 @@ static bool canNotEvaluateInType(Value *V, Type *Ty) {
 ///
 /// This function works on both vectors and scalars.
 ///
-static bool canEvaluateTruncated(Value *V, Type *Ty, SeaInstCombinerImpl &IC,
+static bool canEvaluateTruncated(Value *V, Type *Ty, InstCombinerImpl &IC,
                                  Instruction *CxtI) {
   if (canAlwaysEvaluateInType(V, Ty))
     return true;
@@ -367,6 +373,9 @@ static bool canEvaluateTruncated(Value *V, Type *Ty, SeaInstCombinerImpl &IC,
           I->getOpcode() == Instruction::FPToSI);
     return Ty->getScalarSizeInBits() >= MinBitWidth;
   }
+  case Instruction::ShuffleVector:
+    return canEvaluateTruncated(I->getOperand(0), Ty, IC, CxtI) &&
+           canEvaluateTruncated(I->getOperand(1), Ty, IC, CxtI);
   default:
     // TODO: Can handle more cases here.
     break;
@@ -382,7 +391,7 @@ static bool canEvaluateTruncated(Value *V, Type *Ty, SeaInstCombinerImpl &IC,
 ///   --->
 ///   extractelement <4 x i32> %X, 1
 static Instruction *foldVecTruncToExtElt(TruncInst &Trunc,
-                                         SeaInstCombinerImpl &IC) {
+                                         InstCombinerImpl &IC) {
   Value *TruncOp = Trunc.getOperand(0);
   Type *DestType = Trunc.getType();
   if (!TruncOp->hasOneUse() || !isa<IntegerType>(DestType))
@@ -421,7 +430,7 @@ static Instruction *foldVecTruncToExtElt(TruncInst &Trunc,
 
 /// Funnel/Rotate left/right may occur in a wider type than necessary because of
 /// type promotion rules. Try to narrow the inputs and convert to funnel shift.
-Instruction *SeaInstCombinerImpl::narrowFunnelShift(TruncInst &Trunc) {
+Instruction *InstCombinerImpl::narrowFunnelShift(TruncInst &Trunc) {
   assert((isa<VectorType>(Trunc.getSrcTy()) ||
           shouldChangeType(Trunc.getSrcTy(), Trunc.getType())) &&
          "Don't narrow to an illegal scalar type");
@@ -506,11 +515,13 @@ Instruction *SeaInstCombinerImpl::narrowFunnelShift(TruncInst &Trunc) {
   if (!MaskedValueIsZero(ShVal1, HiBitMask, 0, &Trunc))
     return nullptr;
 
-  // We have an unnecessarily wide rotate!
-  // trunc (or (shl ShVal0, ShAmt), (lshr ShVal1, BitWidth - ShAmt))
-  // Narrow the inputs and convert to funnel shift intrinsic:
-  // llvm.fshl.i8(trunc(ShVal), trunc(ShVal), trunc(ShAmt))
-  Value *NarrowShAmt = Builder.CreateTrunc(ShAmt, DestTy);
+  // Adjust the width of ShAmt for narrowed funnel shift operation:
+  // - Zero-extend if ShAmt is narrower than the destination type.
+  // - Truncate if ShAmt is wider, discarding non-significant high-order bits.
+  // This prepares ShAmt for llvm.fshl.i8(trunc(ShVal), trunc(ShVal),
+  // zext/trunc(ShAmt)).
+  Value *NarrowShAmt = Builder.CreateZExtOrTrunc(ShAmt, DestTy);
+
   Value *X, *Y;
   X = Y = Builder.CreateTrunc(ShVal0, DestTy);
   if (ShVal0 != ShVal1)
@@ -522,7 +533,7 @@ Instruction *SeaInstCombinerImpl::narrowFunnelShift(TruncInst &Trunc) {
 
 /// Try to narrow the width of math or bitwise logic instructions by pulling a
 /// truncate ahead of binary operators.
-Instruction *SeaInstCombinerImpl::narrowBinOp(TruncInst &Trunc) {
+Instruction *InstCombinerImpl::narrowBinOp(TruncInst &Trunc) {
   Type *SrcTy = Trunc.getSrcTy();
   Type *DestTy = Trunc.getType();
   unsigned SrcWidth = SrcTy->getScalarSizeInBits();
@@ -583,13 +594,15 @@ Instruction *SeaInstCombinerImpl::narrowBinOp(TruncInst &Trunc) {
                                       APInt(SrcWidth, MaxShiftAmt)))) {
         auto *OldShift = cast<Instruction>(Trunc.getOperand(0));
         bool IsExact = OldShift->isExact();
-        auto *ShAmt = ConstantExpr::getIntegerCast(C, A->getType(), true);
-        ShAmt = Constant::mergeUndefsWith(ShAmt, C);
-        Value *Shift =
-            OldShift->getOpcode() == Instruction::AShr
-                ? Builder.CreateAShr(A, ShAmt, OldShift->getName(), IsExact)
-                : Builder.CreateLShr(A, ShAmt, OldShift->getName(), IsExact);
-        return CastInst::CreateTruncOrBitCast(Shift, DestTy);
+        if (Constant *ShAmt = ConstantFoldIntegerCast(C, A->getType(),
+                                                      /*IsSigned*/ true, DL)) {
+          ShAmt = Constant::mergeUndefsWith(ShAmt, C);
+          Value *Shift =
+              OldShift->getOpcode() == Instruction::AShr
+                  ? Builder.CreateAShr(A, ShAmt, OldShift->getName(), IsExact)
+                  : Builder.CreateLShr(A, ShAmt, OldShift->getName(), IsExact);
+          return CastInst::CreateTruncOrBitCast(Shift, DestTy);
+        }
       }
     }
     break;
@@ -653,7 +666,7 @@ static Instruction *shrinkInsertElt(CastInst &Trunc,
   return nullptr;
 }
 
-Instruction *SeaInstCombinerImpl::visitTrunc(TruncInst &Trunc) {
+Instruction *InstCombinerImpl::visitTrunc(TruncInst &Trunc) {
   if (Instruction *Result = commonCastTransforms(Trunc))
     return Result;
 
@@ -714,7 +727,6 @@ Instruction *SeaInstCombinerImpl::visitTrunc(TruncInst &Trunc) {
     return &Trunc;
 
   if (DestWidth == 1) {
-    if (AvoidBv) return nullptr;
     Value *Zero = Constant::getNullValue(SrcTy);
     if (DestTy->isIntegerTy()) {
       // Canonicalize trunc x to i1 -> icmp ne (and x, 1), 0 (scalar only).
@@ -875,7 +887,7 @@ Instruction *SeaInstCombinerImpl::visitTrunc(TruncInst &Trunc) {
   return nullptr;
 }
 
-Instruction *SeaInstCombinerImpl::transformZExtICmp(ICmpInst *Cmp,
+Instruction *InstCombinerImpl::transformZExtICmp(ICmpInst *Cmp,
                                                  ZExtInst &Zext) {
   // If we are just checking for a icmp eq of a single bit and zext'ing it
   // to an integer, then shift the bit to the appropriate place and then
@@ -906,19 +918,18 @@ Instruction *SeaInstCombinerImpl::transformZExtICmp(ICmpInst *Cmp,
     // zext (X == 0) to i32 --> (X>>1)^1 iff X has only the 2nd bit set.
     // zext (X != 0) to i32 --> X        iff X has only the low bit set.
     // zext (X != 0) to i32 --> X>>1     iff X has only the 2nd bit set.
-    if (Op1CV->isZero() && Cmp->isEquality() &&
-        (Cmp->getOperand(0)->getType() == Zext.getType() ||
-         Cmp->getPredicate() == ICmpInst::ICMP_NE)) {
-      // If Op1C some other power of two, convert:
-      KnownBits Known = computeKnownBits(Cmp->getOperand(0), 0, &Zext);
 
+    if (Op1CV->isZero() && Cmp->isEquality()) {
       // Exactly 1 possible 1? But not the high-bit because that is
       // canonicalized to this form.
+      KnownBits Known = computeKnownBits(Cmp->getOperand(0), 0, &Zext);
       APInt KnownZeroMask(~Known.Zero);
-      if (KnownZeroMask.isPowerOf2() &&
-          (Zext.getType()->getScalarSizeInBits() !=
-           KnownZeroMask.logBase2() + 1)) {
-        uint32_t ShAmt = KnownZeroMask.logBase2();
+      uint32_t ShAmt = KnownZeroMask.logBase2();
+      bool IsExpectShAmt = KnownZeroMask.isPowerOf2() &&
+                           (Zext.getType()->getScalarSizeInBits() != ShAmt + 1);
+      if (IsExpectShAmt &&
+          (Cmp->getOperand(0)->getType() == Zext.getType() ||
+           Cmp->getPredicate() == ICmpInst::ICMP_NE || ShAmt == 0)) {
         Value *In = Cmp->getOperand(0);
         if (ShAmt) {
           // Perform a logical shr by shiftamt.
@@ -978,7 +989,7 @@ Instruction *SeaInstCombinerImpl::transformZExtICmp(ICmpInst *Cmp,
 ///
 /// This function works on both vectors and scalars.
 static bool canEvaluateZExtd(Value *V, Type *Ty, unsigned &BitsToClear,
-                             SeaInstCombinerImpl &IC, Instruction *CxtI) {
+                             InstCombinerImpl &IC, Instruction *CxtI) {
   BitsToClear = 0;
   if (canAlwaysEvaluateInType(V, Ty))
     return true;
@@ -1090,7 +1101,7 @@ static bool canEvaluateZExtd(Value *V, Type *Ty, unsigned &BitsToClear,
   }
 }
 
-Instruction *SeaInstCombinerImpl::visitZExt(ZExtInst &Zext) {
+Instruction *InstCombinerImpl::visitZExt(ZExtInst &Zext) {
   // If this zero extend is only used by a truncate, let the truncate be
   // eliminated before we try to optimize this zext.
   if (Zext.hasOneUse() && isa<TruncInst>(Zext.user_back()) &&
@@ -1110,9 +1121,6 @@ Instruction *SeaInstCombinerImpl::visitZExt(ZExtInst &Zext) {
       canEvaluateZExtd(Src, DestTy, BitsToClear, *this, &Zext)) {
     assert(BitsToClear <= SrcTy->getScalarSizeInBits() &&
            "Can't clear more bits than in SrcTy");
-
-    if (AvoidBv)
-      return nullptr;
 
     // Okay, we can transform this!  Insert the new expression now.
     LLVM_DEBUG(
@@ -1149,9 +1157,6 @@ Instruction *SeaInstCombinerImpl::visitZExt(ZExtInst &Zext) {
   // 'and' which will be much cheaper than the pair of casts.
   if (auto *CSrc = dyn_cast<TruncInst>(Src)) {   // A->B->C cast
     // TODO: Subsume this into EvaluateInDifferentType.
-
-    if (AvoidBv)
-      return nullptr;
 
     // Get the sizes of the types involved.  We know that the intermediate type
     // will be smaller than A or C, but don't know the relation between A and C.
@@ -1192,14 +1197,14 @@ Instruction *SeaInstCombinerImpl::visitZExt(ZExtInst &Zext) {
   Value *X;
   if (match(Src, m_OneUse(m_And(m_Trunc(m_Value(X)), m_Constant(C)))) &&
       X->getType() == DestTy)
-    return BinaryOperator::CreateAnd(X, ConstantExpr::getZExt(C, DestTy));
+    return BinaryOperator::CreateAnd(X, Builder.CreateZExt(C, DestTy));
 
   // zext((trunc(X) & C) ^ C) -> ((X & zext(C)) ^ zext(C)).
   Value *And;
   if (match(Src, m_OneUse(m_Xor(m_Value(And), m_Constant(C)))) &&
       match(And, m_OneUse(m_And(m_Trunc(m_Value(X)), m_Specific(C)))) &&
       X->getType() == DestTy) {
-    Constant *ZC = ConstantExpr::getZExt(C, DestTy);
+    Value *ZC = Builder.CreateZExt(C, DestTy);
     return BinaryOperator::CreateXor(Builder.CreateAnd(X, ZC), ZC);
   }
 
@@ -1210,7 +1215,7 @@ Instruction *SeaInstCombinerImpl::visitZExt(ZExtInst &Zext) {
   // zext (and (trunc X), C) --> and X, (zext C)
   if (match(Src, m_And(m_Trunc(m_Value(X)), m_Constant(C))) &&
       X->getType() == DestTy) {
-    Constant *ZextC = ConstantExpr::getZExt(C, DestTy);
+    Value *ZextC = Builder.CreateZExt(C, DestTy);
     return BinaryOperator::CreateAnd(X, ZextC);
   }
 
@@ -1229,11 +1234,27 @@ Instruction *SeaInstCombinerImpl::visitZExt(ZExtInst &Zext) {
     }
   }
 
+  if (!Zext.hasNonNeg()) {
+    // If this zero extend is only used by a shift, add nneg flag.
+    if (Zext.hasOneUse() &&
+        SrcTy->getScalarSizeInBits() >
+            Log2_64_Ceil(DestTy->getScalarSizeInBits()) &&
+        match(Zext.user_back(), m_Shift(m_Value(), m_Specific(&Zext)))) {
+      Zext.setNonNeg();
+      return &Zext;
+    }
+
+    if (isKnownNonNegative(Src, SQ.getWithInstruction(&Zext))) {
+      Zext.setNonNeg();
+      return &Zext;
+    }
+  }
+
   return nullptr;
 }
 
 /// Transform (sext icmp) to bitwise / integer operations to eliminate the icmp.
-Instruction *SeaInstCombinerImpl::transformSExtICmp(ICmpInst *Cmp,
+Instruction *InstCombinerImpl::transformSExtICmp(ICmpInst *Cmp,
                                                  SExtInst &Sext) {
   Value *Op0 = Cmp->getOperand(0), *Op1 = Cmp->getOperand(1);
   ICmpInst::Predicate Pred = Cmp->getPredicate();
@@ -1366,7 +1387,7 @@ static bool canEvaluateSExtd(Value *V, Type *Ty) {
   return false;
 }
 
-Instruction *SeaInstCombinerImpl::visitSExt(SExtInst &Sext) {
+Instruction *InstCombinerImpl::visitSExt(SExtInst &Sext) {
   // If this sign extend is only used by a truncate, let the truncate be
   // eliminated before we try to optimize this sext.
   if (Sext.hasOneUse() && isa<TruncInst>(Sext.user_back()))
@@ -1381,8 +1402,11 @@ Instruction *SeaInstCombinerImpl::visitSExt(SExtInst &Sext) {
   unsigned DestBitSize = DestTy->getScalarSizeInBits();
 
   // If the value being extended is zero or positive, use a zext instead.
-  if (isKnownNonNegative(Src, DL, 0, &AC, &Sext, &DT))
-    return CastInst::Create(Instruction::ZExt, Src, DestTy);
+  if (isKnownNonNegative(Src, SQ.getWithInstruction(&Sext))) {
+    auto CI = CastInst::Create(Instruction::ZExt, Src, DestTy);
+    CI->setNonNeg(true);
+    return CI;
+  }
 
   // Try to extend the entire expression tree to the wide destination type.
   if (shouldChangeType(SrcTy, DestTy) && canEvaluateSExtd(Src, DestTy)) {
@@ -1453,9 +1477,11 @@ Instruction *SeaInstCombinerImpl::visitSExt(SExtInst &Sext) {
   // TODO: Eventually this could be subsumed by EvaluateInDifferentType.
   Constant *BA = nullptr, *CA = nullptr;
   if (match(Src, m_AShr(m_Shl(m_Trunc(m_Value(A)), m_Constant(BA)),
-                        m_Constant(CA))) &&
+                        m_ImmConstant(CA))) &&
       BA->isElementWiseEqual(CA) && A->getType() == DestTy) {
-    Constant *WideCurrShAmt = ConstantExpr::getSExt(CA, DestTy);
+    Constant *WideCurrShAmt =
+        ConstantFoldCastOperand(Instruction::SExt, CA, DestTy, DL);
+    assert(WideCurrShAmt && "Constant folding of ImmConstant cannot fail");
     Constant *NumLowbitsLeft = ConstantExpr::getSub(
         ConstantInt::get(DestTy, SrcTy->getScalarSizeInBits()), WideCurrShAmt);
     Constant *NewShAmt = ConstantExpr::getSub(
@@ -1593,7 +1619,7 @@ static Type *getMinimumFPType(Value *V) {
 
 /// Return true if the cast from integer to FP can be proven to be exact for all
 /// possible inputs (the conversion does not lose any precision).
-static bool isKnownExactCastIntToFP(CastInst &I, SeaInstCombinerImpl &IC) {
+static bool isKnownExactCastIntToFP(CastInst &I, InstCombinerImpl &IC) {
   CastInst::CastOps Opcode = I.getOpcode();
   assert((Opcode == CastInst::SIToFP || Opcode == CastInst::UIToFP) &&
          "Unexpected cast");
@@ -1640,7 +1666,7 @@ static bool isKnownExactCastIntToFP(CastInst &I, SeaInstCombinerImpl &IC) {
   return false;
 }
 
-Instruction *SeaInstCombinerImpl::visitFPTrunc(FPTruncInst &FPT) {
+Instruction *InstCombinerImpl::visitFPTrunc(FPTruncInst &FPT) {
   if (Instruction *I = commonCastTransforms(FPT))
     return I;
 
@@ -1824,7 +1850,7 @@ Instruction *SeaInstCombinerImpl::visitFPTrunc(FPTruncInst &FPT) {
   return nullptr;
 }
 
-Instruction *SeaInstCombinerImpl::visitFPExt(CastInst &FPExt) {
+Instruction *InstCombinerImpl::visitFPExt(CastInst &FPExt) {
   // If the source operand is a cast from integer to FP and known exact, then
   // cast the integer operand directly to the destination type.
   Type *Ty = FPExt.getType();
@@ -1842,7 +1868,7 @@ Instruction *SeaInstCombinerImpl::visitFPExt(CastInst &FPExt) {
 /// This is safe if the intermediate type has enough bits in its mantissa to
 /// accurately represent all values of X.  For example, this won't work with
 /// i64 -> float -> i64.
-Instruction *SeaInstCombinerImpl::foldItoFPtoI(CastInst &FI) {
+Instruction *InstCombinerImpl::foldItoFPtoI(CastInst &FI) {
   if (!isa<UIToFPInst>(FI.getOperand(0)) && !isa<SIToFPInst>(FI.getOperand(0)))
     return nullptr;
 
@@ -1882,29 +1908,29 @@ Instruction *SeaInstCombinerImpl::foldItoFPtoI(CastInst &FI) {
   return replaceInstUsesWith(FI, X);
 }
 
-Instruction *SeaInstCombinerImpl::visitFPToUI(FPToUIInst &FI) {
+Instruction *InstCombinerImpl::visitFPToUI(FPToUIInst &FI) {
   if (Instruction *I = foldItoFPtoI(FI))
     return I;
 
   return commonCastTransforms(FI);
 }
 
-Instruction *SeaInstCombinerImpl::visitFPToSI(FPToSIInst &FI) {
+Instruction *InstCombinerImpl::visitFPToSI(FPToSIInst &FI) {
   if (Instruction *I = foldItoFPtoI(FI))
     return I;
 
   return commonCastTransforms(FI);
 }
 
-Instruction *SeaInstCombinerImpl::visitUIToFP(CastInst &CI) {
+Instruction *InstCombinerImpl::visitUIToFP(CastInst &CI) {
   return commonCastTransforms(CI);
 }
 
-Instruction *SeaInstCombinerImpl::visitSIToFP(CastInst &CI) {
+Instruction *InstCombinerImpl::visitSIToFP(CastInst &CI) {
   return commonCastTransforms(CI);
 }
 
-Instruction *SeaInstCombinerImpl::visitIntToPtr(IntToPtrInst &CI) {
+Instruction *InstCombinerImpl::visitIntToPtr(IntToPtrInst &CI) {
   // If the source integer type is not the intptr_t type for this target, do a
   // trunc or zext to the intptr_t type, then inttoptr of it.  This allows the
   // cast to be exposed to other transforms.
@@ -1923,30 +1949,7 @@ Instruction *SeaInstCombinerImpl::visitIntToPtr(IntToPtrInst &CI) {
   return nullptr;
 }
 
-/// Implement the transforms for cast of pointer (bitcast/ptrtoint)
-Instruction *SeaInstCombinerImpl::commonPointerCastTransforms(CastInst &CI) {
-  Value *Src = CI.getOperand(0);
-
-  if (GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(Src)) {
-    // If casting the result of a getelementptr instruction with no offset, turn
-    // this into a cast of the original pointer!
-    if (GEP->hasAllZeroIndices() &&
-        // If CI is an addrspacecast and GEP changes the poiner type, merging
-        // GEP into CI would undo canonicalizing addrspacecast with different
-        // pointer types, causing infinite loops.
-        (!isa<AddrSpaceCastInst>(CI) ||
-         GEP->getType() == GEP->getPointerOperandType())) {
-      // Changing the cast operand is usually not a good idea but it is safe
-      // here because the pointer operand is being replaced with another
-      // pointer operand so the opcode doesn't need to change.
-      return replaceOperand(CI, 0, GEP->getOperand(0));
-    }
-  }
-
-  return commonCastTransforms(CI);
-}
-
-Instruction *SeaInstCombinerImpl::visitPtrToInt(PtrToIntInst &CI) {
+Instruction *InstCombinerImpl::visitPtrToInt(PtrToIntInst &CI) {
   // If the destination integer type is not the intptr_t type for this target,
   // do a ptrtoint to intptr_t then do a trunc or zext.  This allows the cast
   // to be exposed to other transforms.
@@ -1962,6 +1965,15 @@ Instruction *SeaInstCombinerImpl::visitPtrToInt(PtrToIntInst &CI) {
     Value *P = Builder.CreatePtrToInt(SrcOp, IntPtrTy);
     return CastInst::CreateIntegerCast(P, Ty, /*isSigned=*/false);
   }
+
+  // (ptrtoint (ptrmask P, M))
+  //    -> (and (ptrtoint P), M)
+  // This is generally beneficial as `and` is better supported than `ptrmask`.
+  Value *Ptr, *Mask;
+  if (match(SrcOp, m_OneUse(m_Intrinsic<Intrinsic::ptrmask>(m_Value(Ptr),
+                                                            m_Value(Mask)))) &&
+      Mask->getType() == Ty)
+    return BinaryOperator::CreateAnd(Builder.CreatePtrToInt(Ptr, Ty), Mask);
 
   if (auto *GEP = dyn_cast<GetElementPtrInst>(SrcOp)) {
     // Fold ptrtoint(gep null, x) to multiply + constant if the GEP has one use.
@@ -1987,7 +1999,7 @@ Instruction *SeaInstCombinerImpl::visitPtrToInt(PtrToIntInst &CI) {
     return InsertElementInst::Create(Vec, NewCast, Index);
   }
 
-  return commonPointerCastTransforms(CI);
+  return commonCastTransforms(CI);
 }
 
 /// This input value (which is known to have vector type) is being zero extended
@@ -2008,7 +2020,7 @@ Instruction *SeaInstCombinerImpl::visitPtrToInt(PtrToIntInst &CI) {
 /// The source and destination vector types may have different element types.
 static Instruction *
 optimizeVectorResizeWithIntegerBitCasts(Value *InVal, VectorType *DestTy,
-                                        SeaInstCombinerImpl &IC) {
+                                        InstCombinerImpl &IC) {
   // We can only do this optimization if the output is a multiple of the input
   // element size, or the input is a multiple of the output element size.
   // Convert the input type to have the same element type as the output.
@@ -2144,11 +2156,14 @@ static bool collectInsertionElements(Value *V, unsigned Shift,
     Type *ElementIntTy = IntegerType::get(C->getContext(), ElementSize);
 
     for (unsigned i = 0; i != NumElts; ++i) {
-      unsigned ShiftI = Shift+i*ElementSize;
-      Constant *Piece = ConstantExpr::getLShr(C, ConstantInt::get(C->getType(),
-                                                                  ShiftI));
+      unsigned ShiftI = i * ElementSize;
+      Constant *Piece = ConstantFoldBinaryInstruction(
+          Instruction::LShr, C, ConstantInt::get(C->getType(), ShiftI));
+      if (!Piece)
+        return false;
+
       Piece = ConstantExpr::getTrunc(Piece, ElementIntTy);
-      if (!collectInsertionElements(Piece, ShiftI, Elements, VecEltTy,
+      if (!collectInsertionElements(Piece, ShiftI + Shift, Elements, VecEltTy,
                                     isBigEndian))
         return false;
     }
@@ -2207,7 +2222,7 @@ static bool collectInsertionElements(Value *V, unsigned Shift,
 ///
 /// Into two insertelements that do "buildvector{%inc, %inc5}".
 static Value *optimizeIntegerToVectorInsertions(BitCastInst &CI,
-                                                SeaInstCombinerImpl &IC) {
+                                                InstCombinerImpl &IC) {
   auto *DestVecTy = cast<FixedVectorType>(CI.getType());
   Value *IntInput = CI.getOperand(0);
 
@@ -2236,7 +2251,7 @@ static Value *optimizeIntegerToVectorInsertions(BitCastInst &CI,
 /// vectors better than bitcasts of scalars because vector registers are
 /// usually not type-specific like scalar integer or scalar floating-point.
 static Instruction *canonicalizeBitCastExtElt(BitCastInst &BitCast,
-                                              SeaInstCombinerImpl &IC) {
+                                              InstCombinerImpl &IC) {
   Value *VecOp, *Index;
   if (!match(BitCast.getOperand(0),
              m_OneUse(m_ExtractElt(m_Value(VecOp), m_Value(Index)))))
@@ -2393,7 +2408,7 @@ static bool hasStoreUsersOnly(CastInst &CI) {
 ///
 /// All the related PHI nodes can be replaced by new PHI nodes with type A.
 /// The uses of \p CI can be changed to the new PHI node corresponding to \p PN.
-Instruction *SeaInstCombinerImpl::optimizeBitCastFromPhi(CastInst &CI,
+Instruction *InstCombinerImpl::optimizeBitCastFromPhi(CastInst &CI,
                                                       PHINode *PN) {
   // BitCast used by Store can be handled in InstCombineLoadStoreAlloca.cpp.
   if (hasStoreUsersOnly(CI))
@@ -2561,7 +2576,7 @@ Instruction *SeaInstCombinerImpl::optimizeBitCastFromPhi(CastInst &CI,
   return RetVal;
 }
 
-Instruction *SeaInstCombinerImpl::visitBitCast(BitCastInst &CI) {
+Instruction *InstCombinerImpl::visitBitCast(BitCastInst &CI) {
   // If the operands are integer typed then apply the integer transforms,
   // otherwise just apply the common ones.
   Value *Src = CI.getOperand(0);
@@ -2709,11 +2724,9 @@ Instruction *SeaInstCombinerImpl::visitBitCast(BitCastInst &CI) {
   if (Instruction *I = foldBitCastSelect(CI, Builder))
     return I;
 
-  if (SrcTy->isPointerTy())
-    return commonPointerCastTransforms(CI);
   return commonCastTransforms(CI);
 }
 
-Instruction *SeaInstCombinerImpl::visitAddrSpaceCast(AddrSpaceCastInst &CI) {
-  return commonPointerCastTransforms(CI);
+Instruction *InstCombinerImpl::visitAddrSpaceCast(AddrSpaceCastInst &CI) {
+  return commonCastTransforms(CI);
 }
