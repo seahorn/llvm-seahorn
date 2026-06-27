@@ -13,19 +13,19 @@ The Avoid* knobs default **on** (`AvoidBv`, `AvoidUnsignedICmp`,
 `AvoidIntToPtr`, `AvoidAliasing`; `AvoidDisequalities` off) but are
 CLI-controllable via `-seaopt-instcombine-avoid-*` flags -- e.g.
 `-seaopt-instcombine-avoid-bv=0` recovers stock LLVM behavior. (That `=0`
-escape hatch is how `test/sea_instcombine` runs the LLVM 17 corpus to check
-stock equivalence.) Behavior below validated on LLVM 17:
+escape hatch is how `test/sea_instcombine` runs the LLVM 18 corpus to check
+stock equivalence.) Behavior below validated on LLVM 18:
 
 | File | Flag | stock instcombine | `seaopt -passes=sea-instcombine` keeps |
 |------|------|-------------------|----------------|
 | `avoidbv_urem_pow2.ll`      | AvoidBv            | `and i32 %x, 7`              | `urem i32 %x, 8` |
-| `avoidbv_add_disjoint.ll`   | AvoidBv            | `or i32 %a, %b`             | `add nuw nsw i32 %a, %b` |
+| `avoidbv_add_disjoint.ll`   | AvoidBv            | `or disjoint i32 %a, %b`    | `add nuw nsw i32 %a, %b` |
 | `avoidunsignedicmp_slt.ll`  | AvoidUnsignedICmp | `icmp ult`                  | `icmp slt` |
 | `avoidaliasing_phi_load.ll` | AvoidAliasing     | `phi ptr` + single `load`   | two `load`s + `phi i32` |
 
 `avoidaliasing_phi_load.ll` doubles as the opaque-pointer canary: the suppressed
 transform (`FoldPHIArgLoadIntoPHI`) builds a pointer-typed phi + a new load, so
-it exercises the pointer-construction paths. On LLVM 17 (opaque pointers) the
+it exercises the pointer-construction paths. On LLVM 18 (opaque pointers) the
 merged stock form is `phi ptr`; the test asserts the SeaHorn output keeps two
 `load`s and an `i32` phi, and the `STOCK:` line requires the `phi ptr`.
 
@@ -59,7 +59,7 @@ design:
 
 ## Pipeline test
 
-`pipeline_o2.ll` runs SeaHorn's `-O` pipeline. On LLVM 17 `seaopt -O#` runs under
+`pipeline_o2.ll` runs SeaHorn's `-O` pipeline. On LLVM 18 `seaopt -O#` runs under
 the new PM via `buildSeaPipeline` (NewPMDriver.cpp): SeaHorn constructs its own
 curated pipeline with the new pass-creation API (`addPass(SeaInstCombinePass())`),
 using `sea-instcombine` in place of stock `instcombine`. This is the new-PM
@@ -113,8 +113,8 @@ The corpus runs under `llvm-lit` (this is what CI uses). Tool paths come from
 the environment, so the same tests run against any build:
 
 ```sh
-# LLVM 17 (dev17 build under test)
-SEAOPT=./build/bin/seaopt OPT=opt-17 FILECHECK=FileCheck lit -v test/sea_transforms
+# LLVM 18 (dev18 build under test)
+SEAOPT=./build/bin/seaopt OPT=opt-18 FILECHECK=FileCheck lit -v test/sea_transforms
 ```
 
 Each test (see its `RUN:` lines) does three things:
