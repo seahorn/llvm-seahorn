@@ -13,8 +13,8 @@ The Avoid* knobs default **on** (`AvoidBv`, `AvoidUnsignedICmp`,
 `AvoidIntToPtr`, `AvoidAliasing`; `AvoidDisequalities` off) but are
 CLI-controllable via `-seaopt-instcombine-avoid-*` flags -- e.g.
 `-seaopt-instcombine-avoid-bv=0` recovers stock LLVM behavior. (That `=0`
-escape hatch is how `test/sea_instcombine` reuses the LLVM 16 corpus to check
-stock equivalence.) Behavior below validated on LLVM 16:
+escape hatch is how `test/sea_instcombine` runs the LLVM 17 corpus to check
+stock equivalence.) Behavior below validated on LLVM 17:
 
 | File | Flag | stock instcombine | `seaopt -passes=sea-instcombine` keeps |
 |------|------|-------------------|----------------|
@@ -25,7 +25,7 @@ stock equivalence.) Behavior below validated on LLVM 16:
 
 `avoidaliasing_phi_load.ll` doubles as the opaque-pointer canary: the suppressed
 transform (`FoldPHIArgLoadIntoPHI`) builds a pointer-typed phi + a new load, so
-it exercises the pointer-construction paths. On LLVM 16 (opaque pointers) the
+it exercises the pointer-construction paths. On LLVM 17 (opaque pointers) the
 merged stock form is `phi ptr`; the test asserts the SeaHorn output keeps two
 `load`s and an `i32` phi, and the `STOCK:` line requires the `phi ptr`.
 
@@ -59,7 +59,7 @@ design:
 
 ## Pipeline test
 
-`pipeline_o2.ll` runs SeaHorn's `-O` pipeline. On LLVM 16 `seaopt -O#` runs under
+`pipeline_o2.ll` runs SeaHorn's `-O` pipeline. On LLVM 17 `seaopt -O#` runs under
 the new PM via `buildSeaPipeline` (NewPMDriver.cpp): SeaHorn constructs its own
 curated pipeline with the new pass-creation API (`addPass(SeaInstCombinePass())`),
 using `sea-instcombine` in place of stock `instcombine`. This is the new-PM
@@ -113,8 +113,8 @@ The corpus runs under `llvm-lit` (this is what CI uses). Tool paths come from
 the environment, so the same tests run against any build:
 
 ```sh
-# LLVM 16 (dev16 build under test)
-SEAOPT=./build/bin/seaopt OPT=opt-16 FILECHECK=FileCheck lit -v test/sea_transforms
+# LLVM 17 (dev17 build under test)
+SEAOPT=./build/bin/seaopt OPT=opt-17 FILECHECK=FileCheck lit -v test/sea_transforms
 ```
 
 Each test (see its `RUN:` lines) does three things:
