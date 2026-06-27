@@ -34,16 +34,17 @@
 #include "llvm/Transforms/Utils/BuildLibCalls.h"
 #include <cassert>
 
-#define DEBUG_TYPE "instcombine"
+#define DEBUG_TYPE "sea-instcombine"
 #include "llvm/Transforms/Utils/InstructionWorklist.h"
 
 using namespace llvm;
+using namespace llvm_seahorn;
 using namespace PatternMatch;
 
 /// The specific integer value is used in a context where it is known to be
 /// non-zero.  If this allows us to simplify the computation, do so and return
 /// the new operand, otherwise return null.
-static Value *simplifyValueKnownNonZero(Value *V, InstCombinerImpl &IC,
+static Value *simplifyValueKnownNonZero(Value *V, SeaInstCombinerImpl &IC,
                                         Instruction &CxtI) {
   // If V has multiple uses, then we would have to do more analysis to determine
   // if this is safe.  For example, the use could be in dynamically unreached
@@ -188,7 +189,7 @@ static Value *foldMulShl1(BinaryOperator &Mul, bool CommuteOperands,
 static Value *takeLog2(IRBuilderBase &Builder, Value *Op, unsigned Depth,
                        bool AssumeNonZero, bool DoFold);
 
-Instruction *InstCombinerImpl::visitMul(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::visitMul(BinaryOperator &I) {
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
   if (Value *V =
           simplifyMulInst(Op0, Op1, I.hasNoSignedWrap(), I.hasNoUnsignedWrap(),
@@ -237,7 +238,7 @@ Instruction *InstCombinerImpl::visitMul(BinaryOperator &I) {
       return BO;
     }
 
-    if (match(&I, m_Mul(m_Value(NewOp), m_Constant(C1)))) {
+    if (!AvoidBv && match(&I, m_Mul(m_Value(NewOp), m_Constant(C1)))) {
       // Replace X*(2^C) with X << C, where C is either a scalar or a vector.
       if (Constant *NewCst = ConstantExpr::getExactLogBase2(C1)) {
         BinaryOperator *Shl = BinaryOperator::CreateShl(NewOp, NewCst);
@@ -522,7 +523,7 @@ Instruction *InstCombinerImpl::visitMul(BinaryOperator &I) {
   return Changed ? &I : nullptr;
 }
 
-Instruction *InstCombinerImpl::foldFPSignBitOps(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::foldFPSignBitOps(BinaryOperator &I) {
   BinaryOperator::BinaryOps Opcode = I.getOpcode();
   assert((Opcode == Instruction::FMul || Opcode == Instruction::FDiv) &&
          "Expected fmul or fdiv");
@@ -555,7 +556,7 @@ Instruction *InstCombinerImpl::foldFPSignBitOps(BinaryOperator &I) {
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::visitFMul(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::visitFMul(BinaryOperator &I) {
   if (Value *V = simplifyFMulInst(I.getOperand(0), I.getOperand(1),
                                   I.getFastMathFlags(),
                                   SQ.getWithInstruction(&I)))
@@ -822,7 +823,7 @@ Instruction *InstCombinerImpl::visitFMul(BinaryOperator &I) {
 /// Fold a divide or remainder with a select instruction divisor when one of the
 /// select operands is zero. In that case, we can use the other select operand
 /// because div/rem by zero is undefined.
-bool InstCombinerImpl::simplifyDivRemOfSelectWithZeroOp(BinaryOperator &I) {
+bool SeaInstCombinerImpl::simplifyDivRemOfSelectWithZeroOp(BinaryOperator &I) {
   SelectInst *SI = dyn_cast<SelectInst>(I.getOperand(1));
   if (!SI)
     return false;
@@ -986,7 +987,7 @@ static Instruction *foldIDivShl(BinaryOperator &I,
 /// instructions (udiv and sdiv). It is called by the visitors to those integer
 /// division instructions.
 /// Common integer divide transforms
-Instruction *InstCombinerImpl::commonIDivTransforms(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::commonIDivTransforms(BinaryOperator &I) {
   if (Instruction *Phi = foldBinopWithPhiOperands(I))
     return Phi;
 
@@ -1304,7 +1305,7 @@ static Instruction *narrowUDivURem(BinaryOperator &I,
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::visitUDiv(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::visitUDiv(BinaryOperator &I) {
   if (Value *V = simplifyUDivInst(I.getOperand(0), I.getOperand(1), I.isExact(),
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
@@ -1386,7 +1387,7 @@ Instruction *InstCombinerImpl::visitUDiv(BinaryOperator &I) {
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::visitSDiv(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::visitSDiv(BinaryOperator &I) {
   if (Value *V = simplifySDivInst(I.getOperand(0), I.getOperand(1), I.isExact(),
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
@@ -1520,7 +1521,7 @@ Instruction *InstCombinerImpl::visitSDiv(BinaryOperator &I) {
 }
 
 /// Remove negation and try to convert division into multiplication.
-Instruction *InstCombinerImpl::foldFDivConstantDivisor(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::foldFDivConstantDivisor(BinaryOperator &I) {
   Constant *C;
   if (!match(I.getOperand(1), m_Constant(C)))
     return nullptr;
@@ -1642,7 +1643,7 @@ static Instruction *foldFDivPowDivisor(BinaryOperator &I,
   return BinaryOperator::CreateFMulFMF(Op0, Pow, &I);
 }
 
-Instruction *InstCombinerImpl::visitFDiv(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::visitFDiv(BinaryOperator &I) {
   Module *M = I.getModule();
 
   if (Value *V = simplifyFDivInst(I.getOperand(0), I.getOperand(1),
@@ -1769,7 +1770,7 @@ Instruction *InstCombinerImpl::visitFDiv(BinaryOperator &I) {
 // NB: The shift cases are really just extensions of the mul case. We treat
 // shift as Val * (1 << Amt).
 static Instruction *simplifyIRemMulShl(BinaryOperator &I,
-                                       InstCombinerImpl &IC) {
+                                       SeaInstCombinerImpl &IC) {
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1), *X = nullptr;
   APInt Y, Z;
   bool ShiftByX = false;
@@ -1871,7 +1872,7 @@ static Instruction *simplifyIRemMulShl(BinaryOperator &I,
 /// instructions (urem and srem). It is called by the visitors to those integer
 /// remainder instructions.
 /// Common integer remainder transforms
-Instruction *InstCombinerImpl::commonIRemTransforms(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::commonIRemTransforms(BinaryOperator &I) {
   if (Instruction *Phi = foldBinopWithPhiOperands(I))
     return Phi;
 
@@ -1925,7 +1926,7 @@ Instruction *InstCombinerImpl::commonIRemTransforms(BinaryOperator &I) {
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::visitURem(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::visitURem(BinaryOperator &I) {
   if (Value *V = simplifyURemInst(I.getOperand(0), I.getOperand(1),
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
@@ -1942,7 +1943,7 @@ Instruction *InstCombinerImpl::visitURem(BinaryOperator &I) {
   // X urem Y -> X and Y-1, where Y is a power of 2,
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
   Type *Ty = I.getType();
-  if (isKnownToBeAPowerOfTwo(Op1, /*OrZero*/ true, 0, &I)) {
+  if (!AvoidBv && isKnownToBeAPowerOfTwo(Op1, /*OrZero*/ true, 0, &I)) {
     // This may increase instruction count, we don't enforce that Y is a
     // constant.
     Constant *N1 = Constant::getAllOnesValue(Ty);
@@ -1991,7 +1992,7 @@ Instruction *InstCombinerImpl::visitURem(BinaryOperator &I) {
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::visitSRem(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::visitSRem(BinaryOperator &I) {
   if (Value *V = simplifySRemInst(I.getOperand(0), I.getOperand(1),
                                   SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
@@ -2063,7 +2064,7 @@ Instruction *InstCombinerImpl::visitSRem(BinaryOperator &I) {
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::visitFRem(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::visitFRem(BinaryOperator &I) {
   if (Value *V = simplifyFRemInst(I.getOperand(0), I.getOperand(1),
                                   I.getFastMathFlags(),
                                   SQ.getWithInstruction(&I)))

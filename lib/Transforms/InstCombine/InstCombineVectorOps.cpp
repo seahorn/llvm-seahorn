@@ -41,9 +41,10 @@
 #include <iterator>
 #include <utility>
 
-#define DEBUG_TYPE "instcombine"
+#define DEBUG_TYPE "sea-instcombine"
 
 using namespace llvm;
+using namespace llvm_seahorn;
 using namespace PatternMatch;
 
 STATISTIC(NumAggregateReconstructionsSimplified,
@@ -97,7 +98,7 @@ static bool cheapToScalarize(Value *V, Value *EI) {
 // If we have a PHI node with a vector type that is only used to feed
 // itself and be an operand of extractelement at a constant location,
 // try to replace the PHI of the vector type with a PHI of a scalar type.
-Instruction *InstCombinerImpl::scalarizePHI(ExtractElementInst &EI,
+Instruction *SeaInstCombinerImpl::scalarizePHI(ExtractElementInst &EI,
                                             PHINode *PN) {
   SmallVector<Instruction *, 2> Extracts;
   // The users we want the PHI to have are:
@@ -180,7 +181,7 @@ Instruction *InstCombinerImpl::scalarizePHI(ExtractElementInst &EI,
   return &EI;
 }
 
-Instruction *InstCombinerImpl::foldBitcastExtElt(ExtractElementInst &Ext) {
+Instruction *SeaInstCombinerImpl::foldBitcastExtElt(ExtractElementInst &Ext) {
   Value *X;
   uint64_t ExtIndexC;
   if (!match(Ext.getVectorOperand(), m_BitCast(m_Value(X))) ||
@@ -395,7 +396,7 @@ static ConstantInt *getPreferredVectorIndex(ConstantInt *IndexC) {
                           IndexC->getValue().zextOrTrunc(64));
 }
 
-Instruction *InstCombinerImpl::visitExtractElementInst(ExtractElementInst &EI) {
+Instruction *SeaInstCombinerImpl::visitExtractElementInst(ExtractElementInst &EI) {
   Value *SrcVec = EI.getVectorOperand();
   Value *Index = EI.getIndexOperand();
   if (Value *V = simplifyExtractElementInst(SrcVec, Index,
@@ -515,24 +516,24 @@ Instruction *InstCombinerImpl::visitExtractElementInst(ExtractElementInst &EI) {
               return isa<VectorType>(V->getType());
             });
         if (VectorOps == 1) {
-          Value *NewPtr = GEP->getPointerOperand();
-          if (isa<VectorType>(NewPtr->getType()))
-            NewPtr = Builder.CreateExtractElement(NewPtr, IndexC);
+        Value *NewPtr = GEP->getPointerOperand();
+        if (isa<VectorType>(NewPtr->getType()))
+          NewPtr = Builder.CreateExtractElement(NewPtr, IndexC);
 
-          SmallVector<Value *> NewOps;
-          for (unsigned I = 1; I != GEP->getNumOperands(); ++I) {
-            Value *Op = GEP->getOperand(I);
-            if (isa<VectorType>(Op->getType()))
-              NewOps.push_back(Builder.CreateExtractElement(Op, IndexC));
-            else
-              NewOps.push_back(Op);
-          }
-
-          GetElementPtrInst *NewGEP = GetElementPtrInst::Create(
-              GEP->getSourceElementType(), NewPtr, NewOps);
-          NewGEP->setIsInBounds(GEP->isInBounds());
-          return NewGEP;
+        SmallVector<Value *> NewOps;
+        for (unsigned I = 1; I != GEP->getNumOperands(); ++I) {
+          Value *Op = GEP->getOperand(I);
+          if (isa<VectorType>(Op->getType()))
+            NewOps.push_back(Builder.CreateExtractElement(Op, IndexC));
+          else
+            NewOps.push_back(Op);
         }
+
+        GetElementPtrInst *NewGEP = GetElementPtrInst::Create(
+              GEP->getSourceElementType(), NewPtr, NewOps);
+        NewGEP->setIsInBounds(GEP->isInBounds());
+        return NewGEP;
+      }
       }
     } else if (auto *SVI = dyn_cast<ShuffleVectorInst>(I)) {
       // If this is extracting an element from a shufflevector, figure out where
@@ -686,7 +687,7 @@ static bool collectSingleShuffleElements(Value *V, Value *LHS, Value *RHS,
 /// shufflevector to replace one or more insert/extract pairs.
 static bool replaceExtractElements(InsertElementInst *InsElt,
                                    ExtractElementInst *ExtElt,
-                                   InstCombinerImpl &IC) {
+                                   SeaInstCombinerImpl &IC) {
   auto *InsVecType = cast<FixedVectorType>(InsElt->getType());
   auto *ExtVecType = cast<FixedVectorType>(ExtElt->getVectorOperandType());
   unsigned NumInsElts = InsVecType->getNumElements();
@@ -773,7 +774,7 @@ using ShuffleOps = std::pair<Value *, Value *>;
 
 static ShuffleOps collectShuffleElements(Value *V, SmallVectorImpl<int> &Mask,
                                          Value *PermittedRHS,
-                                         InstCombinerImpl &IC, bool &Rerun) {
+                                         SeaInstCombinerImpl &IC, bool &Rerun) {
   assert(V->getType()->isVectorTy() && "Invalid shuffle!");
   unsigned NumElts = cast<FixedVectorType>(V->getType())->getNumElements();
 
@@ -858,7 +859,7 @@ static ShuffleOps collectShuffleElements(Value *V, SmallVectorImpl<int> &Mask,
 /// the same source aggregate from the exact same element indexes.
 /// If they were, just reuse the source aggregate.
 /// This potentially deals with PHI indirections.
-Instruction *InstCombinerImpl::foldAggregateConstructionIntoAggregateReuse(
+Instruction *SeaInstCombinerImpl::foldAggregateConstructionIntoAggregateReuse(
     InsertValueInst &OrigIVI) {
   Type *AggTy = OrigIVI.getType();
   unsigned NumAggElts;
@@ -1117,7 +1118,7 @@ Instruction *InstCombinerImpl::foldAggregateConstructionIntoAggregateReuse(
 
   // All good! Now we just need to thread the source aggregates here.
   // Note that we have to insert the new PHI here, ourselves, because we can't
-  // rely on InstCombinerImpl::run() inserting it into the right basic block.
+  // rely on SeaInstCombinerImpl::run() inserting it into the right basic block.
   // Note that the same block can be a predecessor more than once,
   // and we need to preserve that invariant for the PHI node.
   BuilderTy::InsertPointGuard Guard(Builder);
@@ -1138,7 +1139,7 @@ Instruction *InstCombinerImpl::foldAggregateConstructionIntoAggregateReuse(
 /// first one, making the first one redundant.
 /// It should be transformed to:
 ///  %0 = insertvalue { i8, i32 } undef, i8 %y, 0
-Instruction *InstCombinerImpl::visitInsertValueInst(InsertValueInst &I) {
+Instruction *SeaInstCombinerImpl::visitInsertValueInst(InsertValueInst &I) {
   if (Value *V = simplifyInsertValueInst(
           I.getAggregateOperand(), I.getInsertedValueOperand(), I.getIndices(),
           SQ.getWithInstruction(&I)))
@@ -1595,7 +1596,7 @@ static Instruction *foldTruncInsEltPair(InsertElementInst &InsElt,
   return new BitCastInst(NewInsert, VTy);
 }
 
-Instruction *InstCombinerImpl::visitInsertElementInst(InsertElementInst &IE) {
+Instruction *SeaInstCombinerImpl::visitInsertElementInst(InsertElementInst &IE) {
   Value *VecOp    = IE.getOperand(0);
   Value *ScalarOp = IE.getOperand(1);
   Value *IdxOp    = IE.getOperand(2);
@@ -2216,7 +2217,7 @@ static Instruction *canonicalizeInsertSplat(ShuffleVectorInst &Shuf,
 }
 
 /// Try to fold shuffles that are the equivalent of a vector select.
-Instruction *InstCombinerImpl::foldSelectShuffle(ShuffleVectorInst &Shuf) {
+Instruction *SeaInstCombinerImpl::foldSelectShuffle(ShuffleVectorInst &Shuf) {
   if (!Shuf.isSelect())
     return nullptr;
 
@@ -2343,7 +2344,7 @@ Instruction *InstCombinerImpl::foldSelectShuffle(ShuffleVectorInst &Shuf) {
   if (auto *NewI = dyn_cast<Instruction>(NewBO)) {
     NewI->copyIRFlags(B0);
     NewI->andIRFlags(B1);
-    if (DropNSW)
+  if (DropNSW)
       NewI->setHasNoSignedWrap(false);
     if (is_contained(Mask, PoisonMaskElem) && !MightCreatePoisonOrUB)
       NewI->dropPoisonGeneratingFlags();
@@ -2575,7 +2576,7 @@ static Instruction *foldIdentityExtractShuffle(ShuffleVectorInst &Shuf) {
 /// Try to replace a shuffle with an insertelement or try to replace a shuffle
 /// operand with the operand of an insertelement.
 static Instruction *foldShuffleWithInsert(ShuffleVectorInst &Shuf,
-                                          InstCombinerImpl &IC) {
+                                          SeaInstCombinerImpl &IC) {
   Value *V0 = Shuf.getOperand(0), *V1 = Shuf.getOperand(1);
   SmallVector<int, 16> Mask;
   Shuf.getShuffleMask(Mask);
@@ -2731,7 +2732,7 @@ static Instruction *foldIdentityPaddedShuffles(ShuffleVectorInst &Shuf) {
 // Splatting the first element of the result of a BinOp, where any of the
 // BinOp's operands are the result of a first element splat can be simplified to
 // splatting the first element of the result of the BinOp
-Instruction *InstCombinerImpl::simplifyBinOpSplats(ShuffleVectorInst &SVI) {
+Instruction *SeaInstCombinerImpl::simplifyBinOpSplats(ShuffleVectorInst &SVI) {
   if (!match(SVI.getOperand(1), m_Undef()) ||
       !match(SVI.getShuffleMask(), m_ZeroMask()) ||
       !SVI.getOperand(0)->hasOneUse())
@@ -2758,7 +2759,7 @@ Instruction *InstCombinerImpl::simplifyBinOpSplats(ShuffleVectorInst &SVI) {
   return new ShuffleVectorInst(NewBO, SVI.getShuffleMask());
 }
 
-Instruction *InstCombinerImpl::visitShuffleVectorInst(ShuffleVectorInst &SVI) {
+Instruction *SeaInstCombinerImpl::visitShuffleVectorInst(ShuffleVectorInst &SVI) {
   Value *LHS = SVI.getOperand(0);
   Value *RHS = SVI.getOperand(1);
   SimplifyQuery ShufQuery = SQ.getWithInstruction(&SVI);

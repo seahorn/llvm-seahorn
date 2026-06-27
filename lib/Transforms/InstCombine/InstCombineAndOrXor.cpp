@@ -20,9 +20,10 @@
 #include "llvm/Transforms/Utils/Local.h"
 
 using namespace llvm;
+using namespace llvm_seahorn;
 using namespace PatternMatch;
 
-#define DEBUG_TYPE "instcombine"
+#define DEBUG_TYPE "sea-instcombine"
 
 /// This is the complement of getICmpCode, which turns an opcode and two
 /// operands into either a constant true or false, or a brand new ICmp
@@ -87,7 +88,7 @@ static Value *SimplifyBSwap(BinaryOperator &I,
 /// Emit a computation of: (V >= Lo && V < Hi) if Inside is true, otherwise
 /// (V < Lo || V >= Hi). This method expects that Lo < Hi. IsSigned indicates
 /// whether to treat V, Lo, and Hi as signed or not.
-Value *InstCombinerImpl::insertRangeTest(Value *V, const APInt &Lo,
+Value *SeaInstCombinerImpl::insertRangeTest(Value *V, const APInt &Lo,
                                          const APInt &Hi, bool isSigned,
                                          bool Inside) {
   assert((isSigned ? Lo.slt(Hi) : Lo.ult(Hi)) &&
@@ -688,8 +689,13 @@ static Value *foldLogOpOfMaskedICmps(ICmpInst *LHS, ICmpInst *RHS, bool IsAnd,
 /// Example: (icmp sge x, 0) & (icmp slt x, n) --> icmp ult x, n
 /// If \p Inverted is true then the check is for the inverted range, e.g.
 /// (icmp slt x, 0) | (icmp sgt x, n) --> icmp ugt x, n
-Value *InstCombinerImpl::simplifyRangeCheck(ICmpInst *Cmp0, ICmpInst *Cmp1,
+Value *SeaInstCombinerImpl::simplifyRangeCheck(ICmpInst *Cmp0, ICmpInst *Cmp1,
                                             bool Inverted) {
+
+  if (AvoidUnsignedICmp) {
+    return nullptr;
+  }
+
   // Check the lower range comparison, e.g. x >= 0
   // InstCombine already ensured that if there is a constant it's on the RHS.
   ConstantInt *RangeStart = dyn_cast<ConstantInt>(Cmp0->getOperand(1));
@@ -741,7 +747,7 @@ Value *InstCombinerImpl::simplifyRangeCheck(ICmpInst *Cmp0, ICmpInst *Cmp1,
 
 // Fold (iszero(A & K1) | iszero(A & K2)) -> (A & (K1 | K2)) != (K1 | K2)
 // Fold (!iszero(A & K1) & !iszero(A & K2)) -> (A & (K1 | K2)) == (K1 | K2)
-Value *InstCombinerImpl::foldAndOrOfICmpsOfAndWithPow2(ICmpInst *LHS,
+Value *SeaInstCombinerImpl::foldAndOrOfICmpsOfAndWithPow2(ICmpInst *LHS,
                                                        ICmpInst *RHS,
                                                        Instruction *CxtI,
                                                        bool IsAnd,
@@ -1173,7 +1179,7 @@ static Value *extractIntPart(const IntPart &P, IRBuilderBase &Builder) {
 /// (icmp eq X0, Y0) & (icmp eq X1, Y1) -> icmp eq X01, Y01
 /// (icmp ne X0, Y0) | (icmp ne X1, Y1) -> icmp ne X01, Y01
 /// where X0, X1 and Y0, Y1 are adjacent parts extracted from an integer.
-Value *InstCombinerImpl::foldEqOfParts(ICmpInst *Cmp0, ICmpInst *Cmp1,
+Value *SeaInstCombinerImpl::foldEqOfParts(ICmpInst *Cmp0, ICmpInst *Cmp1,
                                        bool IsAnd) {
   if (!Cmp0->hasOneUse() || !Cmp1->hasOneUse())
     return nullptr;
@@ -1267,7 +1273,7 @@ static Value *foldAndOrOfICmpsWithConstEq(ICmpInst *Cmp0, ICmpInst *Cmp1,
 /// or   (icmp Pred1 V1, C1) | (icmp Pred2 V2, C2)
 /// into a single comparison using range-based reasoning.
 /// NOTE: This is also used for logical and/or, must be poison-safe!
-Value *InstCombinerImpl::foldAndOrOfICmpsUsingRanges(ICmpInst *ICmp1,
+Value *SeaInstCombinerImpl::foldAndOrOfICmpsUsingRanges(ICmpInst *ICmp1,
                                                      ICmpInst *ICmp2,
                                                      bool IsAnd) {
   ICmpInst::Predicate Pred1, Pred2;
@@ -1375,7 +1381,7 @@ static Value *matchIsFiniteTest(InstCombiner::BuilderTy &Builder, FCmpInst *LHS,
   return Builder.CreateFCmp(FCmpInst::getOrderedPredicate(PredR), RHS0, RHS1);
 }
 
-Value *InstCombinerImpl::foldLogicOfFCmps(FCmpInst *LHS, FCmpInst *RHS,
+Value *SeaInstCombinerImpl::foldLogicOfFCmps(FCmpInst *LHS, FCmpInst *RHS,
                                           bool IsAnd, bool IsLogicalSelect) {
   Value *LHS0 = LHS->getOperand(0), *LHS1 = LHS->getOperand(1);
   Value *RHS0 = RHS->getOperand(0), *RHS1 = RHS->getOperand(1);
@@ -1486,7 +1492,7 @@ static bool matchIsFPClassLikeFCmp(Value *Op, Value *&ClassVal,
 ///     -> is_fpclass x, (mask0 & mask1)
 /// xor (is_fpclass x, mask0), (is_fpclass x, mask1)
 ///     -> is_fpclass x, (mask0 ^ mask1)
-Instruction *InstCombinerImpl::foldLogicOfIsFPClass(BinaryOperator &BO,
+Instruction *SeaInstCombinerImpl::foldLogicOfIsFPClass(BinaryOperator &BO,
                                                     Value *Op0, Value *Op1) {
   Value *ClassVal0 = nullptr;
   Value *ClassVal1 = nullptr;
@@ -1552,7 +1558,7 @@ Instruction *InstCombinerImpl::foldLogicOfIsFPClass(BinaryOperator &BO,
 /// and rewrite it to do the same, but via logical operations:
 ///   value.neg = sub 0, value
 ///   cond = select i1 neg, value.neg, value
-Instruction *InstCombinerImpl::canonicalizeConditionalNegationViaMathToSelect(
+Instruction *SeaInstCombinerImpl::canonicalizeConditionalNegationViaMathToSelect(
     BinaryOperator &I) {
   assert(I.getOpcode() == BinaryOperator::Xor && "Only for xor!");
   Value *Cond, *X;
@@ -1651,7 +1657,7 @@ static Instruction *matchDeMorgansLaws(BinaryOperator &I,
   return nullptr;
 }
 
-bool InstCombinerImpl::shouldOptimizeCast(CastInst *CI) {
+bool SeaInstCombinerImpl::shouldOptimizeCast(CastInst *CI) {
   Value *CastSrc = CI->getOperand(0);
 
   // Noop casts and casts of constants should be eliminated trivially.
@@ -1707,7 +1713,7 @@ static Instruction *foldLogicCastConstant(BinaryOperator &Logic, CastInst *Cast,
 }
 
 /// Fold {and,or,xor} (cast X), Y.
-Instruction *InstCombinerImpl::foldCastedBitwiseLogic(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::foldCastedBitwiseLogic(BinaryOperator &I) {
   auto LogicOpc = I.getOpcode();
   assert(I.isBitwiseLogicOp() && "Unexpected opcode for bitwise logic folding");
 
@@ -1897,7 +1903,7 @@ static bool canNarrowShiftAmt(Constant *C, unsigned BitWidth) {
 
 /// Try to use narrower ops (sink zext ops) for an 'and' with binop operand and
 /// a common zext operand: and (binop (zext X), C), (zext X).
-Instruction *InstCombinerImpl::narrowMaskedBinOp(BinaryOperator &And) {
+Instruction *SeaInstCombinerImpl::narrowMaskedBinOp(BinaryOperator &And) {
   // This transform could also apply to {or, and, xor}, but there are better
   // folds for those cases, so we don't expect those patterns here. AShr is not
   // handled because it should always be transformed to LShr in this sequence.
@@ -2082,7 +2088,7 @@ static Instruction *foldComplexAndOrPatterns(BinaryOperator &I,
 /// multi-use restrictions and makes it more likely to match other patterns that
 /// are looking for a common operand.
 static Instruction *reassociateForUses(BinaryOperator &BO,
-                                       InstCombinerImpl::BuilderTy &Builder) {
+                                       SeaInstCombinerImpl::BuilderTy &Builder) {
   Instruction::BinaryOps Opcode = BO.getOpcode();
   Value *X, *Y, *Z;
   if (match(&BO,
@@ -2152,7 +2158,7 @@ static Instruction *canonicalizeLogicFirst(BinaryOperator &I,
 // binop(shift(ShiftedC1, ShAmt), shift(ShiftedC2, add(ShAmt, AddC))) ->
 // shift(binop(ShiftedC1, shift(ShiftedC2, AddC)), ShAmt)
 // where both shifts are the same and AddC is a valid shift amount.
-Instruction *InstCombinerImpl::foldBinOpOfDisplacedShifts(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::foldBinOpOfDisplacedShifts(BinaryOperator &I) {
   assert((I.isBitwiseLogicOp() || I.getOpcode() == Instruction::Add) &&
          "Unexpected opcode");
 
@@ -2195,7 +2201,7 @@ Instruction *InstCombinerImpl::foldBinOpOfDisplacedShifts(BinaryOperator &I) {
 // FIXME: We use commutative matchers (m_c_*) for some, but not all, matches
 // here. We should standardize that construct where it is needed or choose some
 // other way to ensure that commutated variants of patterns are not missed.
-Instruction *InstCombinerImpl::visitAnd(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::visitAnd(BinaryOperator &I) {
   Type *Ty = I.getType();
 
   if (Value *V = simplifyAndInst(I.getOperand(0), I.getOperand(1),
@@ -2682,7 +2688,7 @@ Instruction *InstCombinerImpl::visitAnd(BinaryOperator &I) {
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::matchBSwapOrBitReverse(Instruction &I,
+Instruction *SeaInstCombinerImpl::matchBSwapOrBitReverse(Instruction &I,
                                                       bool MatchBSwaps,
                                                       bool MatchBitReversals) {
   SmallVector<Instruction *, 4> Insts;
@@ -2698,7 +2704,7 @@ Instruction *InstCombinerImpl::matchBSwapOrBitReverse(Instruction &I,
 }
 
 /// Match UB-safe variants of the funnel shift intrinsic.
-static Instruction *matchFunnelShift(Instruction &Or, InstCombinerImpl &IC) {
+static Instruction *matchFunnelShift(Instruction &Or, SeaInstCombinerImpl &IC) {
   // TODO: Can we reduce the code duplication between this and the related
   // rotate matching code under visitSelect and visitTrunc?
   unsigned Width = Or.getType()->getScalarSizeInBits();
@@ -2873,7 +2879,7 @@ static bool areInverseVectorBitmasks(Constant *C1, Constant *C2) {
 /// vector composed of all-zeros or all-ones values and is the bitwise 'not' of
 /// B, it can be used as the condition operand of a select instruction.
 /// We will detect (A & C) | ~(B | D) when the flag ABIsTheSame enabled.
-Value *InstCombinerImpl::getSelectCondition(Value *A, Value *B,
+Value *SeaInstCombinerImpl::getSelectCondition(Value *A, Value *B,
                                             bool ABIsTheSame) {
   // We may have peeked through bitcasts in the caller.
   // Exit immediately if we don't have (vector) integer types.
@@ -2928,10 +2934,10 @@ Value *InstCombinerImpl::getSelectCondition(Value *A, Value *B,
     //       checked for uses on logic ops/casts, that should be enough to
     //       make this transform worthwhile.
     if (match(B, m_OneUse(m_Not(m_Value(NotB))))) {
-      NotB = peekThroughBitcast(NotB, true);
-      if (match(NotB, m_SExt(m_Specific(Cond))))
-        return Cond;
-    }
+    NotB = peekThroughBitcast(NotB, true);
+    if (match(NotB, m_SExt(m_Specific(Cond))))
+      return Cond;
+  }
   }
 
   // All scalar (and most vector) possibilities should be handled now.
@@ -2957,7 +2963,7 @@ Value *InstCombinerImpl::getSelectCondition(Value *A, Value *B,
 /// When InvertFalseVal is set to true, we try to match the pattern
 /// where we have peeked through a 'not' op and A and B are the same:
 /// (A & C) | ~(A | D) --> (A & C) | (~A & ~D) --> A' ? C : ~D
-Value *InstCombinerImpl::matchSelectFromAndOr(Value *A, Value *C, Value *B,
+Value *SeaInstCombinerImpl::matchSelectFromAndOr(Value *A, Value *C, Value *B,
                                               Value *D, bool InvertFalseVal) {
   // The potential condition of the select may be bitcasted. In that case, look
   // through its bitcast and the corresponding bitcast of the 'not' condition.
@@ -3037,7 +3043,7 @@ static Value *foldAndOrOfICmpEqConstantAndICmp(ICmpInst *LHS, ICmpInst *RHS,
 /// Fold (icmp)&(icmp) or (icmp)|(icmp) if possible.
 /// If IsLogical is true, then the and/or is in select form and the transform
 /// must be poison-safe.
-Value *InstCombinerImpl::foldAndOrOfICmps(ICmpInst *LHS, ICmpInst *RHS,
+Value *SeaInstCombinerImpl::foldAndOrOfICmps(ICmpInst *LHS, ICmpInst *RHS,
                                           Instruction &I, bool IsAnd,
                                           bool IsLogical) {
   const SimplifyQuery Q = SQ.getWithInstruction(&I);
@@ -3070,11 +3076,13 @@ Value *InstCombinerImpl::foldAndOrOfICmps(ICmpInst *LHS, ICmpInst *RHS,
     }
   }
 
+  if (!AvoidBv) {
   // handle (roughly):
   // (icmp ne (A & B), C) | (icmp ne (A & D), E)
   // (icmp eq (A & B), C) & (icmp eq (A & D), E)
   if (Value *V = foldLogOpOfMaskedICmps(LHS, RHS, IsAnd, IsLogical, Builder))
     return V;
+  }
 
   if (Value *V =
           foldAndOrOfICmpEqConstantAndICmp(LHS, RHS, IsAnd, IsLogical, Builder))
@@ -3235,7 +3243,7 @@ Value *InstCombinerImpl::foldAndOrOfICmps(ICmpInst *LHS, ICmpInst *RHS,
 // FIXME: We use commutative matchers (m_c_*) for some, but not all, matches
 // here. We should standardize that construct where it is needed or choose some
 // other way to ensure that commutated variants of patterns are not missed.
-Instruction *InstCombinerImpl::visitOr(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::visitOr(BinaryOperator &I) {
   if (Value *V = simplifyOrInst(I.getOperand(0), I.getOperand(1),
                                 SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
@@ -3330,7 +3338,7 @@ Instruction *InstCombinerImpl::visitOr(BinaryOperator &I) {
     // (A & C0) | (B & C1)
     const APInt *C0, *C1;
     if (match(C, m_APInt(C0)) && match(D, m_APInt(C1))) {
-      Value *X;
+        Value *X;
       if (*C0 == ~*C1) {
         // ((X | B) & MaskC) | (B & ~MaskC) -> (X & MaskC) | B
         if (match(A, m_c_Or(m_Value(X), m_Specific(B))))
@@ -3776,7 +3784,7 @@ static Instruction *foldXorToXor(BinaryOperator &I,
   return nullptr;
 }
 
-Value *InstCombinerImpl::foldXorOfICmps(ICmpInst *LHS, ICmpInst *RHS,
+Value *SeaInstCombinerImpl::foldXorOfICmps(ICmpInst *LHS, ICmpInst *RHS,
                                         BinaryOperator &I) {
   assert(I.getOpcode() == Instruction::Xor && I.getOperand(0) == LHS &&
          I.getOperand(1) == RHS && "Should be 'xor' with these operands");
@@ -4026,7 +4034,7 @@ static bool canFreelyInvert(InstCombiner &IC, Value *Op,
          InstCombiner::canFreelyInvertAllUsersOf(I, IgnoredUser);
 }
 
-static Value *freelyInvert(InstCombinerImpl &IC, Value *Op,
+static Value *freelyInvert(SeaInstCombinerImpl &IC, Value *Op,
                            Instruction *IgnoredUser) {
   auto *I = cast<Instruction>(Op);
   IC.Builder.SetInsertPoint(&*I->getInsertionPointAfterDef());
@@ -4042,7 +4050,7 @@ static Value *freelyInvert(InstCombinerImpl &IC, Value *Op,
 // into:
 //   z = ((~x) |/& (~y))
 // iff both x and y are free to invert and all uses of z can be freely updated.
-bool InstCombinerImpl::sinkNotIntoLogicalOp(Instruction &I) {
+bool SeaInstCombinerImpl::sinkNotIntoLogicalOp(Instruction &I) {
   Value *Op0, *Op1;
   if (!match(&I, m_LogicalOp(m_Value(Op0), m_Value(Op1))))
     return false;
@@ -4088,7 +4096,7 @@ bool InstCombinerImpl::sinkNotIntoLogicalOp(Instruction &I) {
 // into:
 //   z = ~(x |/& (~y))
 // iff y is free to invert and all uses of z can be freely updated.
-bool InstCombinerImpl::sinkNotIntoOtherHandOfLogicalOp(Instruction &I) {
+bool SeaInstCombinerImpl::sinkNotIntoOtherHandOfLogicalOp(Instruction &I) {
   Value *Op0, *Op1;
   if (!match(&I, m_LogicalOp(m_Value(Op0), m_Value(Op1))))
     return false;
@@ -4129,7 +4137,7 @@ bool InstCombinerImpl::sinkNotIntoOtherHandOfLogicalOp(Instruction &I) {
   return true;
 }
 
-Instruction *InstCombinerImpl::foldNot(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::foldNot(BinaryOperator &I) {
   Value *NotOp;
   if (!match(&I, m_Not(m_Value(NotOp))))
     return nullptr;
@@ -4323,7 +4331,7 @@ Instruction *InstCombinerImpl::foldNot(BinaryOperator &I) {
 // FIXME: We use commutative matchers (m_c_*) for some, but not all, matches
 // here. We should standardize that construct where it is needed or choose some
 // other way to ensure that commutated variants of patterns are not missed.
-Instruction *InstCombinerImpl::visitXor(BinaryOperator &I) {
+Instruction *SeaInstCombinerImpl::visitXor(BinaryOperator &I) {
   if (Value *V = simplifyXorInst(I.getOperand(0), I.getOperand(1),
                                  SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
