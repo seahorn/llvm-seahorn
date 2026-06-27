@@ -2,6 +2,7 @@
 ; dbg.value intrinsics should not affect peephole combining of stacksave/stackrestore.
 ; PR37713
 ; RUN: %instcombine %s -S | %FileCheck %s
+; RUN: %instcombine %s -S --try-experimental-debuginfo-iterators | %FileCheck %s
 
 declare ptr @llvm.stacksave() #0
 declare void @llvm.stackrestore(ptr) #0
