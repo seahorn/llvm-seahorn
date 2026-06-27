@@ -20,12 +20,13 @@
 #include "llvm/Transforms/InstCombine/InstCombiner.h"
 
 using namespace llvm;
+using namespace llvm_seahorn;
 using namespace llvm::PatternMatch;
 
-#define DEBUG_TYPE "instcombine"
+#define DEBUG_TYPE "sea-instcombine"
 
 static cl::opt<bool>
-    VerifyKnownBits("instcombine-verify-known-bits",
+    VerifyKnownBits("sea-ic-verify-known-bits",
                     cl::desc("Verify that computeKnownBits() and "
                              "SimplifyDemandedBits() are consistent"),
                     cl::Hidden, cl::init(false));
@@ -65,7 +66,7 @@ static unsigned getBitWidth(Type *Ty, const DataLayout &DL) {
 
 /// Inst is an integer instruction that SimplifyDemandedBits knows about. See if
 /// the instruction has any properties that allow us to simplify its operands.
-bool InstCombinerImpl::SimplifyDemandedInstructionBits(Instruction &Inst,
+bool SeaInstCombinerImpl::SimplifyDemandedInstructionBits(Instruction &Inst,
                                                        KnownBits &Known) {
   APInt DemandedMask(APInt::getAllOnes(Known.getBitWidth()));
   Value *V = SimplifyDemandedUseBits(&Inst, DemandedMask, Known,
@@ -78,7 +79,7 @@ bool InstCombinerImpl::SimplifyDemandedInstructionBits(Instruction &Inst,
 
 /// Inst is an integer instruction that SimplifyDemandedBits knows about. See if
 /// the instruction has any properties that allow us to simplify its operands.
-bool InstCombinerImpl::SimplifyDemandedInstructionBits(Instruction &Inst) {
+bool SeaInstCombinerImpl::SimplifyDemandedInstructionBits(Instruction &Inst) {
   KnownBits Known(getBitWidth(Inst.getType(), DL));
   return SimplifyDemandedInstructionBits(Inst, Known);
 }
@@ -86,7 +87,7 @@ bool InstCombinerImpl::SimplifyDemandedInstructionBits(Instruction &Inst) {
 /// This form of SimplifyDemandedBits simplifies the specified instruction
 /// operand if possible, updating it in place. It returns true if it made any
 /// change and false otherwise.
-bool InstCombinerImpl::SimplifyDemandedBits(Instruction *I, unsigned OpNo,
+bool SeaInstCombinerImpl::SimplifyDemandedBits(Instruction *I, unsigned OpNo,
                                             const APInt &DemandedMask,
                                             KnownBits &Known, unsigned Depth) {
   Use &U = I->getOperandUse(OpNo);
@@ -123,7 +124,7 @@ bool InstCombinerImpl::SimplifyDemandedBits(Instruction *I, unsigned OpNo,
 /// operands based on the information about what bits are demanded. This returns
 /// some other non-null value if it found out that V is equal to another value
 /// in the context where the specified bits are demanded, but not for all users.
-Value *InstCombinerImpl::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
+Value *SeaInstCombinerImpl::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
                                                  KnownBits &Known,
                                                  unsigned Depth,
                                                  Instruction *CxtI) {
@@ -494,7 +495,7 @@ Value *InstCombinerImpl::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
       // If we do not need the low bit, try to convert bool math to logic:
       // add iN (zext i1 X), (sext i1 Y) --> sext (~X & Y) to iN
       Value *X, *Y;
-      if (match(I, m_c_Add(m_OneUse(m_ZExt(m_Value(X))),
+      if (!AvoidBv && match(I, m_c_Add(m_OneUse(m_ZExt(m_Value(X))),
                            m_OneUse(m_SExt(m_Value(Y))))) &&
           X->getType()->isIntOrIntVectorTy(1) && X->getType() == Y->getType()) {
         // Truth table for inputs and output signbits:
@@ -511,7 +512,7 @@ Value *InstCombinerImpl::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
 
       // add iN (sext i1 X), (sext i1 Y) --> sext (X | Y) to iN
       // TODO: Relax the one-use checks because we are removing an instruction?
-      if (match(I, m_Add(m_OneUse(m_SExt(m_Value(X))),
+      if (!AvoidBv && match(I, m_Add(m_OneUse(m_SExt(m_Value(X))),
                          m_OneUse(m_SExt(m_Value(Y))))) &&
           X->getType()->isIntOrIntVectorTy(1) && X->getType() == Y->getType()) {
         // Truth table for inputs and output signbits:
@@ -915,7 +916,7 @@ Value *InstCombinerImpl::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
         NLZ = alignDown(NLZ, 8);
         NTZ = alignDown(NTZ, 8);
         // If we need exactly one byte, we can do this transformation.
-        if (BitWidth - NLZ - NTZ == 8) {
+        if (BitWidth-NLZ-NTZ == 8) {
           // Replace this with either a left or right shift to get the byte into
           // the right place.
           Instruction *NewVal;
@@ -1085,7 +1086,7 @@ Value *InstCombinerImpl::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
 /// Helper routine of SimplifyDemandedUseBits. It computes Known
 /// bits. It also tries to handle simplifications that can be done based on
 /// DemandedMask, but without modifying the Instruction.
-Value *InstCombinerImpl::SimplifyMultipleUseDemandedBits(
+Value *SeaInstCombinerImpl::SimplifyMultipleUseDemandedBits(
     Instruction *I, const APInt &DemandedMask, KnownBits &Known, unsigned Depth,
     Instruction *CxtI) {
   unsigned BitWidth = DemandedMask.getBitWidth();
@@ -1259,7 +1260,7 @@ Value *InstCombinerImpl::SimplifyMultipleUseDemandedBits(
 ///
 /// As with SimplifyDemandedUseBits, it returns NULL if the simplification was
 /// not successful.
-Value *InstCombinerImpl::simplifyShrShlDemandedBits(
+Value *SeaInstCombinerImpl::simplifyShrShlDemandedBits(
     Instruction *Shr, const APInt &ShrOp1, Instruction *Shl,
     const APInt &ShlOp1, const APInt &DemandedMask, KnownBits &Known) {
   if (!ShlOp1 || !ShrOp1)
@@ -1334,7 +1335,7 @@ Value *InstCombinerImpl::simplifyShrShlDemandedBits(
 /// If the information about demanded elements can be used to simplify the
 /// operation, the operation is simplified, then the resultant value is
 /// returned.  This returns null if no change was made.
-Value *InstCombinerImpl::SimplifyDemandedVectorElts(Value *V,
+Value *SeaInstCombinerImpl::SimplifyDemandedVectorElts(Value *V,
                                                     APInt DemandedElts,
                                                     APInt &PoisonElts,
                                                     unsigned Depth,
@@ -1778,7 +1779,7 @@ Value *InstCombinerImpl::SimplifyDemandedVectorElts(Value *V,
       // regardless of whether the element is demanded.  Doing otherwise risks
       // segfaults which didn't exist in the original program.
       APInt DemandedPtrs(APInt::getAllOnes(VWidth)),
-          DemandedPassThrough(DemandedElts);
+        DemandedPassThrough(DemandedElts);
       if (auto *CV = dyn_cast<ConstantVector>(II->getOperand(2)))
         for (unsigned i = 0; i < VWidth; i++) {
           Constant *CElt = CV->getAggregateElement(i);
