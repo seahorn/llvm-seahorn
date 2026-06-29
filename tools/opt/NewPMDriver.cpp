@@ -15,6 +15,7 @@
 #include "NewPMDriver.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringSwitch.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/CGSCCPassManager.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
@@ -40,6 +41,53 @@
 #include "llvm/Transforms/Utils/Debugify.h"
 #include "llvm_seahorn/Transforms/InstCombine/SeaInstCombine.h"
 #include "llvm_seahorn/Transforms/Scalar/SeaFakeLatchExit.h"
+// Passes used to build SeaHorn's own -O pipeline (option C: construct the
+// pipeline with the new pass-creation API rather than patching default<O#>).
+#include "llvm/Passes/OptimizationLevel.h"
+// --- passes for the dev15-faithful -O# pipeline (new-PM transcription of
+// --- llvm-seahorn's forked legacy PassManagerBuilder) ---
+#include "llvm/Analysis/GlobalsModRef.h"
+#include "llvm/Analysis/InlineCost.h"
+#include "llvm/Transforms/IPO/CalledValuePropagation.h"
+#include "llvm/Transforms/IPO/Inliner.h"
+#include "llvm/Transforms/IPO/ConstantMerge.h"
+#include "llvm/Transforms/IPO/DeadArgumentElimination.h"
+#include "llvm/Transforms/IPO/FunctionAttrs.h"
+#include "llvm/Transforms/IPO/GlobalDCE.h"
+#include "llvm/Transforms/IPO/GlobalOpt.h"
+#include "llvm/Transforms/IPO/InferFunctionAttrs.h"
+#include "llvm/Transforms/IPO/SCCP.h"
+#include "llvm/Transforms/Scalar/ADCE.h"
+#include "llvm/Transforms/Scalar/BDCE.h"
+#include "llvm/Transforms/Scalar/CorrelatedValuePropagation.h"
+#include "llvm/Transforms/Scalar/DeadStoreElimination.h"
+#include "llvm/Transforms/Scalar/DivRemPairs.h"
+#include "llvm/Transforms/Scalar/EarlyCSE.h"
+#include "llvm/Transforms/Scalar/Float2Int.h"
+#include "llvm/Transforms/Scalar/GVN.h"
+#include "llvm/Transforms/Scalar/IndVarSimplify.h"
+#include "llvm/Transforms/Scalar/JumpThreading.h"
+#include "llvm/Transforms/Scalar/LICM.h"
+#include "llvm/Transforms/Scalar/LoopDeletion.h"
+#include "llvm/Transforms/Scalar/LoopIdiomRecognize.h"
+#include "llvm/Transforms/Scalar/LoopInstSimplify.h"
+#include "llvm/Transforms/Scalar/LoopPassManager.h"
+#include "llvm/Transforms/Scalar/LoopRotation.h"
+#include "llvm/Transforms/Scalar/LoopSimplifyCFG.h"
+#include "llvm/Transforms/Scalar/LoopSink.h"
+#include "llvm/Transforms/Scalar/LowerConstantIntrinsics.h"
+#include "llvm/Transforms/Scalar/MemCpyOptimizer.h"
+#include "llvm/Transforms/Scalar/MergedLoadStoreMotion.h"
+#include "llvm/Transforms/Scalar/Reassociate.h"
+#include "llvm/Transforms/Scalar/SCCP.h"
+#include "llvm/Transforms/Scalar/SROA.h"
+#include "llvm/Transforms/Scalar/SimpleLoopUnswitch.h"
+#include "llvm/Transforms/Scalar/SimplifyCFG.h"
+#include "llvm/Transforms/Scalar/SpeculativeExecution.h"
+#include "llvm/Transforms/Scalar/TailRecursionElimination.h"
+#include "llvm/Transforms/Utils/LibCallsShrinkWrap.h"
+#include "llvm/Transforms/Utils/LoopSimplify.h"
+#include "llvm/Transforms/Utils/Mem2Reg.h"
 
 using namespace llvm;
 using namespace opt_tool;
@@ -299,35 +347,151 @@ static cl::opt<bool>
                                  "pipeline (gives unconditional-latch loops a "
                                  "fake always-taken exit edge)"));
 
-// SEAHORN: replace every standalone `instcombine` pass token in a printed
-// pipeline string with `sea-instcombine`, leaving `aggressive-instcombine`
-// (and any other `*-instcombine`) untouched. Pass tokens are delimited by
-// '(', ',' and ')'; a trailing `<...>` parameter block (if LLVM ever prints
-// one for instcombine) is dropped, since SeaInstCombine uses its own defaults.
-// This is how the faithful sea -O pipeline swaps instcombine without forking
-// LLVM's pipeline: print default<O#>, run this, reparse. See runPassPipeline.
-static std::string seaSwapInstCombine(StringRef P) {
-  static constexpr StringRef Tok = "instcombine";
-  std::string Out;
-  Out.reserve(P.size() + 32);
-  for (size_t i = 0, e = P.size(); i < e;) {
-    bool AtBoundary = (i == 0) || P[i - 1] == '(' || P[i - 1] == ',';
-    if (AtBoundary && P.substr(i).startswith(Tok)) {
-      size_t j = i + Tok.size();
-      char Next = (j < e) ? P[j] : '\0';
-      if (Next == ',' || Next == ')' || Next == '\0' || Next == '<') {
-        Out += "sea-instcombine";
-        i = j;
-        if (Next == '<') { // drop stock params; SeaInstCombine has its own
-          size_t Close = P.find('>', i);
-          i = (Close == StringRef::npos) ? e : Close + 1;
-        }
-        continue;
-      }
-    }
-    Out += P[i++];
+// SEAHORN: SeaHorn's -O# pipeline, a new-PM transcription of llvm-seahorn's
+// forked legacy PassManagerBuilder (lib/Transforms/IPO/PassManagerBuilder.cpp).
+// That dev15 pipeline is known to clean SeaHorn's IR (e.g. PromoteMemcpy
+// field-copies, via GlobalsAA + GVN/MemCpyOpt/DSE) yet keep loops intact for
+// SeaHorn's own -sea-loop-unroll/cut-loops/--assert-on-backedge machinery.
+// Differences from stock default<O#>, both deliberate: stock InstCombine ->
+// SeaInstCombine, and loop unrolling/vectorization are omitted (SeaHorn drives
+// unrolling itself; full O3's loop-unroll erases the backedge and breaks bounded
+// loop verification). `-passes=default<O#>` remains the untouched stock hatch.
+static SimplifyCFGOptions seaSimplifyCFGSwitch() {
+  return SimplifyCFGOptions().convertSwitchRangeToICmp(true);
+}
+
+// dev15 addFunctionSimplificationPasses (OptLevel>=2), minus loop unrolling.
+static void seaAddFunctionSimplification(FunctionPassManager &FPM,
+                                         OptimizationLevel Level) {
+  FPM.addPass(SROAPass(SROAOptions::ModifyCFG));
+  FPM.addPass(EarlyCSEPass(/*UseMemorySSA=*/true));
+  FPM.addPass(SpeculativeExecutionPass(/*OnlyIfDivergentTarget=*/true));
+  FPM.addPass(JumpThreadingPass());
+  FPM.addPass(CorrelatedValuePropagationPass());
+  FPM.addPass(SimplifyCFGPass(seaSimplifyCFGSwitch()));
+  FPM.addPass(llvm_seahorn::SeaInstCombinePass());
+  FPM.addPass(LibCallsShrinkWrapPass());
+  FPM.addPass(TailCallElimPass());
+  FPM.addPass(SimplifyCFGPass(seaSimplifyCFGSwitch()));
+  FPM.addPass(ReassociatePass());
+
+  LoopPassManager LPM1;
+  LPM1.addPass(LoopInstSimplifyPass());
+  LPM1.addPass(LoopSimplifyCFGPass());
+  LPM1.addPass(LICMPass(LICMOptions()));
+  LPM1.addPass(LoopRotatePass());
+  LPM1.addPass(LICMPass(LICMOptions()));
+  // NOTE: dev15's pipeline also ran SimpleLoopUnswitch / IndVarSimplify /
+  // LoopDeletion / SimpleLoopUnroll here. They are intentionally dropped: their
+  // new-PM forms fold/erase SeaHorn's __VERIFIER_assume-bounded loops before
+  // -sea-loop-unroll/cut-loops/--assert-on-backedge run, flipping bounded-loop
+  // proofs (opsem2 verifier_assert_unsat.03). SeaHorn drives loop handling
+  // itself, so the -O# stage stays light on loops (rotate + LICM only).
+  FPM.addPass(createFunctionToLoopPassAdaptor(
+      std::move(LPM1), /*UseMemorySSA=*/true, /*UseBlockFrequencyInfo=*/true));
+  FPM.addPass(SimplifyCFGPass(seaSimplifyCFGSwitch()));
+  FPM.addPass(llvm_seahorn::SeaInstCombinePass());
+
+  LoopPassManager LPM2;
+  LPM2.addPass(LoopIdiomRecognizePass());
+  FPM.addPass(createFunctionToLoopPassAdaptor(std::move(LPM2)));
+
+  FPM.addPass(SROAPass(SROAOptions::ModifyCFG));
+  FPM.addPass(MergedLoadStoreMotionPass());
+  FPM.addPass(GVNPass());
+  FPM.addPass(SCCPPass());
+  FPM.addPass(BDCEPass());
+  FPM.addPass(llvm_seahorn::SeaInstCombinePass());
+  FPM.addPass(JumpThreadingPass());
+  FPM.addPass(CorrelatedValuePropagationPass());
+  FPM.addPass(ADCEPass());
+  FPM.addPass(MemCpyOptPass());
+  FPM.addPass(DSEPass());
+  FPM.addPass(createFunctionToLoopPassAdaptor(
+      LICMPass(LICMOptions()), /*UseMemorySSA=*/true,
+      /*UseBlockFrequencyInfo=*/true));
+  FPM.addPass(SimplifyCFGPass(
+      SimplifyCFGOptions().hoistCommonInsts(true).sinkCommonInsts(true)));
+  FPM.addPass(llvm_seahorn::SeaInstCombinePass());
+}
+
+static void buildSeaPipeline(ModulePassManager &MPM, OptimizationLevel Level) {
+  if (Level == OptimizationLevel::O0) {
+    MPM.addPass(createModuleToFunctionPassAdaptor(PromotePass()));
+    return;
   }
-  return Out;
+
+  // ---- module-level setup (dev15 populateModulePassManager) ----
+  MPM.addPass(InferFunctionAttrsPass());
+  MPM.addPass(IPSCCPPass());
+  MPM.addPass(CalledValuePropagationPass());
+  MPM.addPass(GlobalOptPass());
+  MPM.addPass(createModuleToFunctionPassAdaptor(PromotePass()));
+  MPM.addPass(DeadArgumentEliminationPass());
+  {
+    FunctionPassManager FPM;
+    FPM.addPass(llvm_seahorn::SeaInstCombinePass());
+    FPM.addPass(SimplifyCFGPass(seaSimplifyCFGSwitch()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
+  }
+  // Run the function simplification nested in the CGSCC inliner, exactly as
+  // dev15's populateModulePassManager did (MPM.add(Inliner) then
+  // addFunctionSimplificationPasses). The inliner is load-bearing for cleanup:
+  // it inlines residual callees that hold SeaHorn's PromoteMemcpy structs, after
+  // which SROA/GVN can scalarize and forward the field-copies. Without it
+  // push_back/push_front stay ~40x slow (SROA alone can't crack the structs).
+  {
+    ModuleInlinerWrapperPass MIWP(
+        getInlineParams(Level.getSpeedupLevel(), Level.getSizeLevel()));
+    // GlobalsAA gives GVN/MemCpyOpt the alias info to forward field-copies.
+    MIWP.addModulePass(RequireAnalysisPass<GlobalsAA, Module>());
+    CGSCCPassManager &CG = MIWP.getPM();
+    CG.addPass(PostOrderFunctionAttrsPass());
+    FunctionPassManager FPM;
+    seaAddFunctionSimplification(FPM, Level);
+    CG.addPass(createCGSCCToFunctionPassAdaptor(std::move(FPM)));
+    MPM.addPass(std::move(MIWP));
+  }
+
+  MPM.addPass(ReversePostOrderFunctionAttrsPass());
+  MPM.addPass(RequireAnalysisPass<GlobalsAA, Module>());
+
+  // ---- late cleanup (dev15 tail; loop vectorization omitted) ----
+  {
+    FunctionPassManager FPM;
+    FPM.addPass(Float2IntPass());
+    FPM.addPass(LowerConstantIntrinsicsPass());
+    LoopPassManager LPM;
+    LPM.addPass(LoopRotatePass());
+    FPM.addPass(createFunctionToLoopPassAdaptor(std::move(LPM)));
+    FPM.addPass(llvm_seahorn::SeaInstCombinePass());
+    FPM.addPass(LoopSinkPass());
+    FPM.addPass(DivRemPairsPass());
+    FPM.addPass(SimplifyCFGPass(seaSimplifyCFGSwitch()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
+  }
+  MPM.addPass(GlobalDCEPass());
+  MPM.addPass(ConstantMergePass());
+
+  // Optional: give unconditional-latch loops a fake exit, as the very last step.
+  if (SeaFakeLatchExitInO) {
+    FunctionPassManager Late;
+    Late.addPass(llvm_seahorn::SeaFakeLatchExitPass());
+    MPM.addPass(createModuleToFunctionPassAdaptor(std::move(Late)));
+  }
+}
+
+// Map seaopt's "default<O#>" pipeline string (built in opt.cpp for -O#) to an
+// OptimizationLevel for buildSeaPipeline.
+static std::optional<OptimizationLevel> seaParseOptLevel(StringRef P) {
+  return llvm::StringSwitch<std::optional<OptimizationLevel>>(P)
+      .Case("default<O0>", OptimizationLevel::O0)
+      .Case("default<O1>", OptimizationLevel::O1)
+      .Case("default<O2>", OptimizationLevel::O2)
+      .Case("default<O3>", OptimizationLevel::O3)
+      .Case("default<Os>", OptimizationLevel::Os)
+      .Case("default<Oz>", OptimizationLevel::Oz)
+      .Default(std::nullopt);
 }
 
 bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
@@ -417,17 +581,7 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
   // to false above so we shouldn't necessarily need to check whether or not the
   // option has been enabled.
   PTO.LoopUnrolling = !DisableLoopUnrolling;
-  // SEAHORN: the sea -O customization below prints the default<O#> pipeline to a
-  // string (to swap instcombine -> sea-instcombine). PassBuilder only fills the
-  // class->pass-name map that printPipeline needs when population is requested
-  // (shouldPopulateClassToPassNames(), gated on -print-pipeline-passes etc.).
-  // Enable it for this PassBuilder's construction, then restore so we don't
-  // actually trigger the -print-pipeline-passes print-and-exit path below.
-  const bool SavedPrintPipelinePasses = PrintPipelinePasses;
-  if (SeaCustomizeOPipeline)
-    PrintPipelinePasses = true;
   PassBuilder PB(TM, PTO, P, &PIC);
-  PrintPipelinePasses = SavedPrintPipelinePasses;
   registerEPCallbacks(PB);
 
   // For any loaded plugins, let them register pass builder callbacks.
@@ -453,9 +607,11 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
         return false;
       });
 
-  // Same pass, registered at the function level so it can nest inside
-  // `function(...)` -- this is where instcombine lives in the -O pipelines, so
-  // the sea -O customization (below) needs sea-instcombine to parse there.
+  // Same pass, registered at the function level so it can be named inside a
+  // `function(...)` pipeline string (e.g. -passes=sea-instcombine, used by the
+  // sea_instcombine / sea_transforms lit tests). seaopt's own -O# pipeline adds
+  // SeaInstCombinePass directly (see buildSeaPipeline), so it does not rely on
+  // this callback.
   PB.registerPipelineParsingCallback(
       [](StringRef Name, FunctionPassManager &FPM,
          ArrayRef<PassBuilder::PipelineElement>) {
@@ -480,6 +636,10 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
   // a custom pipeline of AA passes with it.
   AAManager AA;
   if (Passes.empty()) {
+    // SeaHorn's -O# pipeline needs globals-aa in the AAManager so GVN/MemCpyOpt
+    // forward PromoteMemcpy struct field-copies (this is what dev15's legacy
+    // createGlobalsAAWrapperPass provided). The stock "default" AA pipeline
+    // omits globals-aa, which made push_back/push_front ~40x slower.
     if (auto Err = PB.parseAAPipeline(AA, AAPipeline)) {
       errs() << Arg0 << ": " << toString(std::move(Err)) << "\n";
       return false;
@@ -534,34 +694,18 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
   if (!PassPipeline.empty()) {
     assert(Passes.empty() &&
            "PassPipeline and Passes should not both contain passes");
-    std::string EffectivePipeline(PassPipeline);
     if (SeaCustomizeOPipeline) {
-      // Faithful sea -O pipeline: this is the new-PM equivalent of dev15's
-      // forked PassManagerBuilder, which reconstructed the whole -O pipeline
-      // with createSeaInstructionCombiningPass() in place of the stock
-      // createInstructionCombiningPass(). The new PM has no hook to swap a pass
-      // inside default<O#>, so instead build it, print it as a pipeline string
-      // (staying in sync with LLVM's real pipeline), swap instcombine ->
-      // sea-instcombine, and reparse. AA comes from the AAManager as usual.
-      ModulePassManager Base;
-      if (auto Err = PB.parsePassPipeline(Base, PassPipeline)) {
-        errs() << Arg0 << ": " << toString(std::move(Err)) << "\n";
+      // seaopt's -O# builds SeaHorn's own new-PM pipeline (sea-instcombine in
+      // place of stock instcombine) -- see buildSeaPipeline. opt.cpp passes the
+      // requested level as the "default<O#>" string.
+      auto Level = seaParseOptLevel(PassPipeline);
+      if (!Level) {
+        errs() << Arg0 << ": sea -O pipeline: unexpected level '" << PassPipeline
+               << "'\n";
         return false;
       }
-      std::string Printed;
-      raw_string_ostream OS(Printed);
-      Base.printPipeline(OS, [&PIC](StringRef ClassName) {
-        auto PassName = PIC.getPassNameForClassName(ClassName);
-        return PassName.empty() ? ClassName : PassName;
-      });
-      OS.flush();
-      EffectivePipeline = seaSwapInstCombine(Printed);
-      // Optionally give unconditional-latch loops a fake exit, as the final
-      // step (later folds would otherwise undo the `br i1 true`).
-      if (SeaFakeLatchExitInO)
-        EffectivePipeline += ",function(sea-fake-latch-exit)";
-    }
-    if (auto Err = PB.parsePassPipeline(MPM, EffectivePipeline)) {
+      buildSeaPipeline(MPM, *Level);
+    } else if (auto Err = PB.parsePassPipeline(MPM, PassPipeline)) {
       errs() << Arg0 << ": " << toString(std::move(Err)) << "\n";
       return false;
     }
