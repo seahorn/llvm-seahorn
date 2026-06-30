@@ -157,3 +157,30 @@ INITIALIZE_PASS_END(SeaLoopRotateLegacyPass, "sea-loop-rotate", "Rotate Loops",
 Pass *llvm_seahorn::createLoopRotatePass(int MaxHeaderSize, bool PrepareForLTO) {
   return new SeaLoopRotateLegacyPass(MaxHeaderSize, PrepareForLTO);
 }
+
+// --- new pass manager wrapper (loop pass via FunctionToLoopPassAdaptor) ---
+#include "llvm_seahorn/Transforms/Scalar/SeaLoopRotate.h"
+#include "llvm/Analysis/MemorySSA.h"
+llvm::PreservedAnalyses
+llvm_seahorn::SeaLoopRotatePass::run(llvm::Loop &L, llvm::LoopAnalysisManager &,
+                                     llvm::LoopStandardAnalysisResults &AR,
+                                     llvm::LPMUpdater &) {
+  using namespace llvm;
+  Function &F = *L.getHeader()->getParent();
+  const DataLayout &DL = F.getParent()->getDataLayout();
+  const SimplifyQuery SQ = getBestSimplifyQuery(AR, DL);
+  std::optional<MemorySSAUpdater> MSSAU;
+  if (AR.MSSA)
+    MSSAU = MemorySSAUpdater(AR.MSSA);
+  int Threshold = DefaultRotationThreshold;
+  bool Changed =
+      LoopRotation(&L, &AR.LI, &AR.TTI, &AR.AC, &AR.DT, &AR.SE,
+                   MSSAU ? &*MSSAU : nullptr, SQ, false, Threshold,
+                   true /* IsUtilMode */, false);
+  if (!Changed)
+    return PreservedAnalyses::all();
+  auto PA = getLoopPassPreservedAnalyses();
+  if (AR.MSSA)
+    PA.preserve<MemorySSAAnalysis>();
+  return PA;
+}

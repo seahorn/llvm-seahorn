@@ -489,9 +489,11 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
         return false;
       });
 
-  // Same pass, registered at the function level so it can nest inside
-  // `function(...)` -- this is where instcombine lives in the -O pipelines, so
-  // the sea -O customization (below) needs sea-instcombine to parse there.
+  // Same pass, registered at the function level so it can be named inside a
+  // `function(...)` pipeline string (e.g. -passes=sea-instcombine, used by the
+  // sea_instcombine / sea_transforms lit tests). seaopt's own -O# pipeline adds
+  // SeaInstCombinePass directly (see buildSeaPipeline), so it does not rely on
+  // this callback.
   PB.registerPipelineParsingCallback(
       [](StringRef Name, FunctionPassManager &FPM,
          ArrayRef<PassBuilder::PipelineElement>) {
@@ -516,6 +518,10 @@ bool llvm::runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
   // a custom pipeline of AA passes with it.
   AAManager AA;
   if (Passes.empty()) {
+    // SeaHorn's -O# pipeline needs globals-aa in the AAManager so GVN/MemCpyOpt
+    // forward PromoteMemcpy struct field-copies (this is what dev15's legacy
+    // createGlobalsAAWrapperPass provided). The stock "default" AA pipeline
+    // omits globals-aa, which made push_back/push_front ~40x slower.
     if (auto Err = PB.parseAAPipeline(AA, AAPipeline)) {
       errs() << Arg0 << ": " << toString(std::move(Err)) << "\n";
       return false;

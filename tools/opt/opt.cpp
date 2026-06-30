@@ -56,7 +56,6 @@
 #include "llvm/Support/YAMLTraits.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/IPO/AlwaysInliner.h"
-#include "llvm_seahorn/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/IPO/WholeProgramDevirt.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/Debugify.h"
@@ -336,32 +335,10 @@ static void AddOptimizationPasses(legacy::PassManagerBase &MPM,
   if (!NoVerify || VerifyEach)
     FPM.add(createVerifierPass()); // Verify that input is correct
 
-  (void)TM; (void)OptLevel; (void)SizeLevel;
-#if 0 // -O* PassManagerBuilder pipeline disabled for loops-only seaopt
-  llvm_seahorn::PassManagerBuilder Builder;
-  Builder.OptLevel = OptLevel;
-  Builder.SizeLevel = SizeLevel;
-
-  if (OptLevel > 1) {
-    Builder.Inliner = createFunctionInliningPass(OptLevel, SizeLevel, false);
-  } else {
-    Builder.Inliner = createAlwaysInlinerLegacyPass();
-  }
-  Builder.DisableUnrollLoops = (DisableLoopUnrolling.getNumOccurrences() > 0) ?
-                               DisableLoopUnrolling : OptLevel == 0;
-
-  Builder.LoopVectorize = OptLevel > 1 && SizeLevel < 2;
-
-  Builder.SLPVectorize = OptLevel > 1 && SizeLevel < 2;
-
-#if 0 /*  REMOVE SEAHORN */
-  if (TM)
-    TM->adjustPassManager(Builder);
-#endif
-
-  Builder.populateFunctionPassManager(FPM);
-  Builder.populateModulePassManager(MPM);
-#endif
+  // The -O# legacy-PM pipeline (llvm_seahorn::PassManagerBuilder) is gone:
+  // seaopt builds SeaHorn's -O# under the new PM (see buildSeaPipeline). This
+  // legacy entry now only schedules the verifier.
+  (void)MPM; (void)TM; (void)OptLevel; (void)SizeLevel;
 }
 
 //===----------------------------------------------------------------------===//

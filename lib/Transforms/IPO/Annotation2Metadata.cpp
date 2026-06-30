@@ -94,3 +94,12 @@ INITIALIZE_PASS_END(SeaAnnotation2MetadataLegacy, DEBUG_TYPE,
 ModulePass *llvm_seahorn::createSeaAnnotation2MetadataLegacyPass() {
   return new SeaAnnotation2MetadataLegacy();
 }
+
+// --- new pass manager wrapper ---
+#include "llvm_seahorn/Transforms/IPO.h"
+llvm::PreservedAnalyses
+llvm_seahorn::SeaAnnotation2MetadataPass::run(llvm::Module &M,
+                                             llvm::ModuleAnalysisManager &) {
+  return convertAnnotation2Metadata(M) ? llvm::PreservedAnalyses::none()
+                                       : llvm::PreservedAnalyses::all();
+}
