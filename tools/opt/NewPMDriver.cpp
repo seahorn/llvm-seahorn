@@ -69,12 +69,12 @@
 #include "llvm/Transforms/Scalar/JumpThreading.h"
 #include "llvm/Transforms/Scalar/LICM.h"
 #include "llvm/Transforms/Scalar/LoopDeletion.h"
-#include "llvm/Transforms/Scalar/LoopIdiomRecognize.h"
 #include "llvm/Transforms/Scalar/LoopInstSimplify.h"
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
 #include "llvm/Transforms/Scalar/LoopRotation.h"
 #include "llvm/Transforms/Scalar/LoopSimplifyCFG.h"
 #include "llvm/Transforms/Scalar/LoopSink.h"
+#include "llvm/Transforms/Scalar/LoopUnrollPass.h"
 #include "llvm/Transforms/Scalar/LowerConstantIntrinsics.h"
 #include "llvm/Transforms/Scalar/MemCpyOptimizer.h"
 #include "llvm/Transforms/Scalar/MergedLoadStoreMotion.h"
@@ -347,6 +347,17 @@ static cl::opt<bool>
                                  "pipeline (gives unconditional-latch loops a "
                                  "fake always-taken exit edge)"));
 
+// SEAHORN: run IndVarSimplify in the sea -O# pipeline (dev15's
+// --seaopt-enable-indvar, same name, opposite default). Off by default so a
+// bare `seaopt -O#` keeps assume-bounded loops intact for SeaHorn's
+// unroll/cut-loops stage. The sea driver passes =true on its bounded (BMC)
+// flows, where the fold is welcome: exit-value rewriting soundly summarizes a
+// summarizable loop, and a non-summarizable survivor is handled by the BMC
+// VC-gen mode (unify-assumes + dataflow + coi + gsa).
+static cl::opt<bool>
+    SeaEnableIndVar("seaopt-enable-indvar", cl::Hidden, cl::init(false),
+                    cl::desc("Enable IndVarSimplify in the sea -O# pipeline"));
+
 // SEAHORN: SeaHorn's -O# pipeline, a new-PM transcription of llvm-seahorn's
 // forked legacy PassManagerBuilder (lib/Transforms/IPO/PassManagerBuilder.cpp).
 // That dev15 pipeline is known to clean SeaHorn's IR (e.g. PromoteMemcpy
@@ -381,20 +392,29 @@ static void seaAddFunctionSimplification(FunctionPassManager &FPM,
   LPM1.addPass(LICMPass(LICMOptions()));
   LPM1.addPass(LoopRotatePass());
   LPM1.addPass(LICMPass(LICMOptions()));
-  // NOTE: dev15's pipeline also ran SimpleLoopUnswitch / IndVarSimplify /
-  // LoopDeletion / SimpleLoopUnroll here. They are intentionally dropped: their
-  // new-PM forms fold/erase SeaHorn's __VERIFIER_assume-bounded loops before
-  // -sea-loop-unroll/cut-loops/--assert-on-backedge run, flipping bounded-loop
-  // proofs (opsem2 verifier_assert_unsat.03). SeaHorn drives loop handling
-  // itself, so the -O# stage stays light on loops (rotate + LICM only).
+  LPM1.addPass(SimpleLoopUnswitchPass(/*NonTrivial=*/Level ==
+                                      OptimizationLevel::O3));
   FPM.addPass(createFunctionToLoopPassAdaptor(
       std::move(LPM1), /*UseMemorySSA=*/true, /*UseBlockFrequencyInfo=*/true));
   FPM.addPass(SimplifyCFGPass(seaSimplifyCFGSwitch()));
   FPM.addPass(llvm_seahorn::SeaInstCombinePass());
 
+  // dev15 ran { LoopIdiom, IndVarSimplify, LoopDeletion } here, then a loop
+  // unroller, with LoopIdiom and IndVarSimplify behind flags the sea driver
+  // turned off. LoopIdiom stays omitted (it rewrites loops into memset/memcpy
+  // intrinsics opsem would then have to model). IndVarSimplify is gated by
+  // --seaopt-enable-indvar (default off): its exit-value rewriting summarizes
+  // an __VERIFIER_assume-bounded loop into its SCEV closed form (e.g.
+  // c_final = smax(c,limit)) and deletes the loop -- taking it away from
+  // SeaHorn's -sea-loop-unroll/cut-loops stage. The fold itself is sound, so
+  // the sea driver enables it on bounded (BMC) flows, whose full VC-gen mode
+  // handles any loop that survives.
   LoopPassManager LPM2;
-  LPM2.addPass(LoopIdiomRecognizePass());
+  if (SeaEnableIndVar)
+    LPM2.addPass(IndVarSimplifyPass());
+  LPM2.addPass(LoopDeletionPass());
   FPM.addPass(createFunctionToLoopPassAdaptor(std::move(LPM2)));
+  FPM.addPass(LoopUnrollPass(LoopUnrollOptions(Level.getSpeedupLevel())));
 
   FPM.addPass(SROAPass(SROAOptions::ModifyCFG));
   FPM.addPass(MergedLoadStoreMotionPass());
