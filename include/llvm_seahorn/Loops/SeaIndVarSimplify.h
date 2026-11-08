@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 The llvm-seahorn Authors
+// SPDX-FileCopyrightText: 2003-2026 LLVM Project contributors
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception AND NCSA
+
 //===- IndVarSimplify.h - Induction Variable Simplification -----*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure

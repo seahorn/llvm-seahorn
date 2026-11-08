@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The llvm-seahorn Authors
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 #ifndef __LLVM_SEAHORN_TRANSFORMS_SCALAR__H_
 #define __LLVM_SEAHORN_TRANSFORMS_SCALAR__H_
 

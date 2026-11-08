@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The llvm-seahorn Authors
+// SPDX-FileCopyrightText: 2003-2026 LLVM Project contributors
+
 //===- BreakpointPrinter.cpp - Breakpoint location printer ----------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.

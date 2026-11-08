@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The llvm-seahorn Authors
+// SPDX-FileCopyrightText: 2003-2026 LLVM Project contributors
+
 //===- SeaIndVarSimplify.cpp - Induction Variable Elimination
 //----------------===//
 //
