@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The llvm-seahorn Authors
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 //===- SeaFakeLatchExit.h - Fake latch exit (new PM) ------------*- C++ -*-===//
 //
 // SeaHorn pass: give every loop whose latch ends in an *unconditional* branch a

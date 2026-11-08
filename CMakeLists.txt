@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 The llvm-seahorn Authors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 cmake_minimum_required(VERSION 3.10.2)
 project(Llvm-SeaHorn)
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The llvm-seahorn Authors
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 #include "llvm_seahorn/Transforms/Scalar/SeaFakeLatchExit.h"
 
 #include "llvm/Analysis/LoopInfo.h"
