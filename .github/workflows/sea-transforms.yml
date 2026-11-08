@@ -41,7 +41,7 @@ jobs:
           sudo apt-get install -y \
             "llvm-$V" "llvm-$V-dev" "llvm-$V-tools" "clang-$V" \
             ninja-build cmake libzstd-dev
-          python3 -m pip install --user --break-system-packages lit
+          python3 -m pip install --user --break-system-packages lit==18.1.8
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Work around missing libPolly.a (Ubuntu llvm packaging)
